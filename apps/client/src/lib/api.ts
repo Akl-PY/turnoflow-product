@@ -136,49 +136,20 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Demo data fallbacks for instant preview if API is not yet running
-export const DEMO_METRICS = {
-  totalInquiries: 148,
-  capturedLeads: 42,
-  activeConversations: 16,
-  confirmedBookings: 28,
-  pendingFollowUps: 7,
-  humanHandoffs: 3,
-  inquiriesTrend: 18.5,
-  leadsTrend: 24.0,
-  bookingsTrend: 15.2
+// Métricas iniciales limpias (datos reales del tenant)
+export const INITIAL_METRICS = {
+  totalInquiries: 0,
+  capturedLeads: 0,
+  activeConversations: 0,
+  confirmedBookings: 0,
+  pendingFollowUps: 0,
+  humanHandoffs: 0,
+  inquiriesTrend: 0,
+  leadsTrend: 0,
+  bookingsTrend: 0
 };
-
-export const DEMO_ACTIVITY = [
-  {
-    id: 'act-1',
-    type: 'APPOINTMENT_CONFIRMED',
-    title: 'Turno confirmado: Camila Gómez',
-    subtitle: 'Limpieza Facial Profunda — Jueves 15:00 hs',
-    timestamp: 'Hace 10 min'
-  },
-  {
-    id: 'act-2',
-    type: 'LEAD_CAPTURED',
-    title: 'Nuevo Lead Capturado: Mariana Rossi',
-    subtitle: 'Interés en Lifting de Pestañas + Tinte (Alta Prioridad)',
-    timestamp: 'Hace 35 min'
-  },
-  {
-    id: 'act-3',
-    type: 'FOLLOWUP_SENT',
-    title: 'Seguimiento automático enviado',
-    subtitle: 'Recontacto a Sofía Martínez tras consulta de precios',
-    timestamp: 'Hace 2 horas'
-  },
-  {
-    id: 'act-4',
-    type: 'HUMAN_HANDOFF',
-    title: 'Transferencia a persona: Lucía Fernández',
-    subtitle: 'Motivo: Consulta sobre contraindicación dermatológica',
-    timestamp: 'Hace 3 horas'
-  }
-];
+export const DEMO_METRICS = INITIAL_METRICS;
+export const DEMO_ACTIVITY: any[] = [];
 
 export const DEMO_AGENTS = [
   {
@@ -238,68 +209,7 @@ export const DEMO_AGENTS = [
   }
 ];
 
-export const DEMO_LEADS = [
-  {
-    id: 'lead-1',
-    name: 'Camila Gómez',
-    phone: '+5491144556677',
-    requestedService: 'Limpieza Facial Profunda',
-    status: 'NEW',
-    intent: 'HIGH',
-    priority: 'HOT',
-    source: 'WhatsApp',
-    lastInteractionAt: 'Hoy 14:20',
-    notes: 'Preguntó disponibilidad para este jueves por la tarde'
-  },
-  {
-    id: 'lead-2',
-    name: 'Mariana Rossi',
-    phone: '+5491122334455',
-    requestedService: 'Lifting de Pestañas + Tinte',
-    status: 'CONTACTED',
-    intent: 'MEDIUM',
-    priority: 'WARM',
-    source: 'WhatsApp',
-    lastInteractionAt: 'Hoy 12:45',
-    notes: 'Consulta si incluye tinte de pestañas'
-  },
-  {
-    id: 'lead-3',
-    name: 'Lucía Fernández',
-    phone: '+5491188990011',
-    requestedService: 'Manicura Rusa con Esmaltado',
-    status: 'BOOKED',
-    intent: 'HIGH',
-    priority: 'HOT',
-    source: 'WhatsApp',
-    lastInteractionAt: 'Ayer 18:30',
-    notes: 'Turno confirmado en Google Calendar para viernes 16hs'
-  },
-  {
-    id: 'lead-4',
-    name: 'Sofía Martínez',
-    phone: '+5491155667788',
-    requestedService: 'Depilación Láser Definitiva',
-    status: 'INTERESTED',
-    intent: 'MEDIUM',
-    priority: 'WARM',
-    source: 'WhatsApp',
-    lastInteractionAt: 'Ayer 15:10',
-    notes: 'Preguntó por contraindicaciones en piel sensible'
-  },
-  {
-    id: 'lead-5',
-    name: 'Valentina López',
-    phone: '+5491166778899',
-    requestedService: 'Dermapen con Ácido Hialurónico',
-    status: 'PENDING',
-    intent: 'HIGH',
-    priority: 'HOT',
-    source: 'WhatsApp',
-    lastInteractionAt: 'Hace 2 días',
-    notes: 'Esperando confirmación de seña bancaria'
-  }
-];
+export const DEMO_LEADS: any[] = [];
 
 export const DEMO_SERVICES = [
   {

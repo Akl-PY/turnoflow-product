@@ -12,7 +12,8 @@ import {
   Settings,
   ShieldCheck,
   LogOut,
-  Building2
+  Building2,
+  Smartphone
 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
 
@@ -24,7 +25,7 @@ const NAV_ITEMS = [
   { path: '/agents', label: 'Agentes de IA', icon: Bot },
   { path: '/automations', label: 'Automatizaciones n8n', icon: Workflow },
   { path: '/playground', label: 'Playground IA', icon: Sparkles },
-  { path: '/onboarding', label: 'Configuración Negocio', icon: Settings }
+  { path: '/onboarding', label: 'Conectar WhatsApp', icon: Smartphone }
 ];
 
 export const Sidebar: React.FC = () => {

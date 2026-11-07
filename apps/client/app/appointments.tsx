@@ -79,7 +79,7 @@ function formatAppointmentItem(raw: any) {
 
 export default function AppointmentsScreen() {
   const { user } = useAuth();
-  const [appointments, setAppointments] = useState<any[]>(DEMO_APPOINTMENTS);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [testSlotDate, setTestSlotDate] = useState('2026-11-13');
   const [slotCheckResult, setSlotCheckResult] = useState<string | null>(null);
 
@@ -100,7 +100,7 @@ export default function AppointmentsScreen() {
           setAppointments(res.data.map(formatAppointmentItem));
         }
       } catch {
-        // Fallback a DEMO_APPOINTMENTS
+        setAppointments([]);
       }
     };
     fetchAppointments();
@@ -285,52 +285,69 @@ export default function AppointmentsScreen() {
         {/* Lista de Turnos Confirmados */}
         <Text style={styles.sectionTitle}>PRÓXIMOS TURNOS REGISTRADOS</Text>
         <View style={styles.list}>
-          {appointments.map((apt) => {
-            const isCancelled = apt.status === 'CANCELLED';
-            return (
-              <View
-                key={apt.id}
-                style={[styles.aptCard, isCancelled && { opacity: 0.6 }]}
+          {appointments.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <CalendarDays size={32} color="#71717a" style={{ marginBottom: 12 }} />
+              <Text style={styles.emptyTitle}>No hay turnos agendados todavía</Text>
+              <Text style={styles.emptyText}>
+                Los turnos confirmados por tu Asistente de WhatsApp o agendados manualmente con "+ Agendar Turno" se sincronizarán aquí y en Google Calendar en tiempo real.
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyActionBtn}
+                onPress={() => setShowAddForm(true)}
               >
-                <View style={styles.aptLeft}>
-                  <View style={styles.timeBadge}>
-                    <Clock size={14} color="#a855f7" style={{ marginRight: 6 }} />
-                    <Text style={styles.timeText}>{apt.time}</Text>
-                  </View>
-                  <Text style={styles.dateText}>{apt.date}</Text>
-                </View>
-
-                <View style={styles.aptCenter}>
-                  <Text style={styles.customerName}>{apt.customerName}</Text>
-                  <Text style={styles.customerPhone}>{apt.customerPhone}</Text>
-                  <Text style={styles.serviceName}>{apt.serviceName}</Text>
-                  {apt.notes ? <Text style={styles.notesText}>Nota: {apt.notes}</Text> : null}
-                </View>
-
-                <View style={styles.aptRight}>
-                  {isCancelled ? (
-                    <View style={styles.badgeCancelled}>
-                      <XCircle size={12} color="#f87171" style={{ marginRight: 4 }} />
-                      <Text style={styles.badgeCancelledText}>CANCELADO</Text>
+                <Plus size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.emptyActionBtnText}>Agendar Primer Turno</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            appointments.map((apt) => {
+              const isCancelled = apt.status === 'CANCELLED';
+              return (
+                <View
+                  key={apt.id}
+                  style={[styles.aptCard, isCancelled && { opacity: 0.6 }]}
+                >
+                  <View style={styles.aptLeft}>
+                    <View style={styles.timeBadge}>
+                      <Clock size={14} color="#a855f7" style={{ marginRight: 6 }} />
+                      <Text style={styles.timeText}>{apt.time}</Text>
                     </View>
-                  ) : (
-                    <>
-                      <View style={styles.badgeConfirmed}>
-                        <CheckCircle2 size={12} color="#4ade80" style={{ marginRight: 4 }} />
-                        <Text style={styles.badgeConfirmedText}>CONFIRMADO</Text>
+                    <Text style={styles.dateText}>{apt.date}</Text>
+                  </View>
+
+                  <View style={styles.aptCenter}>
+                    <Text style={styles.customerName}>{apt.customerName}</Text>
+                    <Text style={styles.customerPhone}>{apt.customerPhone}</Text>
+                    <Text style={styles.serviceName}>{apt.serviceName}</Text>
+                    {apt.notes ? <Text style={styles.notesText}>Nota: {apt.notes}</Text> : null}
+                  </View>
+
+                  <View style={styles.aptRight}>
+                    {isCancelled ? (
+                      <View style={styles.badgeCancelled}>
+                        <XCircle size={12} color="#f87171" style={{ marginRight: 4 }} />
+                        <Text style={styles.badgeCancelledText}>CANCELADO</Text>
                       </View>
-                      <TouchableOpacity
-                        style={styles.cancelBtn}
-                        onPress={() => handleCancelAppointment(apt.id)}
-                      >
-                        <Text style={styles.cancelBtnText}>Cancelar Turno</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
+                    ) : (
+                      <>
+                        <View style={styles.badgeConfirmed}>
+                          <CheckCircle2 size={12} color="#4ade80" style={{ marginRight: 4 }} />
+                          <Text style={styles.badgeConfirmedText}>CONFIRMADO</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.cancelBtn}
+                          onPress={() => handleCancelAppointment(apt.id)}
+                        >
+                          <Text style={styles.cancelBtnText}>Cancelar Turno</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </View>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </View>
@@ -580,5 +597,42 @@ const styles = StyleSheet.create({
     color: '#f87171',
     fontSize: 10,
     fontWeight: '600'
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#18181b',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginVertical: 12
+  },
+  emptyTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6
+  },
+  emptyText: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    textAlign: 'center',
+    maxWidth: 480,
+    lineHeight: 18,
+    marginBottom: 16
+  },
+  emptyActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#a855f7',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  emptyActionBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 13
   }
 });

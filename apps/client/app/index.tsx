@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  TouchableOpacity
+  TouchableOpacity,
+  Platform
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -16,32 +17,51 @@ import {
   UserCheck,
   Bot,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Copy,
+  Check,
+  ExternalLink,
+  ArrowRight,
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react-native';
 import { Header } from '../src/components/Header';
 import { MetricCard } from '../src/components/MetricCard';
-import { apiClient, DEMO_METRICS, DEMO_ACTIVITY } from '../src/lib/api';
+import { apiClient, INITIAL_METRICS } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
+
+const WHATSAPP_WEBHOOK_URL =
+  'https://turnoflowapi-production.up.railway.app/api/conversations/whatsapp-webhook';
+const WHATSAPP_VERIFY_TOKEN = 'turnoflow_verify_token';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Consulta de estadísticas reales con fallback elegante
-  const { data: metrics = DEMO_METRICS } = useQuery({
+  const handleCopy = (text: string, key: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2500);
+    }
+  };
+
+  // Consulta de estadísticas reales de Supabase (0 si no hay datos aún)
+  const { data: metrics = INITIAL_METRICS } = useQuery({
     queryKey: ['dashboard-stats', user?.organizationId],
     queryFn: async () => {
       try {
         const res = await apiClient.get('/dashboard/stats');
-        return res.data || DEMO_METRICS;
+        return res.data || INITIAL_METRICS;
       } catch {
-        return DEMO_METRICS;
+        return INITIAL_METRICS;
       }
     }
   });
 
-  // Consulta de actividad reciente real con fallback elegante
-  const { data: activity = DEMO_ACTIVITY } = useQuery({
+  // Consulta de actividad reciente real (sin datos inventados)
+  const { data: activity = [] } = useQuery({
     queryKey: ['dashboard-activity', user?.organizationId],
     queryFn: async () => {
       try {
@@ -59,9 +79,9 @@ export default function DashboardScreen() {
               : 'Reciente'
           }));
         }
-        return DEMO_ACTIVITY;
+        return [];
       } catch {
-        return DEMO_ACTIVITY;
+        return [];
       }
     }
   });
@@ -74,25 +94,105 @@ export default function DashboardScreen() {
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        {/* Banner de bienvenida y estado de demostración */}
-        <View style={styles.banner}>
-          <View style={styles.bannerIcon}>
-            <Sparkles size={20} color="#a855f7" />
+        {/* Tarjeta Destacada: Puesta en Marcha y Conexión de WhatsApp */}
+        <View style={styles.whatsappCard}>
+          <View style={styles.whatsappCardHeader}>
+            <View style={styles.whatsappBadge}>
+              <View style={styles.pulsingDot} />
+              <Text style={styles.whatsappBadgeText}>WHATSAPP 24/7 ACTIVO</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.whatsappTitle}>
+                Conectá tu WhatsApp Oficial de Meta en 3 Pasos
+              </Text>
+              <Text style={styles.whatsappDesc}>
+                Vinculá el webhook oficial para que los agentes inteligentes respondan consultas, coticen tratamientos y agenden citas sin intervención humana.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.whatsappPrimaryBtn}
+              onPress={() => router.push('/onboarding')}
+            >
+              <Smartphone size={16} color="#ffffff" style={{ marginRight: 6 }} />
+              <Text style={styles.whatsappPrimaryBtnText}>Configurar Número</Text>
+              <ArrowRight size={14} color="#ffffff" style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>
-              {user?.organizationName || 'TurnoFlow AI'} — Modo Recepción Activo
-            </Text>
-            <Text style={styles.bannerText}>
-              Los agentes están atendiendo consultas en WhatsApp y sincronizando citas con Google Calendar.
-            </Text>
+
+          {/* Grid de Webhook y Token con Copiado Rápido */}
+          <View style={styles.webhookGrid}>
+            <View style={styles.webhookItem}>
+              <Text style={styles.webhookLabel}>1. URL DEL WEBHOOK (META CLOUD API)</Text>
+              <View style={styles.copyBox}>
+                <Text style={styles.copyValue} numberOfLines={1}>
+                  {WHATSAPP_WEBHOOK_URL}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.copyBtn,
+                    copiedKey === 'url' && styles.copyBtnSuccess
+                  ]}
+                  onPress={() => handleCopy(WHATSAPP_WEBHOOK_URL, 'url')}
+                >
+                  {copiedKey === 'url' ? (
+                    <>
+                      <Check size={12} color="#ffffff" style={{ marginRight: 4 }} />
+                      <Text style={styles.copyBtnSuccessText}>¡Copiado!</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={12} color="#a1a1aa" style={{ marginRight: 4 }} />
+                      <Text style={styles.copyBtnText}>Copiar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.webhookItem}>
+              <Text style={styles.webhookLabel}>2. TOKEN DE VERIFICACIÓN (VERIFY TOKEN)</Text>
+              <View style={styles.copyBox}>
+                <Text style={styles.copyValue} numberOfLines={1}>
+                  {WHATSAPP_VERIFY_TOKEN}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.copyBtn,
+                    copiedKey === 'token' && styles.copyBtnSuccess
+                  ]}
+                  onPress={() => handleCopy(WHATSAPP_VERIFY_TOKEN, 'token')}
+                >
+                  {copiedKey === 'token' ? (
+                    <>
+                      <Check size={12} color="#ffffff" style={{ marginRight: 4 }} />
+                      <Text style={styles.copyBtnSuccessText}>¡Copiado!</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={12} color="#a1a1aa" style={{ marginRight: 4 }} />
+                      <Text style={styles.copyBtnText}>Copiar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.bannerButton}
-            onPress={() => router.push('/playground')}
-          >
-            <Text style={styles.bannerButtonText}>Simular en Playground</Text>
-          </TouchableOpacity>
+
+          {/* Barra inferior de prueba */}
+          <View style={styles.whatsappFooter}>
+            <Text style={styles.whatsappFooterHint}>
+              💡 ¿Querés probar cómo responde el bot antes de conectar Meta?
+            </Text>
+            <TouchableOpacity
+              style={styles.playgroundQuickBtn}
+              onPress={() => router.push('/playground')}
+            >
+              <Sparkles size={14} color="#a855f7" style={{ marginRight: 6 }} />
+              <Text style={styles.playgroundQuickBtnText}>
+                Probar en Simulador Playground
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* 5 Métricas Principales */}
@@ -149,16 +249,33 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
-            {activity.map((item: any) => (
-              <View key={item.id} style={styles.activityItem}>
-                <View style={styles.activityDot} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.activityTitle}>{item.title}</Text>
-                  <Text style={styles.activitySubtitle}>{item.subtitle}</Text>
-                </View>
-                <Text style={styles.activityTime}>{item.timestamp}</Text>
+            {activity.length === 0 ? (
+              <View style={styles.emptyActivity}>
+                <MessageSquare size={32} color="#52525b" style={{ marginBottom: 10 }} />
+                <Text style={styles.emptyActivityTitle}>Sin actividad registrada todavía</Text>
+                <Text style={styles.emptyActivityText}>
+                  Los mensajes recibidos por WhatsApp y los turnos confirmados aparecerán aquí en vivo en tiempo real.
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyActivityBtn}
+                  onPress={() => router.push('/playground')}
+                >
+                  <Sparkles size={13} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.emptyActivityBtnText}>Simular una conversación</Text>
+                </TouchableOpacity>
               </View>
-            ))}
+            ) : (
+              activity.map((item: any) => (
+                <View key={item.id} style={styles.activityItem}>
+                  <View style={styles.activityDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.activityTitle}>{item.title}</Text>
+                    <Text style={styles.activitySubtitle}>{item.subtitle}</Text>
+                  </View>
+                  <Text style={styles.activityTime}>{item.timestamp}</Text>
+                </View>
+              ))
+            )}
           </View>
 
           {/* Columna Derecha: Estado de Agentes e Integraciones */}
@@ -420,5 +537,187 @@ const styles = StyleSheet.create({
     color: '#4ade80',
     fontSize: 11,
     fontWeight: '500'
+  },
+  whatsappCard: {
+    backgroundColor: '#0c1a14',
+    borderWidth: 1.5,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 24,
+    gap: 16
+  },
+  whatsappCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    flexWrap: 'wrap'
+  },
+  whatsappBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    gap: 6
+  },
+  pulsingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e'
+  },
+  whatsappBadgeText: {
+    color: '#4ade80',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5
+  },
+  whatsappTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  whatsappDesc: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    lineHeight: 18
+  },
+  whatsappPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16a34a',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  whatsappPrimaryBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  webhookGrid: {
+    flexDirection: 'row',
+    gap: 14,
+    flexWrap: 'wrap'
+  },
+  webhookItem: {
+    flex: 1,
+    minWidth: 280,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 6
+  },
+  webhookLabel: {
+    color: '#86efac',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5
+  },
+  copyBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#09090b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 8
+  },
+  copyValue: {
+    color: '#e4e4e7',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
+    flex: 1
+  },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4
+  },
+  copyBtnSuccess: {
+    backgroundColor: '#16a34a'
+  },
+  copyBtnText: {
+    color: '#d4d4d8',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  copyBtnSuccessText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700'
+  },
+  whatsappFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    paddingTop: 12,
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  whatsappFooterHint: {
+    color: '#a1a1aa',
+    fontSize: 12
+  },
+  playgroundQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.3)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6
+  },
+  playgroundQuickBtnText: {
+    color: '#c084fc',
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  emptyActivity: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  emptyActivityTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4
+  },
+  emptyActivityText: {
+    color: '#71717a',
+    fontSize: 12,
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 16,
+    marginBottom: 14
+  },
+  emptyActivityBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6
+  },
+  emptyActivityBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600'
   }
 });

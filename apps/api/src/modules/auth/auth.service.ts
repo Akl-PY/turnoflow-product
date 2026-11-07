@@ -296,17 +296,17 @@ export class AuthService implements OnModuleInit {
           type: 'incoming-messages',
           isActive: true,
           status: 'healthy',
-          totalRuns: 142,
-          successRuns: 141,
-          failedRuns: 1
+          totalRuns: 0,
+          successRuns: 0,
+          failedRuns: 0
         },
         {
           name: 'Captura y Clasificación de Leads',
           type: 'lead-management',
           isActive: true,
           status: 'healthy',
-          totalRuns: 89,
-          successRuns: 89,
+          totalRuns: 0,
+          successRuns: 0,
           failedRuns: 0
         },
         {
@@ -314,17 +314,17 @@ export class AuthService implements OnModuleInit {
           type: 'follow-up',
           isActive: true,
           status: 'healthy',
-          totalRuns: 34,
-          successRuns: 33,
-          failedRuns: 1
+          totalRuns: 0,
+          successRuns: 0,
+          failedRuns: 0
         },
         {
           name: 'Gestión y Confirmación de Reservas',
           type: 'booking',
           isActive: true,
           status: 'healthy',
-          totalRuns: 56,
-          successRuns: 56,
+          totalRuns: 0,
+          successRuns: 0,
           failedRuns: 0
         },
         {
@@ -332,8 +332,8 @@ export class AuthService implements OnModuleInit {
           type: 'handoff',
           isActive: true,
           status: 'healthy',
-          totalRuns: 12,
-          successRuns: 12,
+          totalRuns: 0,
+          successRuns: 0,
           failedRuns: 0
         }
       ];

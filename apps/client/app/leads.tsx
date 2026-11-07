@@ -25,7 +25,7 @@ export default function LeadsScreen() {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('TODOS');
-  const [leads, setLeads] = useState<any[]>(DEMO_LEADS);
+  const [leads, setLeads] = useState<any[]>([]);
 
   // Formulario para crear nuevo lead
   const [showAddForm, setShowAddForm] = useState(false);
@@ -51,7 +51,8 @@ export default function LeadsScreen() {
           );
         }
       } catch {
-        // Fallback a DEMO_LEADS si falla la red
+        // En caso de error, mantener lista limpia
+        setLeads([]);
       }
     };
     fetchLeads();
@@ -249,41 +250,54 @@ export default function LeadsScreen() {
           </View>
 
           {/* Rows */}
-          {filteredLeads.map((lead) => (
-            <View key={lead.id} style={styles.tableRow}>
-              <View style={{ flex: 2 }}>
-                <Text style={styles.leadName}>{lead.name}</Text>
-                <Text style={styles.leadPhone}>{lead.phone}</Text>
-              </View>
-
-              <View style={{ flex: 2 }}>
-                <Text style={styles.leadService}>{lead.requestedService || 'Sin especificar'}</Text>
-                <Text style={styles.leadSource}>Fuente: {lead.source}</Text>
-              </View>
-
-              <View style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {getStatusBadge(lead.status)}
-                <TouchableOpacity
-                  style={styles.advanceBtn}
-                  onPress={() => handleAdvanceStatus(lead)}
-                >
-                  <ArrowRight size={11} color="#c084fc" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={{ flex: 1 }}>{getPriorityBadge(lead.priority)}</View>
-
-              <View style={{ flex: 1.3 }}>
-                <Text style={styles.timeText}>{lead.lastInteractionAt}</Text>
-              </View>
-
-              <View style={{ flex: 2.3 }}>
-                <Text style={styles.notesText} numberOfLines={2}>
-                  {lead.notes}
-                </Text>
-              </View>
+          {filteredLeads.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>No hay prospectos registrados</Text>
+              <Text style={styles.emptyText}>
+                Cuando un cliente te escriba a tu número de WhatsApp o registres uno manualmente con "+ Nuevo Prospecto", aparecerá aquí clasificado automáticamente por la IA.
+              </Text>
+              <TouchableOpacity style={styles.emptyActionBtn} onPress={() => setShowAddForm(true)}>
+                <Plus size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.emptyActionBtnText}>Crear Primer Prospecto</Text>
+              </TouchableOpacity>
             </View>
-          ))}
+          ) : (
+            filteredLeads.map((lead) => (
+              <View key={lead.id} style={styles.tableRow}>
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.leadName}>{lead.name}</Text>
+                  <Text style={styles.leadPhone}>{lead.phone}</Text>
+                </View>
+
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.leadService}>{lead.requestedService || 'Sin especificar'}</Text>
+                  <Text style={styles.leadSource}>Fuente: {lead.source}</Text>
+                </View>
+
+                <View style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {getStatusBadge(lead.status)}
+                  <TouchableOpacity
+                    style={styles.advanceBtn}
+                    onPress={() => handleAdvanceStatus(lead)}
+                  >
+                    <ArrowRight size={11} color="#c084fc" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1 }}>{getPriorityBadge(lead.priority)}</View>
+
+                <View style={{ flex: 1.3 }}>
+                  <Text style={styles.timeText}>{lead.lastInteractionAt}</Text>
+                </View>
+
+                <View style={{ flex: 2.3 }}>
+                  <Text style={styles.notesText} numberOfLines={2}>
+                    {lead.notes}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
       </ScrollView>
     </View>
@@ -496,5 +510,40 @@ const styles = StyleSheet.create({
   notesText: {
     color: '#71717a',
     fontSize: 11
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#18181b',
+    borderRadius: 8,
+    margin: 16
+  },
+  emptyTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6
+  },
+  emptyText: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    textAlign: 'center',
+    maxWidth: 480,
+    lineHeight: 18,
+    marginBottom: 16
+  },
+  emptyActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#a855f7',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  emptyActionBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 13
   }
 });
