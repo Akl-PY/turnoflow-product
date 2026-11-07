@@ -27,17 +27,21 @@ import {
 } from 'lucide-react-native';
 import { Header } from '../src/components/Header';
 import { MetricCard } from '../src/components/MetricCard';
-import { apiClient, INITIAL_METRICS } from '../src/lib/api';
+import {
+  apiClient,
+  INITIAL_METRICS,
+  getTenantWebhookUrl,
+  getTenantVerifyToken
+} from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
-
-const WHATSAPP_WEBHOOK_URL =
-  'https://turnoflowapi-production.up.railway.app/api/conversations/whatsapp-webhook';
-const WHATSAPP_VERIFY_TOKEN = 'turnoflow_verify_token';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const tenantWebhookUrl = getTenantWebhookUrl(user?.organizationId);
+  const tenantVerifyToken = getTenantVerifyToken(user?.organizationId);
 
   const handleCopy = (text: string, key: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -119,20 +123,20 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Grid de Webhook y Token con Copiado Rápido */}
+          {/* Grid de Webhook y Token Multi-Tenant con Copiado Rápido */}
           <View style={styles.webhookGrid}>
             <View style={styles.webhookItem}>
-              <Text style={styles.webhookLabel}>1. URL DEL WEBHOOK (META CLOUD API)</Text>
+              <Text style={styles.webhookLabel}>1. URL DEL WEBHOOK (EXCLUSIVA DE TU SALÓN)</Text>
               <View style={styles.copyBox}>
                 <Text style={styles.copyValue} numberOfLines={1}>
-                  {WHATSAPP_WEBHOOK_URL}
+                  {tenantWebhookUrl}
                 </Text>
                 <TouchableOpacity
                   style={[
                     styles.copyBtn,
                     copiedKey === 'url' && styles.copyBtnSuccess
                   ]}
-                  onPress={() => handleCopy(WHATSAPP_WEBHOOK_URL, 'url')}
+                  onPress={() => handleCopy(tenantWebhookUrl, 'url')}
                 >
                   {copiedKey === 'url' ? (
                     <>
@@ -147,20 +151,23 @@ export default function DashboardScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+              <Text style={styles.webhookNoteText}>
+                Ruta única aislada para recibir los mensajes directos de tu salón en Meta Cloud API.
+              </Text>
             </View>
 
             <View style={styles.webhookItem}>
-              <Text style={styles.webhookLabel}>2. TOKEN DE VERIFICACIÓN (VERIFY TOKEN)</Text>
+              <Text style={styles.webhookLabel}>2. TOKEN DE VERIFICACIÓN ÚNICO (MULTI-TENANT)</Text>
               <View style={styles.copyBox}>
                 <Text style={styles.copyValue} numberOfLines={1}>
-                  {WHATSAPP_VERIFY_TOKEN}
+                  {tenantVerifyToken}
                 </Text>
                 <TouchableOpacity
                   style={[
                     styles.copyBtn,
                     copiedKey === 'token' && styles.copyBtnSuccess
                   ]}
-                  onPress={() => handleCopy(WHATSAPP_VERIFY_TOKEN, 'token')}
+                  onPress={() => handleCopy(tenantVerifyToken, 'token')}
                 >
                   {copiedKey === 'token' ? (
                     <>
@@ -176,7 +183,7 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.webhookNoteText}>
-                Clave de enlace para Meta. Podés usar esta por defecto o la que definas en Railway (WHATSAPP_VERIFY_TOKEN).
+                Clave criptográfica única e irrepetible para autenticar y blindar la conexión de tu negocio.
               </Text>
             </View>
           </View>

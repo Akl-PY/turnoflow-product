@@ -19,6 +19,11 @@ export class ConversationsService {
     private readonly aiService: AiService
   ) {}
 
+  getTenantVerifyToken(organizationId: string): string {
+    const clean = (organizationId || '').replace(/-/g, '');
+    return `tf_sec_${clean.substring(0, 16)}`;
+  }
+
   verifyMetaSignature(rawPayload: string, signatureHeader?: string): boolean {
     const appSecret = process.env.WHATSAPP_APP_SECRET;
     if (!appSecret || !signatureHeader) {

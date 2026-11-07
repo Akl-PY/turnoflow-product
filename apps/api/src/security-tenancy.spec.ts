@@ -121,4 +121,17 @@ describe('TurnoFlow AI — Aislamiento Multi-Tenant y Seguridad de Webhooks', ()
       expect(invalidCheck).toBe(false);
     });
   });
+
+  describe('4. Tokens de Verificación de Webhook Únicos por Organización (Multi-Tenant)', () => {
+    it('debe generar tokens únicos e irrepetibles para cada tenant', () => {
+      const tokenA = conversationsService.getTenantVerifyToken(orgA);
+      const tokenB = conversationsService.getTenantVerifyToken(orgB);
+
+      expect(tokenA).toBeDefined();
+      expect(tokenB).toBeDefined();
+      expect(tokenA.startsWith('tf_sec_')).toBe(true);
+      expect(tokenB.startsWith('tf_sec_')).toBe(true);
+      expect(tokenA).not.toBe(tokenB); // Tenant A y Tenant B tienen tokens totalmente distintos
+    });
+  });
 });

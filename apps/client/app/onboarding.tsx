@@ -26,16 +26,19 @@ import {
   HelpCircle,
   BookOpen
 } from 'lucide-react-native';
-import { apiClient } from '../src/lib/api';
+import {
+  apiClient,
+  getTenantWebhookUrl,
+  getTenantVerifyToken
+} from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
-
-const WHATSAPP_WEBHOOK_URL =
-  'https://turnoflowapi-production.up.railway.app/api/conversations/whatsapp-webhook';
-const WHATSAPP_VERIFY_TOKEN = 'turnoflow_verify_token';
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { user } = useAuth();
+
+  const tenantWebhookUrl = getTenantWebhookUrl(user?.organizationId);
+  const tenantVerifyToken = getTenantVerifyToken(user?.organizationId);
 
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'business'>('whatsapp');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -239,11 +242,11 @@ export default function OnboardingScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>URL DEL WEBHOOK OFICIAL</Text>
+                <Text style={styles.label}>URL DEL WEBHOOK EXCLUSIVO DE TU SALÓN</Text>
                 <View style={styles.copyRow}>
                   <TextInput
                     style={[styles.input, styles.monoInput, { flex: 1 }]}
-                    value={WHATSAPP_WEBHOOK_URL}
+                    value={tenantWebhookUrl}
                     editable={false}
                   />
                   <TouchableOpacity
@@ -251,7 +254,7 @@ export default function OnboardingScreen() {
                       styles.actionCopyBtn,
                       copiedKey === 'wh_url' && styles.actionCopyBtnSuccess
                     ]}
-                    onPress={() => handleCopy(WHATSAPP_WEBHOOK_URL, 'wh_url')}
+                    onPress={() => handleCopy(tenantWebhookUrl, 'wh_url')}
                   >
                     {copiedKey === 'wh_url' ? (
                       <>
@@ -269,11 +272,11 @@ export default function OnboardingScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>TOKEN DE VERIFICACIÓN (VERIFY TOKEN)</Text>
+                <Text style={styles.label}>TOKEN DE VERIFICACIÓN ÚNICO (MULTI-TENANT)</Text>
                 <View style={styles.copyRow}>
                   <TextInput
                     style={[styles.input, styles.monoInput, { flex: 1 }]}
-                    value={WHATSAPP_VERIFY_TOKEN}
+                    value={tenantVerifyToken}
                     editable={false}
                   />
                   <TouchableOpacity
@@ -281,7 +284,7 @@ export default function OnboardingScreen() {
                       styles.actionCopyBtn,
                       copiedKey === 'wh_token' && styles.actionCopyBtnSuccess
                     ]}
-                    onPress={() => handleCopy(WHATSAPP_VERIFY_TOKEN, 'wh_token')}
+                    onPress={() => handleCopy(tenantVerifyToken, 'wh_token')}
                   >
                     {copiedKey === 'wh_token' ? (
                       <>
@@ -297,7 +300,7 @@ export default function OnboardingScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.hint}>
-                  ℹ️ ¿Por qué este token? Es la clave secreta que Meta exige para validar tu webhook. En el backend viene configurado por defecto como turnoflow_verify_token. Si definís en Railway la variable WHATSAPP_VERIFY_TOKEN con una clave propia, usá esa misma en Meta.
+                  🔑 Este es el token criptográfico exclusivo generado para tu salón. Garantiza aislamiento total para que los mensajes de tus clientes y la agenda de turnos solo pertenezcan a tu cuenta.
                 </Text>
               </View>
             </View>

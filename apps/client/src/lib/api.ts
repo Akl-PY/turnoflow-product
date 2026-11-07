@@ -136,6 +136,19 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Helpers Multi-Tenant para Webhooks y Tokens exclusivos
+export function getTenantVerifyToken(organizationId?: string): string {
+  if (!organizationId) return 'turnoflow_verify_token';
+  const clean = organizationId.replace(/-/g, '');
+  return `tf_sec_${clean.substring(0, 16)}`;
+}
+
+export function getTenantWebhookUrl(organizationId?: string): string {
+  const base = 'https://turnoflowapi-production.up.railway.app/api/conversations/whatsapp-webhook';
+  if (!organizationId) return base;
+  return `${base}/${organizationId}`;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

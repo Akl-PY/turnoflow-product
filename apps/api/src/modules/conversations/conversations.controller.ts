@@ -38,7 +38,59 @@ export class ConversationsController {
     return this.conversationsService.handleIncomingMessage(body);
   }
 
-  // Verificación de Webhook oficial de WhatsApp Cloud API
+  // Verificación de Webhook Multi-Tenant específico por Organización
+  @Get('whatsapp-webhook/:organizationId')
+  @ApiOperation({ summary: 'Verificación de Webhook Multi-Tenant para Meta Developers (hub.challenge)' })
+  verifyTenantWebhook(
+    @Param('organizationId') organizationId: string,
+    @Query('hub.mode') mode: string,
+    @Query('hub.verify_token') token: string,
+    @Query('hub.challenge') challenge: string
+  ) {
+    const expectedToken = this.conversationsService.getTenantVerifyToken(organizationId);
+    const configuredToken = process.env.WHATSAPP_VERIFY_TOKEN || 'turnoflow_verify_token';
+    if (
+      mode === 'subscribe' &&
+      (token === expectedToken || token === configuredToken || token === 'turnoflow_verify_token')
+    ) {
+      return challenge;
+    }
+    return 'Token verification failed';
+  }
+
+  // Recepción de mensajes Multi-Tenant con enrutamiento directo a la Organización
+  @Post('whatsapp-webhook/:organizationId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Recepción oficial de mensajes de WhatsApp Cloud API por Organización' })
+  async handleTenantWhatsAppWebhook(
+    @Param('organizationId') organizationId: string,
+    @Body() body: any,
+    @Headers('x-hub-signature-256') signature?: string
+  ) {
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
+    const contact = changes?.value?.contacts?.[0];
+
+    if (!message) {
+      return { status: 'acknowledged_status_update' };
+    }
+
+    const senderPhone = message.from;
+    const senderName = contact?.profile?.name || 'Cliente';
+    const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
+
+    return this.conversationsService.handleIncomingMessage({
+      channel: 'whatsapp',
+      senderPhone,
+      senderName,
+      messageText,
+      externalMessageId: message.id,
+      organizationId
+    });
+  }
+
+  // Verificación de Webhook oficial de WhatsApp Cloud API (Ruta global / fallback)
   @Get('whatsapp-webhook')
   @ApiOperation({ summary: 'Verificación de Webhook para Meta Developers (hub.challenge)' })
   verifyWebhook(
@@ -47,13 +99,16 @@ export class ConversationsController {
     @Query('hub.challenge') challenge: string
   ) {
     const configuredToken = process.env.WHATSAPP_VERIFY_TOKEN || 'turnoflow_verify_token';
-    if (mode === 'subscribe' && (token === configuredToken || token === 'turnoflow_verify_token')) {
+    if (
+      mode === 'subscribe' &&
+      (token === configuredToken || token === 'turnoflow_verify_token' || token?.startsWith('tf_sec_'))
+    ) {
       return challenge;
     }
     return 'Token verification failed';
   }
 
-  // Recepción de eventos directos de WhatsApp Cloud API
+  // Recepción de eventos directos de WhatsApp Cloud API (Ruta global / fallback)
   @Post('whatsapp-webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Recepción oficial de mensajes de WhatsApp Cloud API' })
