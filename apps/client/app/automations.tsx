@@ -1,31 +1,59 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
   Switch
 } from 'react-native';
 import { Header } from '../src/components/Header';
 import {
   Workflow,
-  CheckCircle2,
-  AlertTriangle,
-  Play,
-  RotateCw,
-  ExternalLink,
   Zap
 } from 'lucide-react-native';
-import { DEMO_AUTOMATIONS } from '../src/lib/api';
+import { apiClient, DEMO_AUTOMATIONS } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 export default function AutomationsScreen() {
-  const [workflows, setWorkflows] = useState(DEMO_AUTOMATIONS);
+  const { user } = useAuth();
+  const [workflows, setWorkflows] = useState<any[]>(DEMO_AUTOMATIONS);
 
-  const toggleWorkflow = (id: string) => {
+  useEffect(() => {
+    const fetchAutomations = async () => {
+      try {
+        const res = await apiClient.get('/automations');
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setWorkflows(
+            res.data.map((wf: any) => ({
+              ...wf,
+              lastRunAt: wf.lastRunAt
+                ? isNaN(new Date(wf.lastRunAt).getTime())
+                  ? wf.lastRunAt
+                  : new Date(wf.lastRunAt).toLocaleTimeString('es-AR', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })
+                : 'Hace 5 min'
+            }))
+          );
+        }
+      } catch {
+        // Fallback a DEMO_AUTOMATIONS
+      }
+    };
+    fetchAutomations();
+  }, [user?.organizationId]);
+
+  const toggleWorkflow = async (id: string) => {
     setWorkflows((prev) =>
       prev.map((wf) => (wf.id === id ? { ...wf, isActive: !wf.isActive } : wf))
     );
+
+    try {
+      await apiClient.patch(`/automations/${id}/toggle`);
+    } catch {
+      // Mantiene cambio local si falla la red
+    }
   };
 
   return (

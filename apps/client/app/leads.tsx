@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,21 +10,104 @@ import {
 import { Header } from '../src/components/Header';
 import {
   Search,
-  Filter,
-  Phone,
   Flame,
-  CheckCircle,
-  Clock,
+  Plus,
+  Check,
   ArrowRight
 } from 'lucide-react-native';
-import { DEMO_LEADS } from '../src/lib/api';
+import { apiClient, DEMO_LEADS } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 const STATUS_FILTERS = ['TODOS', 'NEW', 'CONTACTED', 'INTERESTED', 'PENDING', 'BOOKED', 'LOST'];
+const STATUS_CYCLE = ['NEW', 'CONTACTED', 'INTERESTED', 'BOOKED'];
 
 export default function LeadsScreen() {
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('TODOS');
-  const [leads, setLeads] = useState(DEMO_LEADS);
+  const [leads, setLeads] = useState<any[]>(DEMO_LEADS);
+
+  // Formulario para crear nuevo lead
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newService, setNewService] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+
+  useEffect(() => {
+    const fetchLeads = async () => {
+      try {
+        const res = await apiClient.get('/leads');
+        if (Array.isArray(res.data)) {
+          setLeads(
+            res.data.map((l: any) => ({
+              ...l,
+              lastInteractionAt: l.lastInteractionAt
+                ? isNaN(new Date(l.lastInteractionAt).getTime())
+                  ? l.lastInteractionAt
+                  : new Date(l.lastInteractionAt).toLocaleDateString('es-AR')
+                : 'Hoy'
+            }))
+          );
+        }
+      } catch {
+        // Fallback a DEMO_LEADS si falla la red
+      }
+    };
+    fetchLeads();
+  }, [user?.organizationId]);
+
+  const handleCreateLead = async () => {
+    if (!newName.trim() || !newPhone.trim()) return;
+    const payload = {
+      name: newName.trim(),
+      phone: newPhone.trim(),
+      requestedService: newService.trim() || 'Limpieza Facial Profunda',
+      notes: newNotes.trim() || 'Registrado manualmente desde CRM',
+      priority: 'HOT',
+      intent: 'HIGH',
+      status: 'NEW',
+      source: 'WhatsApp'
+    };
+
+    try {
+      const res = await apiClient.post('/leads', payload);
+      const saved = {
+        ...res.data,
+        lastInteractionAt: 'Hace un instante'
+      };
+      setLeads((prev) => [saved, ...prev]);
+    } catch {
+      const fallbackItem = {
+        id: `lead-${Date.now()}`,
+        ...payload,
+        lastInteractionAt: 'Hace un instante'
+      };
+      setLeads((prev) => [fallbackItem, ...prev]);
+    }
+
+    setNewName('');
+    setNewPhone('');
+    setNewService('');
+    setNewNotes('');
+    setShowAddForm(false);
+  };
+
+  const handleAdvanceStatus = async (lead: any) => {
+    const idx = STATUS_CYCLE.indexOf(lead.status);
+    const nextStatus = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
+
+    // Optimistic update
+    setLeads((prev) =>
+      prev.map((l) => (l.id === lead.id ? { ...l, status: nextStatus } : l))
+    );
+
+    try {
+      await apiClient.patch(`/leads/${lead.id}`, { status: nextStatus });
+    } catch {
+      // Mantiene cambio local si falla la red
+    }
+  };
 
   const filteredLeads = leads.filter((l) => {
     const matchesSearch =
@@ -103,18 +186,66 @@ export default function LeadsScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={() => setShowAddForm(!showAddForm)}
+        >
+          <Plus size={14} color="#ffffff" style={{ marginRight: 4 }} />
+          <Text style={styles.addBtnText}>Nuevo Lead</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {showAddForm && (
+          <View style={styles.addBox}>
+            <Text style={styles.addBoxTitle}>Registrar Nuevo Prospecto</Text>
+            <View style={styles.addFieldsRow}>
+              <TextInput
+                style={[styles.input, { flex: 1.5 }]}
+                placeholder="Nombre completo"
+                placeholderTextColor="#52525b"
+                value={newName}
+                onChangeText={setNewName}
+              />
+              <TextInput
+                style={[styles.input, { flex: 1.2 }]}
+                placeholder="Teléfono (+54911...)"
+                placeholderTextColor="#52525b"
+                value={newPhone}
+                onChangeText={setNewPhone}
+              />
+              <TextInput
+                style={[styles.input, { flex: 1.5 }]}
+                placeholder="Servicio de interés"
+                placeholderTextColor="#52525b"
+                value={newService}
+                onChangeText={setNewService}
+              />
+              <TextInput
+                style={[styles.input, { flex: 2 }]}
+                placeholder="Notas u observaciones"
+                placeholderTextColor="#52525b"
+                value={newNotes}
+                onChangeText={setNewNotes}
+              />
+              <TouchableOpacity style={styles.saveBtn} onPress={handleCreateLead}>
+                <Check size={14} color="#ffffff" style={{ marginRight: 4 }} />
+                <Text style={styles.saveBtnText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.table}>
           {/* Header */}
           <View style={styles.tableHeaderRow}>
             <Text style={[styles.th, { flex: 2 }]}>PROSPECTO</Text>
             <Text style={[styles.th, { flex: 2 }]}>SERVICIO DE INTERÉS</Text>
-            <Text style={[styles.th, { flex: 1.2 }]}>ESTADO</Text>
+            <Text style={[styles.th, { flex: 1.4 }]}>ESTADO</Text>
             <Text style={[styles.th, { flex: 1 }]}>PRIORIDAD</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>ÚLTIMA INTERACCIÓN</Text>
-            <Text style={[styles.th, { flex: 2.5 }]}>NOTAS / ACCIÓN SUGERIDA</Text>
+            <Text style={[styles.th, { flex: 1.3 }]}>ÚLTIMA INTERACCIÓN</Text>
+            <Text style={[styles.th, { flex: 2.3 }]}>NOTAS / ACCIÓN</Text>
           </View>
 
           {/* Rows */}
@@ -130,15 +261,23 @@ export default function LeadsScreen() {
                 <Text style={styles.leadSource}>Fuente: {lead.source}</Text>
               </View>
 
-              <View style={{ flex: 1.2 }}>{getStatusBadge(lead.status)}</View>
+              <View style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {getStatusBadge(lead.status)}
+                <TouchableOpacity
+                  style={styles.advanceBtn}
+                  onPress={() => handleAdvanceStatus(lead)}
+                >
+                  <ArrowRight size={11} color="#c084fc" />
+                </TouchableOpacity>
+              </View>
 
               <View style={{ flex: 1 }}>{getPriorityBadge(lead.priority)}</View>
 
-              <View style={{ flex: 1.5 }}>
+              <View style={{ flex: 1.3 }}>
                 <Text style={styles.timeText}>{lead.lastInteractionAt}</Text>
               </View>
 
-              <View style={{ flex: 2.5 }}>
+              <View style={{ flex: 2.3 }}>
                 <Text style={styles.notesText} numberOfLines={2}>
                   {lead.notes}
                 </Text>
@@ -174,7 +313,7 @@ const styles = StyleSheet.create({
     borderColor: '#27272a',
     borderRadius: 8,
     paddingHorizontal: 12,
-    width: 320,
+    width: 300,
     height: 38
   },
   searchInput: {
@@ -205,6 +344,63 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#ffffff'
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#9333ea',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6
+  },
+  addBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  addBox: {
+    backgroundColor: '#0f0f12',
+    borderWidth: 1,
+    borderColor: '#a855f7',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 20
+  },
+  addBoxTitle: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 10
+  },
+  addFieldsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+    flexWrap: 'wrap'
+  },
+  input: {
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: '#ffffff',
+    fontSize: 12,
+    minWidth: 140
+  },
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6
+  },
+  saveBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700'
   },
   scroll: {
     flex: 1
@@ -270,6 +466,16 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 10,
     fontWeight: '700'
+  },
+  advanceBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center'
   },
   priorityBadge: {
     flexDirection: 'row',

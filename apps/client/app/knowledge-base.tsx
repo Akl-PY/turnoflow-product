@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,14 +10,13 @@ import {
 import { Header } from '../src/components/Header';
 import {
   Plus,
-  Tag,
-  DollarSign,
   Clock,
   HelpCircle,
   ShieldCheck,
   Check
 } from 'lucide-react-native';
-import { DEMO_SERVICES } from '../src/lib/api';
+import { apiClient, DEMO_SERVICES } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 const DEMO_FAQS = [
   {
@@ -43,8 +42,9 @@ const DEMO_FAQS = [
 ];
 
 export default function KnowledgeBaseScreen() {
-  const [services, setServices] = useState(DEMO_SERVICES);
-  const [faqs, setFaqs] = useState(DEMO_FAQS);
+  const { user } = useAuth();
+  const [services, setServices] = useState<any[]>(DEMO_SERVICES);
+  const [faqs, setFaqs] = useState<any[]>(DEMO_FAQS);
   const [activeTab, setActiveTab] = useState<'services' | 'faqs'>('services');
 
   // Form para nuevo servicio
@@ -53,11 +53,34 @@ export default function KnowledgeBaseScreen() {
   const [newServiceDuration, setNewServiceDuration] = useState('60');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  const handleAddService = () => {
+  // Form para nueva FAQ
+  const [showAddFaqModal, setShowAddFaqModal] = useState(false);
+  const [newFaqQuestion, setNewFaqQuestion] = useState('');
+  const [newFaqAnswer, setNewFaqAnswer] = useState('');
+
+  useEffect(() => {
+    const fetchBusiness = async () => {
+      try {
+        const res = await apiClient.get('/business');
+        if (res.data) {
+          if (Array.isArray(res.data.services) && res.data.services.length > 0) {
+            setServices(res.data.services);
+          }
+          if (Array.isArray(res.data.faqs) && res.data.faqs.length > 0) {
+            setFaqs(res.data.faqs);
+          }
+        }
+      } catch {
+        // Fallback a DEMO_SERVICES y DEMO_FAQS
+      }
+    };
+    fetchBusiness();
+  }, [user?.organizationId]);
+
+  const handleAddService = async () => {
     if (!newServiceName || !newServicePrice) return;
     const item = {
-      id: `srv-${Date.now()}`,
-      name: newServiceName,
+      name: newServiceName.trim(),
       category: 'General',
       description: 'Tratamiento personalizado',
       price: parseFloat(newServicePrice) || 30,
@@ -65,10 +88,43 @@ export default function KnowledgeBaseScreen() {
       durationMinutes: parseInt(newServiceDuration, 10) || 60,
       isActive: true
     };
-    setServices([item, ...services]);
+
+    try {
+      const res = await apiClient.post('/business/services', item);
+      if (res.data?.services) {
+        setServices(res.data.services);
+      } else {
+        setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+      }
+    } catch {
+      setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+    }
+
     setNewServiceName('');
     setNewServicePrice('');
     setShowAddModal(false);
+  };
+
+  const handleAddFaq = async () => {
+    if (!newFaqQuestion.trim() || !newFaqAnswer.trim()) return;
+    const nextFaqs = [
+      ...faqs,
+      {
+        id: `faq-${Date.now()}`,
+        question: newFaqQuestion.trim(),
+        answer: newFaqAnswer.trim()
+      }
+    ];
+    setFaqs(nextFaqs);
+    setNewFaqQuestion('');
+    setNewFaqAnswer('');
+    setShowAddFaqModal(false);
+
+    try {
+      await apiClient.put('/business', { faqs: nextFaqs });
+    } catch {
+      // Mantiene cambio local si falla la red
+    }
   };
 
   return (
@@ -153,7 +209,9 @@ export default function KnowledgeBaseScreen() {
                     <View style={styles.categoryPill}>
                       <Text style={styles.categoryText}>{srv.category}</Text>
                     </View>
-                    <Text style={styles.servicePrice}>${srv.price} {srv.currency}</Text>
+                    <Text style={styles.servicePrice}>
+                      ${srv.price} {srv.currency || 'USD'}
+                    </Text>
                   </View>
 
                   <Text style={styles.serviceName}>{srv.name}</Text>
@@ -175,7 +233,42 @@ export default function KnowledgeBaseScreen() {
           </View>
         ) : (
           <View>
-            <Text style={styles.sectionHeader}>PREGUNTAS FRECUENTES (FAQS)</Text>
+            <View style={styles.actionRow}>
+              <Text style={styles.sectionHeader}>PREGUNTAS FRECUENTES (FAQS)</Text>
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => setShowAddFaqModal(!showAddFaqModal)}
+              >
+                <Plus size={14} color="#ffffff" style={{ marginRight: 4 }} />
+                <Text style={styles.addBtnText}>Añadir Pregunta</Text>
+              </TouchableOpacity>
+            </View>
+
+            {showAddFaqModal && (
+              <View style={styles.addBox}>
+                <Text style={styles.addBoxTitle}>Nueva Pregunta Frecuente</Text>
+                <View style={styles.addFieldsRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="Pregunta del cliente"
+                    placeholderTextColor="#52525b"
+                    value={newFaqQuestion}
+                    onChangeText={setNewFaqQuestion}
+                  />
+                  <TextInput
+                    style={[styles.input, { flex: 2 }]}
+                    placeholder="Respuesta oficial"
+                    placeholderTextColor="#52525b"
+                    value={newFaqAnswer}
+                    onChangeText={setNewFaqAnswer}
+                  />
+                  <TouchableOpacity style={styles.saveBtn} onPress={handleAddFaq}>
+                    <Check size={14} color="#ffffff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
             <View style={styles.faqList}>
               {faqs.map((faq) => (
                 <View key={faq.id} style={styles.faqCard}>

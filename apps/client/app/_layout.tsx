@@ -1,10 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, ActivityIndicator } from 'react-native';
-import { Slot, usePathname, useRouter } from 'expo-router';
+import React from 'react';
+import {
+  View,
+  StyleSheet,
+  Platform,
+  useWindowDimensions,
+  ActivityIndicator,
+  Text
+} from 'react-native';
+import { Slot, usePathname, Redirect } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { Sidebar } from '../src/components/Sidebar';
-import { authStorage } from '../src/lib/auth';
+import { AuthProvider, useAuth } from '../src/lib/auth';
+import LoginScreen from './login';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,53 +23,52 @@ const queryClient = new QueryClient({
   }
 });
 
-export default function RootLayout() {
+function AuthenticatedShell() {
+  const { user, isLoading } = useAuth();
   const { width } = useWindowDimensions();
-  const isDesktop = width >= 768;
   const pathname = usePathname();
-  const router = useRouter();
-  const [authChecked, setAuthChecked] = useState(false);
+  const isDesktop = width >= 768;
 
-  const isLoginPage = pathname === '/login';
-
-  useEffect(() => {
-    const isAuth = authStorage.isAuthenticated();
-    if (!isAuth && !isLoginPage) {
-      router.replace('/login');
-    } else if (isAuth && isLoginPage) {
-      router.replace('/');
-    }
-    setAuthChecked(true);
-  }, [pathname]);
-
-  if (!authChecked && !isLoginPage) {
+  if (isLoading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#a855f7" />
+        <Text style={styles.loadingText}>Verificando sesión en TurnoFlow AI...</Text>
       </View>
     );
   }
 
-  if (isLoginPage) {
+  if (!user) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <StatusBar style="light" />
-        <View style={styles.container}>
-          <Slot />
+      <View style={styles.container}>
+        <View style={styles.contentArea}>
+          <LoginScreen />
         </View>
-      </QueryClientProvider>
+      </View>
     );
+  }
+
+  if (pathname === '/login') {
+    return <Redirect href="/" />;
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <StatusBar style="light" />
-      <View style={styles.container}>
-        {isDesktop && <Sidebar />}
-        <View style={styles.contentArea}>
-          <Slot />
-        </View>
+    <View style={styles.container}>
+      {isDesktop && <Sidebar />}
+      <View style={styles.contentArea}>
+        <Slot />
       </View>
+    </View>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <AuthenticatedShell />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
@@ -79,5 +86,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#09090b',
     overflow: 'hidden',
     height: (Platform.OS === 'web' ? '100vh' : '100%') as any
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#09090b',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: (Platform.OS === 'web' ? '100vh' : '100%') as any
+  },
+  loadingText: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    marginTop: 12
   }
 });

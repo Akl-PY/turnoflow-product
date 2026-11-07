@@ -21,6 +21,7 @@ import {
   Terminal
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 const SCENARIOS = [
   {
@@ -64,6 +65,7 @@ interface ChatMessage {
 }
 
 export default function PlaygroundScreen() {
+  const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'm-welcome',
@@ -92,7 +94,8 @@ export default function PlaygroundScreen() {
     try {
       const res = await apiClient.post('/ai/playground', {
         message: text,
-        agentRole: 'RECEPTIONIST'
+        agentRole: 'RECEPTIONIST',
+        organizationId: user?.organizationId
       });
 
       const data = res.data;

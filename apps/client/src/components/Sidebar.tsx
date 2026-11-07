@@ -11,9 +11,10 @@ import {
   Sparkles,
   Settings,
   ShieldCheck,
-  LogOut
+  LogOut,
+  Building2
 } from 'lucide-react-native';
-import { authStorage } from '../lib/auth';
+import { useAuth } from '../lib/auth';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
 export const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const { user, logout } = useAuth();
 
   return (
     <View style={styles.container}>
@@ -37,9 +39,11 @@ export const Sidebar: React.FC = () => {
         <View style={styles.logoBadge}>
           <Sparkles color="#a855f7" size={18} />
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.brandTitle}>TurnoFlow AI</Text>
-          <Text style={styles.brandSubtitle}>Recepción 24/7</Text>
+          <Text style={styles.brandSubtitle} numberOfLines={1}>
+            {user?.organizationName || 'Recepción 24/7'}
+          </Text>
         </View>
       </View>
 
@@ -47,7 +51,8 @@ export const Sidebar: React.FC = () => {
       <ScrollView style={styles.menuContainer} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionHeader}>PLATAFORMA</Text>
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path));
+          const isActive =
+            pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path));
           const Icon = item.icon;
           return (
             <TouchableOpacity
@@ -74,18 +79,32 @@ export const Sidebar: React.FC = () => {
         })}
       </ScrollView>
 
-      {/* Footer Info */}
+      {/* Footer Info & Active User */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() => {
-            authStorage.logout();
-            router.replace('/login');
-          }}
-        >
-          <LogOut color="#f87171" size={14} style={{ marginRight: 8 }} />
-          <Text style={styles.logoutBtnText}>Cerrar Sesión</Text>
-        </TouchableOpacity>
+        {user && (
+          <View style={styles.userCard}>
+            <View style={styles.userHeader}>
+              <Building2 size={13} color="#c084fc" style={{ marginRight: 6 }} />
+              <Text style={styles.orgNameText} numberOfLines={1}>
+                {user.organizationName}
+              </Text>
+            </View>
+            <Text style={styles.userEmailText} numberOfLines={1}>
+              {user.email}
+            </Text>
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              onPress={() => {
+                logout();
+                router.replace('/login');
+              }}
+            >
+              <LogOut size={12} color="#f87171" style={{ marginRight: 6 }} />
+              <Text style={styles.logoutBtnText}>Cerrar Sesión</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.securityRow}>
           <ShieldCheck color="#22c55e" size={14} />
           <Text style={styles.securityText}>Multi-Tenant Seguro</Text>
@@ -187,18 +206,43 @@ const styles = StyleSheet.create({
     borderTopColor: '#18181b',
     paddingHorizontal: 8
   },
+  userCard: {
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12
+  },
+  userHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2
+  },
+  orgNameText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1
+  },
+  userEmailText: {
+    color: '#a1a1aa',
+    fontSize: 10,
+    marginBottom: 8
+  },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
     borderRadius: 6,
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-    marginBottom: 12
+    paddingVertical: 6
   },
   logoutBtnText: {
     color: '#f87171',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600'
   },
   securityRow: {

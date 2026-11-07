@@ -1,32 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
-  Alert
+  TouchableOpacity
 } from 'react-native';
 import { Header } from '../src/components/Header';
 import {
   Building2,
-  Clock,
-  Sparkles,
   Save,
   CheckCircle,
   FileText
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 export default function OnboardingScreen() {
-  const [businessName, setBusinessName] = useState('TurnoFlow Beauty Studio');
+  const { user } = useAuth();
+  const [businessName, setBusinessName] = useState(
+    user?.organizationName || 'TurnoFlow Beauty Studio'
+  );
   const [description, setDescription] = useState('Estudio de belleza y estética integral');
   const [location, setLocation] = useState('Av. Santa Fe 2450, Recoleta, Buenos Aires');
   const [timezone, setTimezone] = useState('America/Argentina/Buenos_Aires');
   const [phone, setPhone] = useState('+5491133445566');
-  const [cancellationPolicy, setCancellationPolicy] = useState('Cancelaciones con al menos 24 horas de antelación sin cargo.');
+  const [cancellationPolicy, setCancellationPolicy] = useState(
+    'Cancelaciones con al menos 24 horas de antelación sin cargo.'
+  );
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    const fetchBusiness = async () => {
+      try {
+        const res = await apiClient.get('/business');
+        if (res.data) {
+          if (res.data.businessName) setBusinessName(res.data.businessName);
+          if (res.data.description) setDescription(res.data.description);
+          if (res.data.location) setLocation(res.data.location);
+          if (res.data.timezone) setTimezone(res.data.timezone);
+          if (res.data.contactPhone) setPhone(res.data.contactPhone);
+          if (res.data.cancellationPolicy) setCancellationPolicy(res.data.cancellationPolicy);
+        }
+      } catch {
+        // Fallback a valores iniciales
+      }
+    };
+    fetchBusiness();
+  }, [user?.organizationId]);
 
   const handleSave = async () => {
     try {
@@ -58,7 +80,9 @@ export default function OnboardingScreen() {
         {savedSuccess && (
           <View style={styles.successBanner}>
             <CheckCircle size={16} color="#22c55e" style={{ marginRight: 8 }} />
-            <Text style={styles.successText}>¡Configuración guardada y sincronizada con los agentes de IA!</Text>
+            <Text style={styles.successText}>
+              ¡Configuración guardada y sincronizada con los agentes de IA!
+            </Text>
           </View>
         )}
 

@@ -13,7 +13,6 @@ RUN npm install
 COPY tsconfig*.json ./
 COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
-COPY dist ./dist
 COPY documentation ./documentation
 COPY automations ./automations
 COPY prompts ./prompts

@@ -94,6 +94,9 @@ export function buildInMemoryZipBuffer(filename: string, content: string): Buffe
 
 export function resolveKitZipPath(): string | null {
   const candidates = [
+    path.resolve(__dirname, '../../../../resources/TurnoFlow-AI-Complete.zip'),
+    path.resolve(process.cwd(), 'resources/TurnoFlow-AI-Complete.zip'),
+    path.resolve(process.cwd(), '../../resources/TurnoFlow-AI-Complete.zip'),
     path.resolve(__dirname, '../../../../dist/TurnoFlow-AI-Complete.zip'),
     path.resolve(process.cwd(), 'dist/TurnoFlow-AI-Complete.zip'),
     path.resolve(process.cwd(), '../../dist/TurnoFlow-AI-Complete.zip')

@@ -15,27 +15,53 @@ import {
   Clock,
   UserCheck,
   Bot,
-  Layers,
-  ArrowUpRight,
   Sparkles,
   CheckCircle2
 } from 'lucide-react-native';
 import { Header } from '../src/components/Header';
 import { MetricCard } from '../src/components/MetricCard';
 import { apiClient, DEMO_METRICS, DEMO_ACTIVITY } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { user } = useAuth();
 
-  // Consulta de estadísticas reales con fallback
+  // Consulta de estadísticas reales con fallback elegante
   const { data: metrics = DEMO_METRICS } = useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ['dashboard-stats', user?.organizationId],
     queryFn: async () => {
       try {
         const res = await apiClient.get('/dashboard/stats');
-        return res.data;
+        return res.data || DEMO_METRICS;
       } catch {
         return DEMO_METRICS;
+      }
+    }
+  });
+
+  // Consulta de actividad reciente real con fallback elegante
+  const { data: activity = DEMO_ACTIVITY } = useQuery({
+    queryKey: ['dashboard-activity', user?.organizationId],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get('/dashboard/activity');
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          return res.data.map((item: any) => ({
+            ...item,
+            timestamp: item.timestamp
+              ? isNaN(new Date(item.timestamp).getTime())
+                ? String(item.timestamp)
+                : new Date(item.timestamp).toLocaleTimeString('es-AR', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })
+              : 'Reciente'
+          }));
+        }
+        return DEMO_ACTIVITY;
+      } catch {
+        return DEMO_ACTIVITY;
       }
     }
   });
@@ -44,7 +70,7 @@ export default function DashboardScreen() {
     <View style={styles.container}>
       <Header
         title="Dashboard General"
-        subtitle="Métricas de recepción y conversión en tiempo real"
+        subtitle={`Métricas de recepción y conversión en tiempo real — ${user?.organizationName || 'TurnoFlow Beauty Studio'}`}
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -54,7 +80,9 @@ export default function DashboardScreen() {
             <Sparkles size={20} color="#a855f7" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>TurnoFlow AI — Modo Recepción Activo</Text>
+            <Text style={styles.bannerTitle}>
+              {user?.organizationName || 'TurnoFlow AI'} — Modo Recepción Activo
+            </Text>
             <Text style={styles.bannerText}>
               Los agentes están atendiendo consultas en WhatsApp y sincronizando citas con Google Calendar.
             </Text>
@@ -121,7 +149,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
-            {DEMO_ACTIVITY.map((item) => (
+            {activity.map((item: any) => (
               <View key={item.id} style={styles.activityItem}>
                 <View style={styles.activityDot} />
                 <View style={{ flex: 1 }}>
@@ -143,7 +171,7 @@ export default function DashboardScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.agentName}>Reception Agent</Text>
-                <Text style={styles.agentModel}>Claude 3.5 Sonnet • 24/7 Activo</Text>
+                <Text style={styles.agentModel}>Gemini 2.5 Flash / Claude 3.5 • 24/7 Activo</Text>
               </View>
               <View style={styles.badgeSuccess}>
                 <Text style={styles.badgeSuccessText}>Online</Text>
@@ -156,7 +184,7 @@ export default function DashboardScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.agentName}>Lead Intelligence Agent</Text>
-                <Text style={styles.agentModel}>Claude 3.5 Haiku • Scoring</Text>
+                <Text style={styles.agentModel}>Clasificación & Scoring JSON</Text>
               </View>
               <View style={styles.badgeSuccess}>
                 <Text style={styles.badgeSuccessText}>Online</Text>

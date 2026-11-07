@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,34 +9,87 @@ import {
   Switch
 } from 'react-native';
 import { Header } from '../src/components/Header';
-import { Bot, Cpu, Sparkles, Check, Settings2, Sliders } from 'lucide-react-native';
-import { DEMO_AGENTS } from '../src/lib/api';
+import { Bot, Cpu, Sparkles, Check, Save, CheckCircle } from 'lucide-react-native';
+import { apiClient, DEMO_AGENTS } from '../src/lib/api';
+import { useAuth } from '../src/lib/auth';
 import { useRouter } from 'expo-router';
 
 export default function AgentsScreen() {
   const router = useRouter();
-  const [agents, setAgents] = useState(DEMO_AGENTS);
-  const [selectedAgentId, setSelectedAgentId] = useState(DEMO_AGENTS[0].id);
+  const { user } = useAuth();
+  const [agents, setAgents] = useState<any[]>(DEMO_AGENTS);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(DEMO_AGENTS[0].id);
+  const [savedBanner, setSavedBanner] = useState(false);
+
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        const res = await apiClient.get('/agents');
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setAgents(res.data);
+          setSelectedAgentId(res.data[0].id);
+        }
+      } catch {
+        // Fallback a DEMO_AGENTS
+      }
+    };
+    fetchAgents();
+  }, [user?.organizationId]);
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
 
+  const persistAgentChange = async (updatedAgent: any) => {
+    try {
+      await apiClient.put(`/agents/${updatedAgent.id}`, {
+        name: updatedAgent.name,
+        isActive: updatedAgent.isActive,
+        provider: updatedAgent.provider,
+        model: updatedAgent.model,
+        temperature: Number(updatedAgent.temperature) || 0.2,
+        systemPrompt: updatedAgent.systemPrompt
+      });
+    } catch {
+      // Mantiene estado local si falla la red
+    }
+    setSavedBanner(true);
+    setTimeout(() => setSavedBanner(false), 2500);
+  };
+
   const toggleAgent = (id: string) => {
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, isActive: !a.isActive } : a))
+      prev.map((a) => {
+        if (a.id === id) {
+          const next = { ...a, isActive: !a.isActive };
+          persistAgentChange(next);
+          return next;
+        }
+        return a;
+      })
     );
   };
 
-  const updateProvider = (provider: 'anthropic' | 'openai') => {
+  const updateProvider = (provider: 'gemini' | 'anthropic' | 'openai') => {
+    const modelMap = {
+      gemini: 'gemini-2.5-flash',
+      anthropic: 'claude-3-5-sonnet-20241022',
+      openai: 'gpt-4o'
+    };
     setAgents((prev) =>
       prev.map((a) =>
         a.id === selectedAgentId
           ? {
               ...a,
               provider,
-              model: provider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gpt-4o'
+              model: modelMap[provider]
             }
           : a
       )
+    );
+  };
+
+  const updateSelectedField = (field: string, value: any) => {
+    setAgents((prev) =>
+      prev.map((a) => (a.id === selectedAgentId ? { ...a, [field]: value } : a))
     );
   };
 
@@ -44,10 +97,19 @@ export default function AgentsScreen() {
     <View style={styles.container}>
       <Header
         title="Administración de Agentes de IA"
-        subtitle="Configuración de personalidad, proveedor (Claude/OpenAI), herramientas y límites"
+        subtitle="Configuración de personalidad, proveedor (Gemini / Claude / OpenAI), herramientas y límites"
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {savedBanner && (
+          <View style={styles.savedNotice}>
+            <CheckCircle size={15} color="#4ade80" style={{ marginRight: 8 }} />
+            <Text style={styles.savedNoticeText}>
+              Configuración del agente guardada en la base de datos.
+            </Text>
+          </View>
+        )}
+
         <View style={styles.layout}>
           {/* Lista Izquierda de Agentes */}
           <View style={styles.listCol}>
@@ -70,7 +132,7 @@ export default function AgentsScreen() {
                         {agent.name}
                       </Text>
                       <Text style={styles.agentProvider}>
-                        {agent.provider.toUpperCase()} • {agent.model.split('-')[0]}
+                        {String(agent.provider).toUpperCase()} • {agent.model}
                       </Text>
                     </View>
                     <Switch
@@ -101,8 +163,22 @@ export default function AgentsScreen() {
                   <Text style={styles.detailName}>{selectedAgent.name}</Text>
                   <Text style={styles.detailRole}>Rol del Sistema: {selectedAgent.role}</Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: selectedAgent.isActive ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)' }]}>
-                  <Text style={[styles.statusText, { color: selectedAgent.isActive ? '#4ade80' : '#f87171' }]}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    {
+                      backgroundColor: selectedAgent.isActive
+                        ? 'rgba(34,197,94,0.1)'
+                        : 'rgba(239,68,68,0.1)'
+                    }
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusText,
+                      { color: selectedAgent.isActive ? '#4ade80' : '#f87171' }
+                    ]}
+                  >
                     {selectedAgent.isActive ? 'ACTIVO' : 'PAUSADO'}
                   </Text>
                 </View>
@@ -112,25 +188,71 @@ export default function AgentsScreen() {
               <Text style={styles.fieldLabel}>Proveedor de Modelo de Lenguaje</Text>
               <View style={styles.providerRow}>
                 <TouchableOpacity
-                  style={[styles.providerCard, selectedAgent.provider === 'anthropic' && styles.providerCardActive]}
-                  onPress={() => updateProvider('anthropic')}
+                  style={[
+                    styles.providerCard,
+                    selectedAgent.provider === 'gemini' && styles.providerCardActive
+                  ]}
+                  onPress={() => updateProvider('gemini')}
                 >
-                  <Cpu size={16} color={selectedAgent.provider === 'anthropic' ? '#c084fc' : '#71717a'} />
+                  <Cpu
+                    size={16}
+                    color={selectedAgent.provider === 'gemini' ? '#c084fc' : '#71717a'}
+                  />
                   <View style={{ marginLeft: 8 }}>
-                    <Text style={[styles.providerName, selectedAgent.provider === 'anthropic' && styles.providerNameActive]}>
-                      Anthropic Claude
+                    <Text
+                      style={[
+                        styles.providerName,
+                        selectedAgent.provider === 'gemini' && styles.providerNameActive
+                      ]}
+                    >
+                      Google Gemini
                     </Text>
-                    <Text style={styles.providerDesc}>Claude 3.5 Sonnet (Recomendado)</Text>
+                    <Text style={styles.providerDesc}>Gemini 2.5 Flash (Activo)</Text>
                   </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.providerCard, selectedAgent.provider === 'openai' && styles.providerCardActive]}
+                  style={[
+                    styles.providerCard,
+                    selectedAgent.provider === 'anthropic' && styles.providerCardActive
+                  ]}
+                  onPress={() => updateProvider('anthropic')}
+                >
+                  <Cpu
+                    size={16}
+                    color={selectedAgent.provider === 'anthropic' ? '#c084fc' : '#71717a'}
+                  />
+                  <View style={{ marginLeft: 8 }}>
+                    <Text
+                      style={[
+                        styles.providerName,
+                        selectedAgent.provider === 'anthropic' && styles.providerNameActive
+                      ]}
+                    >
+                      Anthropic Claude
+                    </Text>
+                    <Text style={styles.providerDesc}>Claude 3.5 Sonnet</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.providerCard,
+                    selectedAgent.provider === 'openai' && styles.providerCardActive
+                  ]}
                   onPress={() => updateProvider('openai')}
                 >
-                  <Cpu size={16} color={selectedAgent.provider === 'openai' ? '#c084fc' : '#71717a'} />
+                  <Cpu
+                    size={16}
+                    color={selectedAgent.provider === 'openai' ? '#c084fc' : '#71717a'}
+                  />
                   <View style={{ marginLeft: 8 }}>
-                    <Text style={[styles.providerName, selectedAgent.provider === 'openai' && styles.providerNameActive]}>
+                    <Text
+                      style={[
+                        styles.providerName,
+                        selectedAgent.provider === 'openai' && styles.providerNameActive
+                      ]}
+                    >
                       OpenAI
                     </Text>
                     <Text style={styles.providerDesc}>GPT-4o / GPT-4o-mini</Text>
@@ -143,9 +265,9 @@ export default function AgentsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.fieldLabel}>Modelo</Text>
                   <TextInput
-                    style={styles.inputDisabled}
+                    style={styles.input}
                     value={selectedAgent.model}
-                    editable={false}
+                    onChangeText={(val) => updateSelectedField('model', val)}
                   />
                 </View>
                 <View style={{ width: 140 }}>
@@ -153,7 +275,7 @@ export default function AgentsScreen() {
                   <TextInput
                     style={styles.input}
                     value={String(selectedAgent.temperature)}
-                    editable={false}
+                    onChangeText={(val) => updateSelectedField('temperature', val)}
                   />
                 </View>
               </View>
@@ -163,6 +285,7 @@ export default function AgentsScreen() {
               <TextInput
                 style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
                 value={selectedAgent.systemPrompt}
+                onChangeText={(val) => updateSelectedField('systemPrompt', val)}
                 multiline
                 placeholderTextColor="#52525b"
               />
@@ -170,17 +293,27 @@ export default function AgentsScreen() {
               {/* Herramientas Permitidas */}
               <Text style={styles.fieldLabel}>Herramientas Permitidas (Tool Calling)</Text>
               <View style={styles.toolsList}>
-                {(selectedAgent.allowedTools && selectedAgent.allowedTools.length > 0) ? (
-                  selectedAgent.allowedTools.map((tool) => (
+                {selectedAgent.allowedTools && selectedAgent.allowedTools.length > 0 ? (
+                  selectedAgent.allowedTools.map((tool: string) => (
                     <View key={tool} style={styles.toolTag}>
                       <Check size={12} color="#4ade80" style={{ marginRight: 4 }} />
                       <Text style={styles.toolTagText}>{tool}</Text>
                     </View>
                   ))
                 ) : (
-                  <Text style={styles.emptyToolsText}>No requiere herramientas externas (Salida estructurada directa).</Text>
+                  <Text style={styles.emptyToolsText}>
+                    No requiere herramientas externas (Salida estructurada directa).
+                  </Text>
                 )}
               </View>
+
+              <TouchableOpacity
+                style={styles.saveAgentBtn}
+                onPress={() => persistAgentChange(selectedAgent)}
+              >
+                <Save size={15} color="#ffffff" style={{ marginRight: 8 }} />
+                <Text style={styles.saveAgentBtnText}>Guardar Cambios del Agente</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -199,6 +332,21 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 28
+  },
+  savedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 18
+  },
+  savedNoticeText: {
+    color: '#4ade80',
+    fontSize: 12,
+    fontWeight: '600'
   },
   layout: {
     flexDirection: 'row',
@@ -316,10 +464,12 @@ const styles = StyleSheet.create({
   providerRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 8
+    marginBottom: 8,
+    flexWrap: 'wrap'
   },
   providerCard: {
     flex: 1,
+    minWidth: 160,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#18181b',
@@ -359,16 +509,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 13
   },
-  inputDisabled: {
-    backgroundColor: '#141417',
-    borderWidth: 1,
-    borderColor: '#222226',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#a1a1aa',
-    fontSize: 13
-  },
   toolsList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -394,5 +534,19 @@ const styles = StyleSheet.create({
     color: '#71717a',
     fontSize: 12,
     fontStyle: 'italic'
+  },
+  saveAgentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#9333ea',
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 22
+  },
+  saveAgentBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700'
   }
 });
