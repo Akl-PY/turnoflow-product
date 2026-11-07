@@ -95,6 +95,10 @@ describe('TurnoFlow AI — OrdersModule & Hardening de Descargas', () => {
       expect(result.amount).toBe(49.0);
       expect(result.currency).toBe('USD');
       expect(result.redirectUrl).toContain(result.downloadToken);
+      expect(result.saasCredentials).toBeDefined();
+      expect(result.saasCredentials.email).toBe('comprador@salon.com');
+      expect(result.saasCredentials.temporaryPassword).toBeDefined();
+      expect(result.saasCredentials.dashboardUrl).toContain('/login');
     });
 
     it('debe rechazar la orden si falta el email o el nombre del cliente', async () => {

@@ -44,7 +44,9 @@ export class AppointmentsController {
       customerName: string;
       customerPhone: string;
       serviceId: string;
+      serviceName?: string;
       startTime: string;
+      notes?: string;
       organizationId?: string;
     }
   ) {

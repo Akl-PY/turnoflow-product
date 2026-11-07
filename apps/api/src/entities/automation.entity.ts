@@ -38,7 +38,7 @@ export class AutomationEntity {
   @Column({ length: 255, nullable: true })
   webhookUrl: string;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ nullable: true })
   lastRunAt: Date;
 
   @Column({ default: 0 })

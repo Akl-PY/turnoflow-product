@@ -9,10 +9,16 @@ COPY apps/api/package*.json ./apps/api/
 
 RUN npm install
 
-# Copiar código fuente
+# Copiar código fuente y activos del kit digital
 COPY tsconfig*.json ./
 COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
+COPY dist ./dist
+COPY documentation ./documentation
+COPY automations ./automations
+COPY prompts ./prompts
+COPY templates ./templates
+COPY resources ./resources
 
 # Compilar contratos compartidos y API
 RUN npm run build:shared

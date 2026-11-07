@@ -57,8 +57,10 @@ export class AppointmentsService {
     customerName: string;
     customerPhone: string;
     serviceId: string;
+    serviceName?: string;
     startTime: string;
     leadId?: string;
+    notes?: string;
   }): Promise<Appointment> {
     const availability = await this.checkSlot(organizationId, data.serviceId, data.startTime);
     if (!availability.isAvailable) {
@@ -73,10 +75,11 @@ export class AppointmentsService {
       customerName: data.customerName,
       customerPhone: data.customerPhone,
       serviceId: data.serviceId,
-      serviceName: data.serviceId,
+      serviceName: data.serviceName || data.serviceId,
       startTime: start,
       endTime: end,
       leadId: data.leadId,
+      notes: data.notes,
       status: AppointmentStatus.CONFIRMED
     });
 

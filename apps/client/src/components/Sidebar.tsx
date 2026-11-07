@@ -10,8 +10,10 @@ import {
   Workflow,
   Sparkles,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  LogOut
 } from 'lucide-react-native';
+import { authStorage } from '../lib/auth';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -74,6 +76,16 @@ export const Sidebar: React.FC = () => {
 
       {/* Footer Info */}
       <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => {
+            authStorage.logout();
+            router.replace('/login');
+          }}
+        >
+          <LogOut color="#f87171" size={14} style={{ marginRight: 8 }} />
+          <Text style={styles.logoutBtnText}>Cerrar Sesión</Text>
+        </TouchableOpacity>
         <View style={styles.securityRow}>
           <ShieldCheck color="#22c55e" size={14} />
           <Text style={styles.securityText}>Multi-Tenant Seguro</Text>
@@ -174,6 +186,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#18181b',
     paddingHorizontal: 8
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    marginBottom: 12
+  },
+  logoutBtnText: {
+    color: '#f87171',
+    fontSize: 12,
+    fontWeight: '600'
   },
   securityRow: {
     flexDirection: 'row',

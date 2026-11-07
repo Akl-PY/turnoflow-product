@@ -62,7 +62,8 @@ export const AppDataSource = new DataSource(
           Message,
           AgentConfigEntity,
           AutomationEntity,
-          AuditLog
+          AuditLog,
+          Order
         ],
         synchronize: true
       }

@@ -39,10 +39,10 @@ export class Appointment {
   @Column({ length: 150 })
   serviceName: string;
 
-  @Column({ type: 'datetime' })
+  @Column()
   startTime: Date;
 
-  @Column({ type: 'datetime' })
+  @Column()
   endTime: Date;
 
   @Column({

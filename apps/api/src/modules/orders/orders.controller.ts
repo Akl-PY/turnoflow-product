@@ -20,14 +20,26 @@ export class OrdersController {
   @Post('checkout-session')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Crear sesión de compra y generar token de descarga seguro'
+    summary: 'Crear sesión de compra, aprovisionar cuenta SaaS y generar token de descarga seguro'
   })
   @ApiResponse({
     status: 201,
-    description: 'Orden registrada y token de descarga generado'
+    description: 'Orden registrada, cuenta aprovisionada y token de descarga generado'
   })
   async createCheckoutSession(@Body() body: CreateOrderDto) {
     return this.ordersService.createCheckoutSession(body);
+  }
+
+  @Get('details/:token')
+  @ApiOperation({
+    summary: 'Obtener detalles de la orden y credenciales SaaS asociadas al token de compra'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Detalles de la orden y accesos SaaS'
+  })
+  async getOrderDetails(@Param('token') token: string) {
+    return this.ordersService.getOrderDetailsByToken(token);
   }
 
   @Get('verify-download/:token')

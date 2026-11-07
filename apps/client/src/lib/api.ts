@@ -1,6 +1,96 @@
 import axios from 'axios';
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+function resolveApiUrl(): string {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.hostname &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    return 'https://backend-production-c7cf.up.railway.app/api';
+  }
+  return 'http://localhost:3000/api';
+}
+
+export const API_URL = resolveApiUrl();
+
+const TOKEN_STORAGE_KEY = 'turnoflow_auth_token';
+const USER_STORAGE_KEY = 'turnoflow_auth_user';
+
+let memoryToken: string | null = null;
+let memoryUser: AuthUser | null = null;
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  organizationId: string;
+  organizationName: string;
+}
+
+export function getStoredToken(): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return memoryToken;
+}
+
+export function setStoredToken(token: string | null): void {
+  memoryToken = token;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (token) {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } else {
+        window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function getStoredUser(): AuthUser | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(USER_STORAGE_KEY);
+      if (raw) {
+        return JSON.parse(raw) as AuthUser;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return memoryUser;
+}
+
+export function setStoredUser(user: AuthUser | null): void {
+  memoryUser = user;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (user) {
+        window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      } else {
+        window.localStorage.removeItem(USER_STORAGE_KEY);
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearStoredAuth(): void {
+  setStoredToken(null);
+  setStoredUser(null);
+}
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -8,6 +98,14 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json'
   }
+});
+
+apiClient.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // Demo data fallbacks for instant preview if API is not yet running

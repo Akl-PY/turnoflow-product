@@ -58,10 +58,10 @@ export class Lead {
   @Column({ length: 50, default: 'whatsapp' })
   source: string;
 
-  @Column({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ default: () => 'CURRENT_TIMESTAMP' })
   lastInteractionAt: Date;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ nullable: true })
   nextFollowUpAt: Date;
 
   @Column({ type: 'text', nullable: true })

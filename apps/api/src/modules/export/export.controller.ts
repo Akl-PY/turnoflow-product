@@ -1,8 +1,8 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
-import * as path from 'path';
 import * as fs from 'fs';
+import { resolveKitZipPath, buildInMemoryZipBuffer } from '../orders/orders.service';
 
 @ApiTags('Product Distribution & Export')
 @Controller('export')
@@ -10,15 +10,17 @@ export class ExportController {
   @Get('download-kit')
   @ApiOperation({ summary: 'Descargar kit digital de implementación TurnoFlow-AI-Complete.zip' })
   downloadKit(@Res() res: Response) {
-    const zipPath = path.resolve(__dirname, '../../../../dist/TurnoFlow-AI-Complete.zip');
-    if (fs.existsSync(zipPath)) {
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename=TurnoFlow-AI-Complete.zip');
+    const zipPath = resolveKitZipPath();
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="TurnoFlow-AI-Complete.zip"');
+
+    if (zipPath) {
       return fs.createReadStream(zipPath).pipe(res);
     }
-    return res.status(404).json({
-      error: 'El archivo ZIP de distribución aún no ha sido compilado. Ejecute npm run export:dist'
-    });
+
+    const readmeText = `# TurnoFlow AI — Kit de Implementación Oficial\nVersión: 1.0.0\nLicencia: Comercial (Pago Único USD 49)\n\nAccede a tu panel SaaS en: https://turnoflow-product-clientturnoflow-p.vercel.app/login\n`;
+    const zipBuffer = buildInMemoryZipBuffer('TurnoFlow-AI-Complete/README.txt', readmeText);
+    return res.send(zipBuffer);
   }
 
   @Get('manifest')
