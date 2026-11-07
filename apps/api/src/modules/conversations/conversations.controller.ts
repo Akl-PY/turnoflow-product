@@ -13,13 +13,45 @@ import {
   HttpStatus
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { ConversationsService } from './conversations.service';
+import { IntegrationsService } from '../integrations/integrations.service';
+import { BusinessProfile } from '../../entities/business-profile.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Conversations & Webhooks')
 @Controller('conversations')
 export class ConversationsController {
-  constructor(private readonly conversationsService: ConversationsService) {}
+  constructor(
+    private readonly conversationsService: ConversationsService,
+    private readonly integrationsService: IntegrationsService,
+    @InjectRepository(BusinessProfile)
+    private readonly profileRepo: Repository<BusinessProfile>
+  ) {}
+
+  private async resolveWhatsAppCredentials(organizationId?: string): Promise<{ phoneNumberId?: string; accessToken?: string }> {
+    let accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    let phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (organizationId) {
+      try {
+        const profile = await this.profileRepo.findOne({ where: { organizationId } });
+        if (profile?.specialInstructions) {
+          const parsed = JSON.parse(profile.specialInstructions);
+          if (parsed?.whatsapp?.accessToken) {
+            accessToken = parsed.whatsapp.accessToken;
+          }
+          if (parsed?.whatsapp?.phoneNumberId) {
+            phoneNumberId = parsed.whatsapp.phoneNumberId;
+          }
+        }
+      } catch {
+        // Fallback a variables de entorno
+      }
+    }
+    return { phoneNumberId, accessToken };
+  }
 
   @Post('incoming-message')
   @HttpCode(HttpStatus.OK)
@@ -80,7 +112,10 @@ export class ConversationsController {
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
 
-    return this.conversationsService.handleIncomingMessage({
+    const metadata = changes?.value?.metadata;
+    const incomingPhoneNumberId = metadata?.phone_number_id;
+
+    const result = await this.conversationsService.handleIncomingMessage({
       channel: 'whatsapp',
       senderPhone,
       senderName,
@@ -88,6 +123,17 @@ export class ConversationsController {
       externalMessageId: message.id,
       organizationId
     });
+
+    if (result.replyMessage && !result.handoffToHuman) {
+      const creds = await this.resolveWhatsAppCredentials(organizationId);
+      const targetPhoneId = incomingPhoneNumberId || creds.phoneNumberId;
+      await this.integrationsService.sendWhatsAppMessage(senderPhone, result.replyMessage, {
+        phoneNumberId: targetPhoneId,
+        accessToken: creds.accessToken
+      });
+    }
+
+    return result;
   }
 
   // Verificación de Webhook oficial de WhatsApp Cloud API (Ruta global / fallback)
@@ -128,14 +174,27 @@ export class ConversationsController {
     const senderPhone = message.from;
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
+    const metadata = changes?.value?.metadata;
+    const incomingPhoneNumberId = metadata?.phone_number_id;
 
-    return this.conversationsService.handleIncomingMessage({
+    const result = await this.conversationsService.handleIncomingMessage({
       channel: 'whatsapp',
       senderPhone,
       senderName,
       messageText,
       externalMessageId: message.id
     });
+
+    if (result.replyMessage && !result.handoffToHuman) {
+      const creds = await this.resolveWhatsAppCredentials();
+      const targetPhoneId = incomingPhoneNumberId || creds.phoneNumberId;
+      await this.integrationsService.sendWhatsAppMessage(senderPhone, result.replyMessage, {
+        phoneNumberId: targetPhoneId,
+        accessToken: creds.accessToken
+      });
+    }
+
+    return result;
   }
 
   @Get()

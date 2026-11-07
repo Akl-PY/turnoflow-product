@@ -6,9 +6,13 @@ import { IntegrationStatus } from '@turnoflow/shared';
 export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
 
-  async sendWhatsAppMessage(to: string, messageText: string): Promise<{ success: boolean; messageId?: string }> {
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-    const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  async sendWhatsAppMessage(
+    to: string,
+    messageText: string,
+    credentials?: { phoneNumberId?: string; accessToken?: string }
+  ): Promise<{ success: boolean; messageId?: string }> {
+    const phoneNumberId = credentials?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = credentials?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
     const version = process.env.WHATSAPP_API_VERSION || 'v20.0';
 
     if (!phoneNumberId || !token) {
