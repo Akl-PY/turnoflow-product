@@ -1,0 +1,176 @@
+{
+  "name": "TurnoFlow AI - 04 Gestión y Confirmación de Reservas",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "turnoflow-booking-requested",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-booking",
+      "name": "Webhook Solicitud de Reserva",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "webhookId": "turnoflow-booking-requested"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/appointments/check-slot",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"serviceId\": \"{{ $json.body.serviceId }}\",\n  \"startTime\": \"{{ $json.body.startTime }}\"\n}",
+        "options": {}
+      },
+      "id": "node-verify-calendar",
+      "name": "Verificar Disponibilidad Real",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isAvailable }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-available",
+      "name": "¿Horario Disponible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/appointments/confirm-booking",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"customerName\": \"{{ $('Webhook Solicitud de Reserva').item.json.body.customerName }}\",\n  \"customerPhone\": \"{{ $('Webhook Solicitud de Reserva').item.json.body.customerPhone }}\",\n  \"serviceId\": \"{{ $('Webhook Solicitud de Reserva').item.json.body.serviceId }}\",\n  \"startTime\": \"{{ $('Webhook Solicitud de Reserva').item.json.body.startTime }}\"\n}",
+        "options": {}
+      },
+      "id": "node-confirm-backend",
+      "name": "Registrar en Base y Google Calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"appointmentId\": \"{{ $json.id }}\",\n  \"confirmedSlot\": \"{{ $json.startTime }}\",\n  \"message\": \"¡Turno confirmado con éxito! Registrado en Google Calendar.\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-reply-confirmed",
+      "name": "Responder Turno Confirmado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1140, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"message\": \"El horario solicitado ya no está disponible.\",\n  \"alternativeSlots\": {{ JSON.stringify($json.alternativeSlots || []) }}\n}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "node-reply-unavailable",
+      "name": "Responder Horario No Disponible",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 420]
+    }
+  ],
+  "connections": {
+    "Webhook Solicitud de Reserva": {
+      "main": [
+        [
+          {
+            "node": "Verificar Disponibilidad Real",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Disponibilidad Real": {
+      "main": [
+        [
+          {
+            "node": "¿Horario Disponible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Horario Disponible?": {
+      "main": [
+        [
+          {
+            "node": "Registrar en Base y Google Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Horario No Disponible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar en Base y Google Calendar": {
+      "main": [
+        [
+          {
+            "node": "Responder Turno Confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

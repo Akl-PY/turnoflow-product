@@ -1,0 +1,8 @@
+day_of_week,is_open,open_time,close_time,break_start,break_end,max_simultaneous_slots
+monday,true,09:00,19:00,13:00,14:00,2
+tuesday,true,09:00,19:00,13:00,14:00,2
+wednesday,true,09:00,19:00,13:00,14:00,2
+thursday,true,09:00,20:00,13:00,14:00,3
+friday,true,09:00,20:00,13:00,14:00,3
+saturday,true,09:00,18:00,none,none,2
+sunday,false,00:00,00:00,none,none,0

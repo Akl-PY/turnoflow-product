@@ -1,0 +1,40 @@
+{
+  "name": "@turnoflow/client",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "build:web": "expo export -p web",
+    "android": "expo start --android",
+    "ios": "expo start --ios"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~4.0.1",
+    "@expo/vector-icons": "^14.0.2",
+    "@tanstack/react-query": "^5.39.0",
+    "@turnoflow/shared": "file:../../packages/shared",
+    "axios": "^1.7.2",
+    "expo": "~52.0.0",
+    "expo-constants": "~17.0.3",
+    "expo-linking": "~7.0.3",
+    "expo-router": "~4.0.9",
+    "expo-status-bar": "~2.0.0",
+    "lucide-react-native": "^0.383.0",
+    "query-string": "^10.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-hook-form": "^7.51.5",
+    "react-native": "0.76.2",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "~4.1.0",
+    "react-native-web": "~0.19.13",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@types/react": "~18.3.12",
+    "typescript": "^5.3.3"
+  },
+  "private": true
+}

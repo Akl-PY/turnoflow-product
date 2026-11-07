@@ -1,0 +1,151 @@
+{
+  "name": "TurnoFlow AI - 03 Seguimiento Inteligente de Interesados",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-followup",
+      "name": "Cron Cada 4 Horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/leads/pending-followups",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-fetch-pending-leads",
+      "name": "Obtener Leads Pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Iterar sobre leads que requieren seguimiento y respetar horario comercial\nconst currentHour = new Date().getHours();\n// No molestar de noche ni madrugada (respetar entre 10:00 y 20:00)\nif (currentHour < 10 || currentHour >= 20) {\n  return [];\n}\n\nconst items = $input.first().json;\nif (!Array.isArray(items) || items.length === 0) {\n  return [];\n}\n\nreturn items.map(lead => ({\n  json: {\n    leadId: lead.id,\n    name: lead.name,\n    phone: lead.phone,\n    service: lead.requestedService || 'nuestros tratamientos',\n    lastInteraction: lead.lastInteractionAt,\n    followUpMessage: `Hola ${lead.name}! 😊 Te escribo de TurnoFlow Estética para consultar si te quedó alguna duda sobre el turno para ${lead.requestedService || 'nuestros tratamientos'} o si deseas que te reservemos un horario esta semana.`\n  }\n}));"
+      },
+      "id": "node-filter-and-prepare",
+      "name": "Filtrar Horario y Preparar Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/integrations/whatsapp/send-message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"to\": \"{{ $json.phone }}\",\n  \"message\": \"{{ $json.followUpMessage }}\",\n  \"leadId\": \"{{ $json.leadId }}\"\n}",
+        "options": {}
+      },
+      "id": "node-send-followup-wa",
+      "name": "Enviar Seguimiento WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/leads/{{ $json.leadId }}/mark-contacted",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-update-lead-status",
+      "name": "Actualizar Estado Lead en CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1140, 300]
+    }
+  ],
+  "connections": {
+    "Cron Cada 4 Horas": {
+      "main": [
+        [
+          {
+            "node": "Obtener Leads Pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener Leads Pendientes": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Horario y Preparar Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Horario y Preparar Mensaje": {
+      "main": [
+        [
+          {
+            "node": "Enviar Seguimiento WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Seguimiento WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado Lead en CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

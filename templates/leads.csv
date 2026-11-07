@@ -1,0 +1,7 @@
+name,phone,email,requested_service,status,intent,priority,source,notes
+Camila Gómez,+5491144556677,camila.g@example.com,Limpieza Facial Profunda,NEW,HIGH,HOT,whatsapp,Preguntó disponibilidad para este jueves por la tarde
+Mariana Rossi,+5491122334455,mariana.r@example.com,Lifting de Pestañas + Tinte,CONTACTED,MEDIUM,WARM,whatsapp,Consulta si incluye tinte de pestañas
+Lucía Fernández,+5491188990011,lucia.f@example.com,Manicura Rusa,BOOKED,HIGH,HOT,whatsapp,Turno agendado y confirmado en Google Calendar
+Sofía Martínez,+5491155667788,sofia.m@example.com,Depilación Láser Definitiva,INTERESTED,MEDIUM,WARM,whatsapp,Preguntó por contraindicaciones en piel sensible
+Valentina López,+5491166778899,valentina.l@example.com,Dermapen con Ácido Hialurónico,PENDING,HIGH,HOT,whatsapp,Esperando confirmación de seña bancaria
+Paula Benítez,+5491199001122,paula.b@example.com,Perfilado y Laminado de Cejas,LOST,LOW,COLD,whatsapp,No respondió luego de enviar tarifas

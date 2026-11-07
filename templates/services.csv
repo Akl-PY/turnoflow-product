@@ -1,0 +1,9 @@
+id,name,category,description,price,currency,durationMinutes,isActive
+srv-001,Limpieza Facial Profunda,Facial,Higiene con punta de diamante extracción e hidratación profunda,45,USD,60,true
+srv-002,Lifting de Pestañas + Tinte,Mirada,Curvatura natural de pestañas con keratina y tinte negro,35,USD,50,true
+srv-003,Perfilado y Laminado de Cejas,Mirada,Diseño según morfología facial fijación y nutrición botox,30,USD,45,true
+srv-004,Manicura Rusa con Esmaltado Semipermanente,Uñas,Tratamiento de cutículas torno y esmaltado premium larga duración,28,USD,60,true
+srv-005,Pedicura Spa Completa,Uñas,Exfoliación hidratación profunda masaje y esmaltado,38,USD,75,true
+srv-006,Depilación Láser Definitiva Diodo - Zona Completa,Depilación,Sesión piernas completas axilas y cavado sistema indoloro,85,USD,45,true
+srv-007,Masaje Descontracturante con Piedras Calientes,Corporal,Alivio de tensiones musculares en espalda cuello y hombros,50,USD,60,true
+srv-008,Dermapen con Ácido Hialurónico,Facial,Microneedling regenerativo para luminosidad y líneas de expresión,65,USD,60,true

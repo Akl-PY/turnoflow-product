@@ -1,0 +1,474 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { BusinessProfile } from '../../entities/business-profile.entity';
+import { Lead } from '../../entities/lead.entity';
+import { Appointment } from '../../entities/appointment.entity';
+import { Conversation } from '../../entities/conversation.entity';
+import { AgentConfigEntity } from '../../entities/agent-config.entity';
+import { AnthropicProvider } from './providers/anthropic.provider';
+import { OpenAiProvider } from './providers/openai.provider';
+import { GeminiProvider } from './providers/gemini.provider';
+import { MockAiProvider } from './providers/mock.provider';
+import { ReceptionistAgent } from './agents/receptionist.agent';
+import { LeadClassifierAgent, LeadClassifierOutput } from './agents/lead-classifier.agent';
+import { FollowUpAgent, FollowUpEvaluation } from './agents/follow-up.agent';
+import { BookingAgent } from './agents/booking.agent';
+import { SupervisorAgent } from './agents/supervisor.agent';
+import {
+  AiProviderInterface,
+  ChatMessage,
+  ToolCall
+} from './interfaces/ai-provider.interface';
+import {
+  AgentRoleType,
+  AIProviderType,
+  ConversationStatus,
+  LeadStatus,
+  LeadIntent,
+  LeadPriority,
+  AppointmentStatus,
+  ToolExecutionRecord
+} from '@turnoflow/shared';
+
+@Injectable()
+export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
+  constructor(
+    @InjectRepository(BusinessProfile)
+    private readonly businessProfileRepo: Repository<BusinessProfile>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(Appointment)
+    private readonly appointmentRepo: Repository<Appointment>,
+    @InjectRepository(Conversation)
+    private readonly conversationRepo: Repository<Conversation>,
+    @InjectRepository(AgentConfigEntity)
+    private readonly agentConfigRepo: Repository<AgentConfigEntity>,
+    private readonly anthropicProvider: AnthropicProvider,
+    private readonly openAiProvider: OpenAiProvider,
+    private readonly geminiProvider: GeminiProvider,
+    private readonly mockAiProvider: MockAiProvider,
+    private readonly receptionistAgent: ReceptionistAgent,
+    private readonly leadClassifierAgent: LeadClassifierAgent,
+    private readonly followUpAgent: FollowUpAgent,
+    private readonly bookingAgent: BookingAgent,
+    private readonly supervisorAgent: SupervisorAgent
+  ) {}
+
+  getProvider(providerType?: AIProviderType | string): AiProviderInterface {
+    const configured = providerType || process.env.AI_PROVIDER || 'anthropic';
+    if (configured === 'openai') {
+      if (!process.env.OPENAI_API_KEY) {
+        this.logger.warn('OPENAI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+        return this.mockAiProvider;
+      }
+      return this.openAiProvider;
+    }
+    if (configured === 'gemini') {
+      if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+        this.logger.warn('GEMINI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+        return this.mockAiProvider;
+      }
+      return this.geminiProvider;
+    }
+    if (configured === 'mock') {
+      return this.mockAiProvider;
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+      this.logger.warn('ANTHROPIC_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+      return this.mockAiProvider;
+    }
+    return this.anthropicProvider;
+  }
+
+  async getDefaultProfile(): Promise<BusinessProfile | null> {
+    return this.businessProfileRepo.findOne({ where: {} });
+  }
+
+  async processIncomingMessage(params: {
+    organizationId: string;
+    conversationId: string;
+    userText: string;
+    overrideProvider?: AIProviderType;
+    overrideModel?: string;
+  }): Promise<{
+    replyText: string;
+    toolExecutions: ToolExecutionRecord[];
+    handoffToHuman: boolean;
+    handoffReason?: string;
+  }> {
+    const { organizationId, conversationId, userText, overrideProvider, overrideModel } = params;
+
+    // 1. Sanitización con Supervisor
+    const securityCheck = this.supervisorAgent.sanitizeInput(userText);
+    if (!securityCheck.isSafe) {
+      return {
+        replyText: 'Lo siento, no puedo procesar ese tipo de instrucciones. ¿En qué servicio o tratamiento te gustaría que te oriente?',
+        toolExecutions: [],
+        handoffToHuman: false
+      };
+    }
+
+    // 2. Obtener perfil de negocio
+    let profile = await this.businessProfileRepo.findOne({ where: { organizationId } });
+    if (!profile) {
+      profile = await this.businessProfileRepo.findOne({ where: {} });
+      if (!profile) {
+        profile = await this.createDefaultProfile(organizationId);
+      }
+    }
+
+    // 3. Determinar rol activo
+    const activeRole = this.supervisorAgent.determineActiveRole(userText);
+    const provider = this.getProvider(overrideProvider);
+
+    // 4. Preparar contexto y herramientas según el rol
+    const tools =
+      activeRole === AgentRoleType.BOOKING
+        ? this.bookingAgent.getToolDefinitions()
+        : this.receptionistAgent.getToolDefinitions();
+
+    const systemPrompt = `Eres el Agente Inteligente de ${profile.businessName}.
+Rubro: ${profile.vertical}.
+Ubicación: ${profile.location}.
+Zona Horaria: ${profile.timezone}.
+Moneda: ${profile.currency}.
+Política de Cancelación: ${profile.cancellationPolicy}.
+Instrucciones Especiales: ${profile.specialInstructions || 'Ninguna'}.
+
+REGLAS ESTRICTAS:
+- Responde con calidez y concisión en español latinoamericano.
+- No inventes tarifas ni servicios no registrados.
+- No brindes diagnósticos médicos ni prescribas tratamientos.
+- Para verificar disponibilidad o confirmar citas utiliza SIEMPRE las herramientas disponibles.`;
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userText }
+    ];
+
+    const toolExecutions: ToolExecutionRecord[] = [];
+    let handoffToHuman = false;
+    let handoffReason: string | undefined;
+    let iterations = 0;
+    const maxIterations = 5;
+
+    while (iterations < maxIterations) {
+      iterations++;
+      const response = await provider.chatCompletion(messages, {
+        model: overrideModel,
+        tools,
+        temperature: 0.2,
+        maxTokens: 1000
+      });
+
+      if (!response.toolCalls || response.toolCalls.length === 0) {
+        // Verificación de grounding de salida
+        const knownPrices = (profile.services || []).map((s) => s.price);
+        const grounding = this.supervisorAgent.verifyGrounding(response.content, knownPrices);
+        if (!grounding.isGrounded) {
+          this.logger.warn(`Grounding violation: ${grounding.violation}`);
+        }
+
+        return {
+          replyText: response.content || '¿En qué más te puedo colaborar hoy?',
+          toolExecutions,
+          handoffToHuman,
+          handoffReason
+        };
+      }
+
+      // Procesar Tool Calls
+      messages.push({
+        role: 'assistant',
+        content: response.content,
+        toolCalls: response.toolCalls
+      });
+
+      for (const tc of response.toolCalls) {
+        const result = await this.executeTool(organizationId, tc, profile);
+        toolExecutions.push({
+          toolName: tc.name,
+          arguments: tc.arguments,
+          result: result.data,
+          success: result.success,
+          timestamp: new Date().toISOString()
+        });
+
+        if (tc.name === 'handoff_to_human') {
+          handoffToHuman = true;
+          handoffReason = (tc.arguments.reason as string) || 'Solicitud de operador o caso especial';
+          await this.conversationRepo.update(conversationId, {
+            status: ConversationStatus.HUMAN_TAKEOVER
+          });
+        }
+
+        messages.push({
+          role: 'tool',
+          name: tc.name,
+          toolCallId: tc.id,
+          content: JSON.stringify(result.data)
+        });
+      }
+    }
+
+    return {
+      replyText: 'He tomado nota de tu consulta. ¿Deseas que te reservemos un horario para esta semana?',
+      toolExecutions,
+      handoffToHuman,
+      handoffReason
+    };
+  }
+
+  private async executeTool(
+    organizationId: string,
+    toolCall: ToolCall,
+    profile: BusinessProfile
+  ): Promise<{ success: boolean; data: any }> {
+    const { name, arguments: args } = toolCall;
+
+    switch (name) {
+      case 'get_services': {
+        const category = args.category as string;
+        let list = profile.services || [];
+        if (category) {
+          list = list.filter((s) => s.category.toLowerCase() === category.toLowerCase());
+        }
+        return { success: true, data: list };
+      }
+
+      case 'get_service_price': {
+        const query = ((args.serviceName as string) || '').toLowerCase();
+        const found = (profile.services || []).find((s) =>
+          s.name.toLowerCase().includes(query)
+        );
+        if (found) {
+          return {
+            success: true,
+            data: {
+              name: found.name,
+              price: found.price,
+              currency: found.currency,
+              durationMinutes: found.durationMinutes,
+              description: found.description
+            }
+          };
+        }
+        return { success: false, data: { error: `Servicio "${args.serviceName}" no encontrado en el catálogo.` } };
+      }
+
+      case 'get_business_hours': {
+        return { success: true, data: profile.businessHours || [] };
+      }
+
+      case 'get_business_location': {
+        return {
+          success: true,
+          data: {
+            location: profile.location,
+            mapsUrl: `https://maps.google.com/?q=${encodeURIComponent(profile.location)}`
+          }
+        };
+      }
+
+      case 'search_knowledge_base': {
+        const q = ((args.query as string) || '').toLowerCase();
+        const faqs = (profile.faqs || []).filter(
+          (f) => f.question.toLowerCase().includes(q) || f.answer.toLowerCase().includes(q)
+        );
+        return {
+          success: true,
+          data: {
+            faqs,
+            cancellationPolicy: profile.cancellationPolicy,
+            generalInfo: profile.description
+          }
+        };
+      }
+
+      case 'create_lead': {
+        const lead = this.leadRepo.create({
+          organizationId,
+          name: (args.name as string) || 'Cliente',
+          phone: (args.phone as string) || '',
+          requestedService: args.service as string,
+          notes: args.notes as string,
+          status: LeadStatus.NEW,
+          intent: LeadIntent.HIGH,
+          priority: LeadPriority.HOT,
+          source: 'whatsapp'
+        });
+        const saved = await this.leadRepo.save(lead);
+        return { success: true, data: { leadId: saved.id, status: 'saved' } };
+      }
+
+      case 'check_availability':
+      case 'check_available_slots': {
+        const date = (args.date as string) || new Date().toISOString().split('T')[0];
+        const slots = await this.calculateAvailableSlots(organizationId, date);
+        return {
+          success: true,
+          data: {
+            date,
+            isAvailable: slots.length > 0,
+            availableSlots: slots
+          }
+        };
+      }
+
+      case 'confirm_appointment': {
+        const startTime = new Date(args.startTime as string);
+        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hora estándar
+
+        const appointment = this.appointmentRepo.create({
+          organizationId,
+          customerName: args.customerName as string,
+          customerPhone: args.customerPhone as string,
+          serviceId: (args.serviceId as string) || 'srv-default',
+          serviceName: (args.serviceId as string) || 'Tratamiento Estético',
+          startTime,
+          endTime,
+          status: AppointmentStatus.CONFIRMED,
+          notes: args.notes as string
+        });
+        const saved = await this.appointmentRepo.save(appointment);
+        return {
+          success: true,
+          data: {
+            appointmentId: saved.id,
+            status: 'CONFIRMED',
+            startTime: saved.startTime.toISOString(),
+            serviceName: saved.serviceName
+          }
+        };
+      }
+
+      case 'handoff_to_human': {
+        return {
+          success: true,
+          data: {
+            handoffTriggered: true,
+            reason: args.reason
+          }
+        };
+      }
+
+      default:
+        return { success: false, data: { error: `Herramienta desconocida: ${name}` } };
+    }
+  }
+
+  async classifyLead(userText: string, providerType?: AIProviderType): Promise<LeadClassifierOutput> {
+    const provider = this.getProvider(providerType);
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.leadClassifierAgent.getSystemPrompt() },
+      { role: 'user', content: userText }
+    ];
+
+    const response = await provider.chatCompletion(messages, {
+      temperature: 0.1,
+      maxTokens: 500
+    });
+
+    return this.leadClassifierAgent.parseResult(response.content);
+  }
+
+  async evaluateFollowUp(leadContext: string, providerType?: AIProviderType): Promise<FollowUpEvaluation> {
+    const provider = this.getProvider(providerType);
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.followUpAgent.getSystemPrompt() },
+      { role: 'user', content: leadContext }
+    ];
+
+    const response = await provider.chatCompletion(messages, {
+      temperature: 0.2,
+      maxTokens: 500
+    });
+
+    return this.followUpAgent.parseResult(response.content);
+  }
+
+  private async calculateAvailableSlots(organizationId: string, dateStr: string): Promise<string[]> {
+    // Franjas de ejemplo entre 09:00 y 18:00
+    const candidateSlots = ['10:00', '11:30', '14:00', '15:30', '17:00'];
+    const existing = await this.appointmentRepo.find({
+      where: { organizationId, status: AppointmentStatus.CONFIRMED }
+    });
+
+    const bookedHours = existing.map((a) => {
+      const d = new Date(a.startTime);
+      return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    });
+
+    return candidateSlots.filter((slot) => !bookedHours.includes(slot));
+  }
+
+  private async createDefaultProfile(organizationId: string): Promise<BusinessProfile> {
+    const profile = this.businessProfileRepo.create({
+      organizationId,
+      businessName: 'TurnoFlow Beauty Studio',
+      description: 'Centro de estética integral y cuidado personal',
+      location: 'Av. Santa Fe 2450, Piso 3, Recoleta, Buenos Aires',
+      contactPhone: '+5491133445566',
+      contactEmail: 'contacto@turnoflowstudio.com',
+      currency: 'USD',
+      cancellationPolicy: 'Cancelaciones con al menos 24 horas de antelación sin cargo.',
+      services: [
+        {
+          id: 'srv-001',
+          name: 'Limpieza Facial Profunda',
+          category: 'Facial',
+          description: 'Higiene con punta de diamante extracción e hidratación profunda',
+          price: 45,
+          currency: 'USD',
+          durationMinutes: 60,
+          isActive: true
+        },
+        {
+          id: 'srv-002',
+          name: 'Lifting de Pestañas + Tinte',
+          category: 'Mirada',
+          description: 'Curvatura natural con keratina y tinte negro',
+          price: 35,
+          currency: 'USD',
+          durationMinutes: 50,
+          isActive: true
+        },
+        {
+          id: 'srv-004',
+          name: 'Manicura Rusa',
+          category: 'Uñas',
+          description: 'Tratamiento de cutículas torno y esmaltado premium',
+          price: 28,
+          currency: 'USD',
+          durationMinutes: 60,
+          isActive: true
+        }
+      ],
+      businessHours: [
+        { day: 'monday', open: '09:00', close: '19:00', isOpen: true },
+        { day: 'tuesday', open: '09:00', close: '19:00', isOpen: true },
+        { day: 'wednesday', open: '09:00', close: '19:00', isOpen: true },
+        { day: 'thursday', open: '09:00', close: '20:00', isOpen: true },
+        { day: 'friday', open: '09:00', close: '20:00', isOpen: true },
+        { day: 'saturday', open: '09:00', close: '18:00', isOpen: true },
+        { day: 'sunday', open: '00:00', close: '00:00', isOpen: false }
+      ],
+      faqs: [
+        {
+          id: 'faq-001',
+          question: '¿Qué medios de pago aceptan?',
+          answer: 'Efectivo, tarjetas de débito/crédito y transferencias bancarias.'
+        },
+        {
+          id: 'faq-002',
+          question: '¿Tienen estacionamiento?',
+          answer: 'Sí, contamos con convenio con el estacionamiento de Santa Fe 2480 a 30 metros.'
+        }
+      ]
+    });
+    return this.businessProfileRepo.save(profile);
+  }
+}

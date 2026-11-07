@@ -1,0 +1,127 @@
+{
+  "name": "TurnoFlow AI - 05 Transferencia a Atención Humana",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "turnoflow-human-handoff",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-handoff",
+      "name": "Webhook Handoff Humano",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "webhookId": "turnoflow-human-handoff"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/conversations/{{ $json.body.conversationId }}/pause-ai",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"HUMAN_TAKEOVER\",\n  \"reason\": \"{{ $json.body.reason || 'Solicitud de cliente o consulta fuera de políticas' }}\"\n}",
+        "options": {}
+      },
+      "id": "node-pause-ai",
+      "name": "Pausar IA en Conversación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/integrations/whatsapp/send-notification",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"to\": \"{{ $env.ADMIN_ALERT_PHONE || $json.body.adminPhone }}\",\n  \"message\": \"⚠️ *ATENCIÓN REQUERIDA: Handoff Humano*\\n\\n👤 *Cliente:* {{ $json.body.customerName || 'Cliente' }}\\n📱 *Teléfono:* {{ $json.body.customerPhone }}\\n❓ *Motivo:* {{ $json.body.reason }}\\n💬 *Último Mensaje:* {{ $json.body.lastMessage }}\\n\\n👉 *Por favor responda directamente en WhatsApp o desde el Panel de TurnoFlow.*\"\n}",
+        "options": {}
+      },
+      "id": "node-notify-operator",
+      "name": "Notificar a Operador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"handoff_activated\",\"message\":\"Conversación transferida a operador humano\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-response-handoff-ok",
+      "name": "Confirmar Handoff",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [940, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Handoff Humano": {
+      "main": [
+        [
+          {
+            "node": "Pausar IA en Conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pausar IA en Conversación": {
+      "main": [
+        [
+          {
+            "node": "Notificar a Operador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar a Operador": {
+      "main": [
+        [
+          {
+            "node": "Confirmar Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

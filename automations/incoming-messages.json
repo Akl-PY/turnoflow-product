@@ -1,0 +1,209 @@
+{
+  "name": "TurnoFlow AI - 01 Recepción de Mensajes WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "turnoflow-incoming-whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-in",
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "webhookId": "turnoflow-incoming-whatsapp"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraer y normalizar payload del webhook oficial de WhatsApp Cloud API\nconst body = $input.first().json.body || $input.first().json;\n\n// Responder inmediatamente a Meta para cumplir SLA < 3s\nif (body['hub.mode'] === 'subscribe') {\n  return [{\n    json: {\n      isVerification: true,\n      challenge: body['hub.challenge'],\n      verifyToken: body['hub.verify_token']\n    }\n  }];\n}\n\nconst entry = body.entry?.[0];\nconst changes = entry?.changes?.[0];\nconst value = changes?.value;\nconst message = value?.messages?.[0];\nconst contact = value?.contacts?.[0];\n\nif (!message) {\n  return [{ json: { isIgnored: true, reason: 'No message in payload (e.g. status delivery event)' } }];\n}\n\nreturn [{\n  json: {\n    isVerification: false,\n    messageId: message.id,\n    senderPhone: message.from,\n    senderName: contact?.profile?.name || 'Cliente',\n    timestamp: message.timestamp,\n    messageType: message.type,\n    textBody: message.type === 'text' ? message.text.body : '[Mensaje multimedia o interactivo]',\n    rawPayload: body\n  }\n}];"
+      },
+      "id": "node-parse-whatsapp",
+      "name": "Normalizar Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isVerification }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-verification",
+      "name": "¿Es Verificación Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-respond-challenge",
+      "name": "Retornar Hub Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isIgnored }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-ignored",
+      "name": "¿Ignorar Evento?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"ignored_status_update\"}",
+        "options": {}
+      },
+      "id": "node-ack-ignored",
+      "name": "ACK Evento Estado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/conversations/incoming-message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"whatsapp\",\n  \"externalMessageId\": \"{{ $json.messageId }}\",\n  \"senderPhone\": \"{{ $json.senderPhone }}\",\n  \"senderName\": \"{{ $json.senderName }}\",\n  \"messageText\": \"{{ $json.textBody }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "node-forward-backend",
+      "name": "Enviar a TurnoFlow AI Engine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"processed\",\n  \"reply\": {{ JSON.stringify($json.replyMessage || null) }},\n  \"handoff\": {{ $json.handoffToHuman ? true : false }}\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-respond-ok",
+      "name": "Responder 200 OK a Meta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1360, 500]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Mensaje": {
+      "main": [
+        [
+          {
+            "node": "¿Es Verificación Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es Verificación Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Retornar Hub Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Ignorar Evento?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Ignorar Evento?": {
+      "main": [
+        [
+          {
+            "node": "ACK Evento Estado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar a TurnoFlow AI Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar a TurnoFlow AI Engine": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK a Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "name": "TurnoFlow AI - 02 Captura y Clasificación de Leads",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "turnoflow-lead-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-lead",
+      "name": "Webhook Evento Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "webhookId": "turnoflow-lead-event"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.priority }}",
+              "value2": "HOT"
+            }
+          ]
+        }
+      },
+      "id": "node-if-hot-lead",
+      "name": "¿Lead de Alta Prioridad?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/integrations/google-sheets/append-lead",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $json.body.name }}\",\n  \"phone\": \"{{ $json.body.phone }}\",\n  \"service\": \"{{ $json.body.requestedService || 'No especificado' }}\",\n  \"intent\": \"{{ $json.body.intent }}\",\n  \"priority\": \"{{ $json.body.priority }}\",\n  \"source\": \"{{ $json.body.source }}\",\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "node-sync-sheets",
+      "name": "Sincronizar a Google Sheets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TURNOFLOW_API_URL || 'http://localhost:3000' }}/api/integrations/whatsapp/send-notification",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-TurnoFlow-API-Key",
+              "value": "={{ $env.TURNOFLOW_API_KEY || 'default-secret-key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"to\": \"{{ $env.ADMIN_ALERT_PHONE || $json.body.adminPhone }}\",\n  \"message\": \"🚨 *Nuevo Lead de Alta Intención (HOT)*\\n\\n👤 *Cliente:* {{ $json.body.name }}\\n📱 *Teléfono:* {{ $json.body.phone }}\\n💅 *Servicio:* {{ $json.body.requestedService }}\\n🎯 *Intención:* {{ $json.body.intent }}\\n💡 *Resumen:* {{ $json.body.summary }}\"\n}",
+        "options": {}
+      },
+      "id": "node-notify-admin-hot",
+      "name": "Alerta WhatsApp a Dueño/Admin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"success\",\"message\":\"Lead procesado y sincronizado correctamente\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-response-lead-ok",
+      "name": "Responder 200 Lead OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Evento Lead": {
+      "main": [
+        [
+          {
+            "node": "¿Lead de Alta Prioridad?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Lead de Alta Prioridad?": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar a Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sincronizar a Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sincronizar a Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Alerta WhatsApp a Dueño/Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alerta WhatsApp a Dueño/Admin": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 Lead OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

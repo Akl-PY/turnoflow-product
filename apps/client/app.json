@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "TurnoFlow AI",
+    "slug": "turnoflow-ai",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "scheme": "turnoflow",
+    "splash": {
+      "backgroundColor": "#09090b"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}

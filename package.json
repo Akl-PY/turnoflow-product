@@ -1,0 +1,21 @@
+{
+  "name": "turnoflow-ai-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace=@turnoflow/shared",
+    "build:api": "npm run build --workspace=@turnoflow/api",
+    "build:all": "npm run build:shared && npm run build:api",
+    "start:api": "npm run start:dev --workspace=@turnoflow/api",
+    "start:client": "npm run web --workspace=@turnoflow/client",
+    "test": "npm run test --workspace=@turnoflow/api",
+    "export:dist": "node scripts/export-dist.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

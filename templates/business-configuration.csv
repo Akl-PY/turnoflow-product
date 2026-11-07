@@ -1,0 +1,13 @@
+key,value,description
+business_name,TurnoFlow Beauty Studio,Nombre comercial visible para clientes
+vertical,BEAUTY_SALON,Rubro o categoría de negocio
+location,"Av. Santa Fe 2450, Piso 3, Recoleta, Buenos Aires",Dirección física del establecimiento
+google_maps_link,https://maps.google.com/?q=TurnoFlow+Studio,Enlace directo para compartir en chat
+timezone,America/Argentina/Buenos_Aires,Zona horaria de referencia para citas y calendario
+currency,USD,Símbolo de moneda oficial
+contact_phone,+5491133445566,Línea WhatsApp oficial
+contact_email,contacto@turnoflowstudio.com,Email para notificaciones y escalados
+cancellation_policy,"Cancelaciones o reprogramaciones con al menos 24 horas de antelación sin cargo. Dentro de las 24hs se retiene la seña.",Política de cancelaciones informada por los agentes
+slot_interval_minutes,15,Intervalo mínimo entre franjas horarias
+buffer_between_appointments_minutes,10,Tiempo de desinfección y preparación de cabina entre citas
+max_advance_booking_days,30,Límite máximo de días hacia adelante para agendar

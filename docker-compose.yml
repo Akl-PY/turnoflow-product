@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: turnoflow-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: turnoflow
+      POSTGRES_PASSWORD: turnoflow_secret_password
+      POSTGRES_DB: turnoflow_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U turnoflow -d turnoflow_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turnoflow-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgres://turnoflow:turnoflow_secret_password@postgres:5432/turnoflow_db
+      - JWT_SECRET=change_me_to_a_secure_32_characters_random_string_now
+      - TURNOFLOW_API_KEY=n8n_secret_communication_token_12345
+      - AI_PROVIDER=anthropic
+      - AI_MODEL=claude-3-5-sonnet-20241022
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}
+      - WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET}
+    volumes:
+      - ./dist:/app/dist
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: turnoflow-n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Argentina/Buenos_Aires
+      - TURNOFLOW_API_URL=http://api:3000
+      - TURNOFLOW_API_KEY=n8n_secret_communication_token_12345
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  pgdata:
+  n8n_data:
