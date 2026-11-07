@@ -10,7 +10,7 @@ function resolveApiUrl(): string {
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
   ) {
-    return 'https://backend-production-c7cf.up.railway.app/api';
+    return 'https://turnoflowapi-production.up.railway.app/api';
   }
   return 'http://localhost:3000/api';
 }
