@@ -271,10 +271,10 @@ export const DEMO_AUTOMATIONS = [
     type: 'incoming-messages',
     isActive: true,
     status: 'healthy',
-    totalRuns: 142,
-    successRuns: 141,
-    failedRuns: 1,
-    lastRunAt: 'Hace 5 min'
+    totalRuns: 0,
+    successRuns: 0,
+    failedRuns: 0,
+    lastRunAt: 'Sin ejecuciones aún'
   },
   {
     id: 'wf-2',
@@ -282,10 +282,10 @@ export const DEMO_AUTOMATIONS = [
     type: 'lead-management',
     isActive: true,
     status: 'healthy',
-    totalRuns: 89,
-    successRuns: 89,
+    totalRuns: 0,
+    successRuns: 0,
     failedRuns: 0,
-    lastRunAt: 'Hace 35 min'
+    lastRunAt: 'Sin ejecuciones aún'
   },
   {
     id: 'wf-3',
@@ -293,10 +293,10 @@ export const DEMO_AUTOMATIONS = [
     type: 'follow-up',
     isActive: true,
     status: 'healthy',
-    totalRuns: 34,
-    successRuns: 33,
-    failedRuns: 1,
-    lastRunAt: 'Hace 2 horas'
+    totalRuns: 0,
+    successRuns: 0,
+    failedRuns: 0,
+    lastRunAt: 'Sin ejecuciones aún'
   },
   {
     id: 'wf-4',
@@ -304,10 +304,10 @@ export const DEMO_AUTOMATIONS = [
     type: 'booking',
     isActive: true,
     status: 'healthy',
-    totalRuns: 56,
-    successRuns: 56,
+    totalRuns: 0,
+    successRuns: 0,
     failedRuns: 0,
-    lastRunAt: 'Hace 10 min'
+    lastRunAt: 'Sin ejecuciones aún'
   },
   {
     id: 'wf-5',
@@ -315,9 +315,9 @@ export const DEMO_AUTOMATIONS = [
     type: 'handoff',
     isActive: true,
     status: 'healthy',
-    totalRuns: 12,
-    successRuns: 12,
+    totalRuns: 0,
+    successRuns: 0,
     failedRuns: 0,
-    lastRunAt: 'Hace 3 horas'
+    lastRunAt: 'Sin ejecuciones aún'
   }
 ];

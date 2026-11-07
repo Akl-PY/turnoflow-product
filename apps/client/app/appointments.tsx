@@ -20,31 +20,6 @@ import {
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
-const DEMO_APPOINTMENTS = [
-  {
-    id: 'apt-1',
-    customerName: 'Lucía Fernández',
-    customerPhone: '+5491188990011',
-    serviceName: 'Manicura Rusa con Esmaltado Semipermanente',
-    date: 'Mañana',
-    time: '15:00 - 16:00 hs',
-    status: 'CONFIRMED',
-    calendarSynced: true,
-    notes: 'Cliente puntual, primera sesión'
-  },
-  {
-    id: 'apt-2',
-    customerName: 'Valentina López',
-    customerPhone: '+5491166778899',
-    serviceName: 'Lifting de Pestañas + Tinte',
-    date: 'Pasado mañana',
-    time: '11:00 - 11:50 hs',
-    status: 'CONFIRMED',
-    calendarSynced: true,
-    notes: 'Alérgica a tintes con amoníaco (verificado tinte vegetal)'
-  }
-];
-
 function formatAppointmentItem(raw: any) {
   if (raw.date && raw.time) return raw;
   const start = raw.startTime ? new Date(raw.startTime) : new Date();

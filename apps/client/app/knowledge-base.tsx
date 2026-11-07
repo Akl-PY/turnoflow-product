@@ -13,38 +13,16 @@ import {
   Clock,
   HelpCircle,
   ShieldCheck,
-  Check
+  Check,
+  Sparkles
 } from 'lucide-react-native';
-import { apiClient, DEMO_SERVICES } from '../src/lib/api';
+import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
-
-const DEMO_FAQS = [
-  {
-    id: 'faq-1',
-    question: '¿Cuáles son los medios de pago aceptados?',
-    answer: 'Aceptamos transferencias bancarias, Mercado Pago, efectivo y tarjetas Visa y Mastercard.'
-  },
-  {
-    id: 'faq-2',
-    question: '¿Tienen estacionamiento en la zona?',
-    answer: 'Contamos con 50% de descuento en el estacionamiento ubicado en Santa Fe 2480 a 30 metros.'
-  },
-  {
-    id: 'faq-3',
-    question: '¿Se requiere pago de seña para reservar?',
-    answer: 'Para confirmar tu primer turno solicitamos una seña del 30% del valor del servicio.'
-  },
-  {
-    id: 'faq-4',
-    question: '¿Qué tolerancia de demora tienen?',
-    answer: 'Contamos con una tolerancia máxima de 10 minutos para no afectar las citas posteriores.'
-  }
-];
 
 export default function KnowledgeBaseScreen() {
   const { user } = useAuth();
-  const [services, setServices] = useState<any[]>(DEMO_SERVICES);
-  const [faqs, setFaqs] = useState<any[]>(DEMO_FAQS);
+  const [services, setServices] = useState<any[]>([]);
+  const [faqs, setFaqs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'services' | 'faqs'>('services');
 
   // Form para nuevo servicio
@@ -63,15 +41,16 @@ export default function KnowledgeBaseScreen() {
       try {
         const res = await apiClient.get('/business');
         if (res.data) {
-          if (Array.isArray(res.data.services) && res.data.services.length > 0) {
+          if (Array.isArray(res.data.services)) {
             setServices(res.data.services);
           }
-          if (Array.isArray(res.data.faqs) && res.data.faqs.length > 0) {
+          if (Array.isArray(res.data.faqs)) {
             setFaqs(res.data.faqs);
           }
         }
       } catch {
-        // Fallback a DEMO_SERVICES y DEMO_FAQS
+        setServices([]);
+        setFaqs([]);
       }
     };
     fetchBusiness();
@@ -202,34 +181,51 @@ export default function KnowledgeBaseScreen() {
               </View>
             )}
 
-            <View style={styles.servicesGrid}>
-              {services.map((srv) => (
-                <View key={srv.id} style={styles.serviceCard}>
-                  <View style={styles.serviceHeader}>
-                    <View style={styles.categoryPill}>
-                      <Text style={styles.categoryText}>{srv.category}</Text>
+            {services.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Sparkles size={36} color="#6366f1" style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyTitle}>No hay tratamientos cargados aún</Text>
+                <Text style={styles.emptySub}>
+                  Agrega los servicios de tu salón para que la IA responda consultas de precios y disponibilidad con exactitud garantizada.
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyActionBtn}
+                  onPress={() => setShowAddModal(true)}
+                >
+                  <Plus size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.emptyActionBtnText}>Crear Primer Servicio</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.servicesGrid}>
+                {services.map((srv) => (
+                  <View key={srv.id} style={styles.serviceCard}>
+                    <View style={styles.serviceHeader}>
+                      <View style={styles.categoryPill}>
+                        <Text style={styles.categoryText}>{srv.category}</Text>
+                      </View>
+                      <Text style={styles.servicePrice}>
+                        ${srv.price} {srv.currency || 'USD'}
+                      </Text>
                     </View>
-                    <Text style={styles.servicePrice}>
-                      ${srv.price} {srv.currency || 'USD'}
-                    </Text>
-                  </View>
 
-                  <Text style={styles.serviceName}>{srv.name}</Text>
-                  <Text style={styles.serviceDesc}>{srv.description}</Text>
+                    <Text style={styles.serviceName}>{srv.name}</Text>
+                    <Text style={styles.serviceDesc}>{srv.description}</Text>
 
-                  <View style={styles.serviceFooter}>
-                    <View style={styles.durationRow}>
-                      <Clock size={12} color="#71717a" style={{ marginRight: 4 }} />
-                      <Text style={styles.durationText}>{srv.durationMinutes} min</Text>
-                    </View>
-                    <View style={styles.verifiedRow}>
-                      <ShieldCheck size={12} color="#4ade80" style={{ marginRight: 4 }} />
-                      <Text style={styles.verifiedText}>Grounding Verificado</Text>
+                    <View style={styles.serviceFooter}>
+                      <View style={styles.durationRow}>
+                        <Clock size={12} color="#71717a" style={{ marginRight: 4 }} />
+                        <Text style={styles.durationText}>{srv.durationMinutes} min</Text>
+                      </View>
+                      <View style={styles.verifiedRow}>
+                        <ShieldCheck size={12} color="#4ade80" style={{ marginRight: 4 }} />
+                        <Text style={styles.verifiedText}>Grounding Verificado</Text>
+                      </View>
                     </View>
                   </View>
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
+            )}
           </View>
         ) : (
           <View>
@@ -269,17 +265,34 @@ export default function KnowledgeBaseScreen() {
               </View>
             )}
 
-            <View style={styles.faqList}>
-              {faqs.map((faq) => (
-                <View key={faq.id} style={styles.faqCard}>
-                  <View style={styles.faqHeader}>
-                    <HelpCircle size={16} color="#a855f7" style={{ marginRight: 8 }} />
-                    <Text style={styles.faqQuestion}>{faq.question}</Text>
+            {faqs.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <HelpCircle size={36} color="#6366f1" style={{ marginBottom: 12 }} />
+                <Text style={styles.emptyTitle}>No hay preguntas frecuentes aún</Text>
+                <Text style={styles.emptySub}>
+                  Define respuestas automáticas sobre formas de pago, señas, estacionamiento y ubicación de tu centro.
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyActionBtn}
+                  onPress={() => setShowAddFaqModal(true)}
+                >
+                  <Plus size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.emptyActionBtnText}>Agregar Pregunta Frecuente</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.faqList}>
+                {faqs.map((faq) => (
+                  <View key={faq.id} style={styles.faqCard}>
+                    <View style={styles.faqHeader}>
+                      <HelpCircle size={16} color="#a855f7" style={{ marginRight: 8 }} />
+                      <Text style={styles.faqQuestion}>{faq.question}</Text>
+                    </View>
+                    <Text style={styles.faqAnswer}>{faq.answer}</Text>
                   </View>
-                  <Text style={styles.faqAnswer}>{faq.answer}</Text>
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -483,5 +496,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     paddingLeft: 24
+  },
+  emptyContainer: {
+    backgroundColor: '#0f0f12',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 12,
+    padding: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 12
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  emptySub: {
+    fontSize: 13,
+    color: '#a1a1aa',
+    textAlign: 'center',
+    maxWidth: 480,
+    lineHeight: 20,
+    marginBottom: 20
+  },
+  emptyActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  emptyActionBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600'
   }
 });
