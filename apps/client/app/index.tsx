@@ -175,6 +175,9 @@ export default function DashboardScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+              <Text style={styles.webhookNoteText}>
+                Clave de enlace para Meta. Podés usar esta por defecto o la que definas en Railway (WHATSAPP_VERIFY_TOKEN).
+              </Text>
             </View>
           </View>
 
@@ -614,6 +617,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     gap: 6
+  },
+  webhookNoteText: {
+    color: '#a1a1aa',
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 2
   },
   webhookLabel: {
     color: '#86efac',

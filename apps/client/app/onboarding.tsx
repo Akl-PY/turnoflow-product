@@ -296,6 +296,9 @@ export default function OnboardingScreen() {
                     )}
                   </TouchableOpacity>
                 </View>
+                <Text style={styles.hint}>
+                  ℹ️ ¿Por qué este token? Es la clave secreta que Meta exige para validar tu webhook. En el backend viene configurado por defecto como turnoflow_verify_token. Si definís en Railway la variable WHATSAPP_VERIFY_TOKEN con una clave propia, usá esa misma en Meta.
+                </Text>
               </View>
             </View>
 
