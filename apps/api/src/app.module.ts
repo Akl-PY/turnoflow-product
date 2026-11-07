@@ -32,8 +32,9 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { HealthController } from './modules/health/health.controller';
 
 const databaseUrl = process.env.DATABASE_URL;
-const isPostgres = !!databaseUrl && databaseUrl.startsWith('postgres');
-const isDev = process.env.NODE_ENV !== 'production';
+const isPostgres = !!databaseUrl && (databaseUrl.startsWith('postgres') || databaseUrl.startsWith('postgresql'));
+const isDev = process.env.NODE_ENV !== 'production' || process.env.DATABASE_SYNC === 'true';
+const useSsl = isPostgres && (databaseUrl?.includes('supabase') || process.env.DATABASE_SSL === 'true');
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ const isDev = process.env.NODE_ENV !== 'production';
         ? {
             type: 'postgres',
             url: databaseUrl,
+            ssl: useSsl ? { rejectUnauthorized: false } : false,
             entities: [
               User,
               Organization,

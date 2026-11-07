@@ -10,7 +10,8 @@ import {
   Message,
   AgentConfigEntity,
   AutomationEntity,
-  AuditLog
+  AuditLog,
+  Order
 } from './entities';
 import {
   UserRole,
@@ -24,13 +25,15 @@ import {
 } from '@turnoflow/shared';
 
 const databaseUrl = process.env.DATABASE_URL;
-const isPostgres = !!databaseUrl && databaseUrl.startsWith('postgres');
+const isPostgres = !!databaseUrl && (databaseUrl.startsWith('postgres') || databaseUrl.startsWith('postgresql'));
+const useSsl = isPostgres && (databaseUrl?.includes('supabase') || process.env.DATABASE_SSL === 'true');
 
 export const AppDataSource = new DataSource(
   isPostgres
     ? {
         type: 'postgres',
         url: databaseUrl,
+        ssl: useSsl ? { rejectUnauthorized: false } : false,
         entities: [
           User,
           Organization,
@@ -41,7 +44,8 @@ export const AppDataSource = new DataSource(
           Message,
           AgentConfigEntity,
           AutomationEntity,
-          AuditLog
+          AuditLog,
+          Order
         ],
         synchronize: true
       }
