@@ -12,7 +12,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { Sidebar } from '../src/components/Sidebar';
 import { AuthProvider, useAuth } from '../src/lib/auth';
-import LoginScreen from './login';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,6 +27,7 @@ function AuthenticatedShell() {
   const { width } = useWindowDimensions();
   const pathname = usePathname();
   const isDesktop = width >= 768;
+  const isLoginPage = pathname === '/login';
 
   if (isLoading) {
     return (
@@ -38,23 +38,17 @@ function AuthenticatedShell() {
     );
   }
 
-  if (!user) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.contentArea}>
-          <LoginScreen />
-        </View>
-      </View>
-    );
+  if (!user && !isLoginPage) {
+    return <Redirect href="/login" />;
   }
 
-  if (pathname === '/login') {
+  if (user && isLoginPage) {
     return <Redirect href="/" />;
   }
 
   return (
     <View style={styles.container}>
-      {isDesktop && <Sidebar />}
+      {user && isDesktop && !isLoginPage && <Sidebar />}
       <View style={styles.contentArea}>
         <Slot />
       </View>
