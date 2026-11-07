@@ -1,8 +1,24 @@
 import axios from 'axios';
 
 function resolveApiUrl(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+  const envUrl = (process.env.EXPO_PUBLIC_API_URL || '').trim();
+  // Ignorar variables de entorno obsoletas o que apunten al host anterior
+  if (
+    envUrl &&
+    !envUrl.includes('backend-production-c7cf') &&
+    !envUrl.includes('turnoflow-api.vercel.app')
+  ) {
+    if (
+      typeof window !== 'undefined' &&
+      window.location?.hostname &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1'
+    ) {
+      if (envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) {
+        return 'https://turnoflowapi-production.up.railway.app/api';
+      }
+    }
+    return envUrl.replace(/\/+$/, '');
   }
   if (
     typeof window !== 'undefined' &&
@@ -101,6 +117,18 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
+  if (config.baseURL?.includes('backend-production-c7cf')) {
+    config.baseURL = 'https://turnoflowapi-production.up.railway.app/api';
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.hostname &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1' &&
+    config.baseURL?.includes('localhost')
+  ) {
+    config.baseURL = 'https://turnoflowapi-production.up.railway.app/api';
+  }
   const token = getStoredToken();
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;

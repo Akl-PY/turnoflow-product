@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx expo export -p web",
+  "buildCommand": "EXPO_PUBLIC_API_URL=https://turnoflowapi-production.up.railway.app/api npx expo export -p web",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,

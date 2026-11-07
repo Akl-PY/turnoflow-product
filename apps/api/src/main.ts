@@ -28,11 +28,25 @@ async function bootstrap() {
   // Prefijo global de API
   app.setGlobalPrefix('api');
 
-  // Habilitar CORS para cliente Expo Web y Mobile
+  // Habilitar CORS con soporte completo de credenciales y orígenes dinámicos
   app.enableCors({
-    origin: '*',
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true
+    origin: (origin, callback) => {
+      // Reflejar origen entrante para cumplir con CORS RFC cuando credentials=true
+      callback(null, true);
+    },
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'X-Requested-With',
+      'Origin',
+      'Access-Control-Request-Method',
+      'Access-Control-Request-Headers'
+    ],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
   });
 
   // Validaciones globales de DTOs
