@@ -11,6 +11,7 @@ import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import axios from 'axios';
 import { Response } from 'express';
 import { Order, OrderStatus, PaymentGateway } from '../../entities/order.entity';
 import { AuthService } from '../auth/auth.service';
@@ -25,6 +26,8 @@ export interface CreateOrderDto {
   currency?: string;
   gateway?: PaymentGateway;
   gatewayOrderId?: string;
+  successUrl?: string;
+  cancelUrl?: string;
 }
 
 export function buildInMemoryZipBuffer(filename: string, content: string): Buffer {
@@ -181,7 +184,84 @@ export class OrdersService {
       }
     }
 
-    const redirectUrl = `/download?token=${downloadToken}`;
+    let redirectUrl = `/download?token=${downloadToken}`;
+
+    // Si el gateway es Stripe y hay STRIPE_SECRET_KEY configurada en el servidor:
+    if (gateway === 'stripe' && process.env.STRIPE_SECRET_KEY) {
+      try {
+        const stripeRes = await axios.post(
+          'https://api.stripe.com/v1/checkout/sessions',
+          new URLSearchParams({
+            'payment_method_types[0]': 'card',
+            'line_items[0][price_data][currency]': (dto.currency || 'usd').toLowerCase(),
+            'line_items[0][price_data][product_data][name]': 'Licencia TurnoFlow AI',
+            'line_items[0][price_data][unit_amount]': String(Math.round((dto.amount ?? 49) * 100)),
+            'line_items[0][quantity]': '1',
+            mode: 'payment',
+            customer_email: cleanEmail,
+            client_reference_id: saved.id,
+            success_url: `${dto.successUrl || 'https://turnoflow-landing.vercel.app/thank-you'}?token=${downloadToken}&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: dto.cancelUrl || 'https://turnoflow-landing.vercel.app/checkout'
+          }),
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 10000
+          }
+        );
+        if (stripeRes.data?.url) {
+          redirectUrl = stripeRes.data.url;
+          this.logger.log(`Sesión de Stripe Checkout generada: ${stripeRes.data.id}`);
+        }
+      } catch (err: any) {
+        this.logger.error(`Error generando Stripe Checkout: ${err.response?.data?.error?.message || err.message}`);
+      }
+    }
+
+    // Si el gateway es Mercado Pago y hay MERCADOPAGO_ACCESS_TOKEN configurado:
+    if (gateway === 'mercadopago' && process.env.MERCADOPAGO_ACCESS_TOKEN) {
+      try {
+        const mpRes = await axios.post(
+          'https://api.mercadopago.com/checkout/preferences',
+          {
+            items: [
+              {
+                id: saved.id,
+                title: 'Licencia TurnoFlow AI',
+                quantity: 1,
+                unit_price: Number(dto.amount ?? 49),
+                currency_id: dto.currency || 'USD'
+              }
+            ],
+            payer: {
+              name: cleanName,
+              email: cleanEmail
+            },
+            external_reference: saved.id,
+            back_urls: {
+              success: `${dto.successUrl || 'https://turnoflow-landing.vercel.app/thank-you'}?token=${downloadToken}`,
+              failure: dto.cancelUrl || 'https://turnoflow-landing.vercel.app/checkout'
+            },
+            auto_return: 'approved'
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 10000
+          }
+        );
+        if (mpRes.data?.init_point) {
+          redirectUrl = mpRes.data.init_point;
+          this.logger.log(`Preferencia de Mercado Pago generada: ${mpRes.data.id}`);
+        }
+      } catch (err: any) {
+        this.logger.error(`Error generando Mercado Pago: ${err.response?.data?.message || err.message}`);
+      }
+    }
 
     return {
       orderId: saved.id,
@@ -190,6 +270,7 @@ export class OrdersService {
       amount: saved.amount,
       currency: saved.currency,
       redirectUrl,
+      checkoutUrl: redirectUrl,
       saasCredentials
     };
   }
