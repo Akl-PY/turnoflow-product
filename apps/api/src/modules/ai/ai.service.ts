@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BusinessProfile } from '../../entities/business-profile.entity';
@@ -6,6 +6,7 @@ import { Lead } from '../../entities/lead.entity';
 import { Appointment } from '../../entities/appointment.entity';
 import { Conversation } from '../../entities/conversation.entity';
 import { AgentConfigEntity } from '../../entities/agent-config.entity';
+import { ScalinkyService } from '../integrations/scalinky.service';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 import { GeminiProvider } from './providers/gemini.provider';
@@ -54,7 +55,9 @@ export class AiService {
     private readonly leadClassifierAgent: LeadClassifierAgent,
     private readonly followUpAgent: FollowUpAgent,
     private readonly bookingAgent: BookingAgent,
-    private readonly supervisorAgent: SupervisorAgent
+    private readonly supervisorAgent: SupervisorAgent,
+    @Optional()
+    private readonly scalinkyService?: ScalinkyService
   ) {}
 
   getProvider(providerType?: AIProviderType | string): AiProviderInterface {
@@ -307,7 +310,30 @@ REGLAS ESTRICTAS:
       case 'check_availability':
       case 'check_available_slots': {
         const date = (args.date as string) || new Date().toISOString().split('T')[0];
-        const slots = await this.calculateAvailableSlots(organizationId, date);
+        let slots = await this.calculateAvailableSlots(organizationId, date);
+
+        if (this.scalinkyService) {
+          const slug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+          try {
+            const staffList = await this.scalinkyService.getStaff(slug);
+            const serviceList = await this.scalinkyService.getServices(slug);
+            if (staffList.length > 0 && serviceList.length > 0) {
+              const staffId = staffList[0].staff_id;
+              const serviceId = (args.serviceId as string) || serviceList[0].service_id;
+              const possibilities = await this.scalinkyService.getPossibilities(slug, staffId, serviceId);
+              const dayMatch = possibilities.find((p) => p.date === date);
+              if (dayMatch && dayMatch.items.length > 0) {
+                const scalinkySlots = dayMatch.items.flatMap((it) => it.slots);
+                if (scalinkySlots.length > 0) {
+                  slots = scalinkySlots;
+                }
+              }
+            }
+          } catch (e: any) {
+            this.logger.warn(`Scalinky availability check notice: ${e.message}`);
+          }
+        }
+
         return {
           success: true,
           data: {
@@ -321,6 +347,40 @@ REGLAS ESTRICTAS:
       case 'confirm_appointment': {
         const startTime = new Date(args.startTime as string);
         const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hora estándar
+
+        let scalinkyBooking: any = null;
+        if (this.scalinkyService) {
+          const slug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+          try {
+            const staffList = await this.scalinkyService.getStaff(slug);
+            const serviceList = await this.scalinkyService.getServices(slug);
+            if (staffList.length > 0 && serviceList.length > 0) {
+              const staffId = staffList[0].staff_id;
+              const serviceId = (args.serviceId as string) || serviceList[0].service_id;
+              const dateStr = startTime.toISOString().split('T')[0];
+              const possibilities = await this.scalinkyService.getPossibilities(slug, staffId, serviceId);
+              const dayMatch = possibilities.find((p) => p.date === dateStr);
+              const availId = dayMatch?.items[0]?.availability_id;
+
+              if (availId) {
+                const timeStr = `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`;
+                const endTimeStr = `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
+                scalinkyBooking = await this.scalinkyService.bookAppointment(slug, {
+                  service_id: serviceId,
+                  availability_id: availId,
+                  startAt: timeStr,
+                  endAt: endTimeStr,
+                  date: dateStr,
+                  customerName: args.customerName as string,
+                  customerPhone: args.customerPhone as string,
+                  status: 'booked'
+                });
+              }
+            }
+          } catch (e: any) {
+            this.logger.warn(`Scalinky appointment booking notice: ${e.message}`);
+          }
+        }
 
         const appointment = this.appointmentRepo.create({
           organizationId,
@@ -340,7 +400,8 @@ REGLAS ESTRICTAS:
             appointmentId: saved.id,
             status: 'CONFIRMED',
             startTime: saved.startTime.toISOString(),
-            serviceName: saved.serviceName
+            serviceName: saved.serviceName,
+            scalinky: scalinkyBooking
           }
         };
       }

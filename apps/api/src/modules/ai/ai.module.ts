@@ -5,6 +5,7 @@ import { Lead } from '../../entities/lead.entity';
 import { Appointment } from '../../entities/appointment.entity';
 import { Conversation } from '../../entities/conversation.entity';
 import { AgentConfigEntity } from '../../entities/agent-config.entity';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { AiService } from './ai.service';
 import { AiController } from './ai.controller';
 import { AnthropicProvider } from './providers/anthropic.provider';
@@ -19,6 +20,7 @@ import { SupervisorAgent } from './agents/supervisor.agent';
 
 @Module({
   imports: [
+    IntegrationsModule,
     TypeOrmModule.forFeature([
       BusinessProfile,
       Lead,
