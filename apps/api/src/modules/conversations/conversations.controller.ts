@@ -70,6 +70,66 @@ export class ConversationsController {
     return this.conversationsService.handleIncomingMessage(body);
   }
 
+  // ==========================================
+  // RECEPCIÓN DE MENSAJES DESDE QR (EVOLUTION API / BAILEYS)
+  // ==========================================
+  @Post('whatsapp-qr-webhook/:organizationId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Recepción de mensajes desde pasarela WhatsApp Web QR (Evolution API / Baileys)' })
+  async handleQRWhatsAppWebhook(
+    @Param('organizationId') organizationId: string,
+    @Body() body: any
+  ) {
+    const data = body.data || body;
+    const key = data.key || {};
+    const message = data.message || {};
+
+    // 1. Si el mensaje lo envió el propio dueño desde su celular (fromMe === true):
+    if (key.fromMe) {
+      const senderPhone = (key.remoteJid || '').replace('@s.whatsapp.net', '').replace('@c.us', '');
+      if (senderPhone) {
+        const conv = await this.conversationsService.findByPhone(organizationId, senderPhone);
+        if (conv) {
+          await this.conversationsService.pauseAi(conv.id, 'Intervención manual del dueño desde WhatsApp');
+        }
+      }
+      return { status: 'human_message_acknowledged', handoffToHuman: true };
+    }
+
+    // 2. Extraer texto del cliente
+    const rawText =
+      message.conversation ||
+      message.extendedTextMessage?.text ||
+      message.imageMessage?.caption ||
+      data.body ||
+      body.text ||
+      '';
+
+    if (!rawText || !key.remoteJid) {
+      return { status: 'ignored_non_text_or_empty' };
+    }
+
+    const senderPhone = key.remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+    const senderName = data.pushName || body.pushName || 'Cliente';
+    const externalMessageId = key.id || data.id;
+
+    return this.conversationsService.handleIncomingMessage({
+      channel: 'whatsapp_qr',
+      senderPhone,
+      senderName,
+      messageText: rawText,
+      externalMessageId,
+      organizationId
+    });
+  }
+
+  @Post('whatsapp-qr-webhook')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Recepción global de mensajes desde pasarela WhatsApp Web QR' })
+  async handleGlobalQRWhatsAppWebhook(@Body() body: any) {
+    return this.handleQRWhatsAppWebhook('default-org-id', body);
+  }
+
   // Verificación de Webhook Multi-Tenant específico por Organización
   @Get('whatsapp-webhook/:organizationId')
   @ApiOperation({ summary: 'Verificación de Webhook Multi-Tenant para Meta Developers (hub.challenge)' })

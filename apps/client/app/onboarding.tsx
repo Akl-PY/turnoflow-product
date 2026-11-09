@@ -24,11 +24,13 @@ import {
   ArrowRight,
   ShieldCheck,
   HelpCircle,
-  BookOpen
+  BookOpen,
+  QrCode
 } from 'lucide-react-native';
 import {
   apiClient,
   getTenantWebhookUrl,
+  getTenantQRWebhookUrl,
   getTenantVerifyToken
 } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
@@ -38,9 +40,10 @@ export default function OnboardingScreen() {
   const { user } = useAuth();
 
   const tenantWebhookUrl = getTenantWebhookUrl(user?.organizationId);
+  const tenantQRWebhookUrl = getTenantQRWebhookUrl(user?.organizationId);
   const tenantVerifyToken = getTenantVerifyToken(user?.organizationId);
 
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'business'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'qr' | 'whatsapp' | 'business'>('qr');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Datos Comerciales
@@ -157,6 +160,25 @@ export default function OnboardingScreen() {
       {/* Tabs */}
       <View style={styles.tabBar}>
         <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'qr' && { borderBottomColor: '#38bdf8' }]}
+          onPress={() => setActiveTab('qr')}
+        >
+          <QrCode
+            size={16}
+            color={activeTab === 'qr' ? '#38bdf8' : '#71717a'}
+            style={{ marginRight: 8 }}
+          />
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === 'qr' && { color: '#38bdf8', fontWeight: '700' }
+            ]}
+          >
+            1. Conexión QR (Tu Celular)
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.tabItem, activeTab === 'whatsapp' && styles.tabItemActive]}
           onPress={() => setActiveTab('whatsapp')}
         >
@@ -171,7 +193,7 @@ export default function OnboardingScreen() {
               activeTab === 'whatsapp' && { color: '#4ade80', fontWeight: '700' }
             ]}
           >
-            1. Conexión WhatsApp 24/7 (Meta)
+            2. Meta Cloud API (Multiusuario)
           </Text>
         </TouchableOpacity>
 
@@ -190,7 +212,7 @@ export default function OnboardingScreen() {
               activeTab === 'business' && { color: '#c084fc', fontWeight: '700' }
             ]}
           >
-            2. Perfil Comercial y Políticas
+            3. Perfil Comercial y Políticas
           </Text>
         </TouchableOpacity>
       </View>
@@ -205,7 +227,115 @@ export default function OnboardingScreen() {
           </View>
         )}
 
-        {activeTab === 'whatsapp' ? (
+        {activeTab === 'qr' ? (
+          <View style={styles.sectionContainer}>
+            {/* Status Hero QR */}
+            <View style={[styles.statusHero, { borderColor: 'rgba(56, 189, 248, 0.4)', backgroundColor: '#081726' }]}>
+              <View style={[styles.statusDot, { backgroundColor: '#38bdf8' }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.statusHeroTitle}>
+                  Modo Híbrido: Tu WhatsApp en el Celular + IA TurnoFlow
+                </Text>
+                <Text style={styles.statusHeroDesc}>
+                  Seguí usando la aplicación de WhatsApp en tu teléfono normal. Respondé vos cuando quieras con tus propios dedos y dejá que el bot coordine turnos y precios automáticamente en paralelo.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.heroChatBtn, { backgroundColor: '#0284c7' }]}
+                onPress={() => router.push('/playground')}
+              >
+                <Sparkles size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.heroChatBtnText}>Probar en Playground</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Tarjeta 1: ¿Cómo funciona este modo? */}
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
+                  <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>A</Text>
+                </View>
+                <View>
+                  <Text style={styles.cardTitle}>¿Cómo funciona el Modo QR con tu teléfono?</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Sin desinstalar WhatsApp ni perder tus chats existentes
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.stepsList}>
+                <View style={styles.stepItem}>
+                  <Text style={styles.stepNum}>1.</Text>
+                  <Text style={styles.stepText}>
+                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>Tu teléfono sigue activo al 100%:</Text> Abrís tu app de WhatsApp en el celular, ves los mensajes en tiempo real, mandás audios o fotos y hablás con tus clientes como siempre.
+                  </Text>
+                </View>
+
+                <View style={styles.stepItem}>
+                  <Text style={styles.stepNum}>2.</Text>
+                  <Text style={styles.stepText}>
+                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>La IA atiende en paralelo:</Text> Cuando un cliente escribe pidiendo precios, tratamientos o turnos, los 5 agentes de TurnoFlow le responden al instante.
+                  </Text>
+                </View>
+
+                <View style={styles.stepItem}>
+                  <Text style={styles.stepNum}>3.</Text>
+                  <Text style={styles.stepText}>
+                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>Silencio inteligente (Atención Humana):</Text> Si vos empezás a escribirle al cliente en ese chat desde tu teléfono, TurnoFlow detecta que estás respondiendo vos y se silencia automáticamente para no interrumpirte.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Tarjeta 2: Conectar la pasarela QR */}
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
+                  <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>B</Text>
+                </View>
+                <View>
+                  <Text style={styles.cardTitle}>Vincular Pasarela WhatsApp Web (Evolution API o n8n)</Text>
+                  <Text style={styles.cardSubtitle}>
+                    URL de Webhook lista para recibir eventos de tu sesión vinculada por QR
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>URL DEL WEBHOOK QR EXCLUSIVO DE TU SALÓN</Text>
+                <View style={styles.copyRow}>
+                  <TextInput
+                    style={[styles.input, styles.monoInput, { flex: 1 }]}
+                    value={tenantQRWebhookUrl}
+                    editable={false}
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.actionCopyBtn,
+                      copiedKey === 'qr_url' && styles.actionCopyBtnSuccess
+                    ]}
+                    onPress={() => handleCopy(tenantQRWebhookUrl, 'qr_url')}
+                  >
+                    {copiedKey === 'qr_url' ? (
+                      <>
+                        <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                        <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
+                        <Text style={styles.actionCopyBtnText}>Copiar URL QR</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.hint}>
+                  💡 Pegá esta URL en la configuración de Webhook de tu pasarela QR (Evolution API, n8n o Baileys) con el evento <Text style={{ color: '#38bdf8', fontWeight: 'bold' }}>messages.upsert</Text>.
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : activeTab === 'whatsapp' ? (
           <View style={styles.sectionContainer}>
             {/* Status Card */}
             <View style={styles.statusHero}>

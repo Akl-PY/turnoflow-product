@@ -149,6 +149,12 @@ export function getTenantWebhookUrl(organizationId?: string): string {
   return `${base}/${organizationId}`;
 }
 
+export function getTenantQRWebhookUrl(organizationId?: string): string {
+  const base = 'https://turnoflowapi-production.up.railway.app/api/conversations/whatsapp-qr-webhook';
+  if (!organizationId) return base;
+  return `${base}/${organizationId}`;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

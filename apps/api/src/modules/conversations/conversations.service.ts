@@ -147,6 +147,12 @@ export class ConversationsService {
     });
   }
 
+  async findByPhone(organizationId: string, phone: string): Promise<Conversation | null> {
+    return this.conversationRepo.findOne({
+      where: { organizationId, channelConversationId: phone }
+    });
+  }
+
   async pauseAi(conversationId: string, reason?: string): Promise<Conversation> {
     const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
     if (!conv) {
