@@ -84,6 +84,13 @@ export class ConversationsController {
     const key = data.key || {};
     const message = data.message || {};
 
+    // 0. Si es un evento de actualización de conexión (escaneo de QR completado):
+    if (body.event === 'connection.update' || data.state === 'open') {
+      const phone = data.phone || data.user?.id || data.sender;
+      this.integrationsService.markQRConnected(organizationId, phone);
+      return { status: 'connection_recorded', phone };
+    }
+
     // 1. Si el mensaje lo envió el propio dueño desde su celular (fromMe === true):
     if (key.fromMe) {
       const senderPhone = (key.remoteJid || '').replace('@s.whatsapp.net', '').replace('@c.us', '');

@@ -7,7 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   Platform,
-  Linking
+  Linking,
+  Image,
+  ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header } from '../src/components/Header';
@@ -25,7 +27,9 @@ import {
   ShieldCheck,
   HelpCircle,
   BookOpen,
-  QrCode
+  QrCode,
+  RefreshCw,
+  PowerOff
 } from 'lucide-react-native';
 import {
   apiClient,
@@ -63,8 +67,64 @@ export default function OnboardingScreen() {
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
 
+  // Autoservicio QR (Opción B)
+  const [qrCodeData, setQrCodeData] = useState<string | null>(null);
+  const [qrStatus, setQrStatus] = useState<'DISCONNECTED' | 'SCAN_QR' | 'CONNECTED'>('DISCONNECTED');
+  const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
+  const [loadingQr, setLoadingQr] = useState(false);
+  const [showAdvancedQr, setShowAdvancedQr] = useState(false);
+
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const fetchQRStatus = async () => {
+    try {
+      const res = await apiClient.get('/integrations/whatsapp-qr/status');
+      if (res.data?.status) {
+        setQrStatus(res.data.status);
+        if (res.data.connectedPhone) setConnectedPhone(res.data.connectedPhone);
+      }
+    } catch {
+      // Ignorar si el endpoint aún está levantando
+    }
+  };
+
+  const handleGenerateQR = async () => {
+    setLoadingQr(true);
+    try {
+      const res = await apiClient.post('/integrations/whatsapp-qr/session');
+      if (res.data?.qrCode) {
+        setQrCodeData(res.data.qrCode);
+        setQrStatus('SCAN_QR');
+      }
+    } catch (err: any) {
+      console.warn('Error generando QR:', err?.message);
+    } finally {
+      setLoadingQr(false);
+    }
+  };
+
+  const handleDisconnectQR = async () => {
+    try {
+      await apiClient.delete('/integrations/whatsapp-qr/session');
+      setQrStatus('DISCONNECTED');
+      setQrCodeData(null);
+      setConnectedPhone(null);
+    } catch (err: any) {
+      console.warn('Error desconectando QR:', err?.message);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'qr') {
+      fetchQRStatus();
+      handleGenerateQR();
+      const interval = setInterval(() => {
+        fetchQRStatus();
+      }, 3500);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const fetchBusiness = async () => {
@@ -230,109 +290,186 @@ export default function OnboardingScreen() {
         {activeTab === 'qr' ? (
           <View style={styles.sectionContainer}>
             {/* Status Hero QR */}
-            <View style={[styles.statusHero, { borderColor: 'rgba(56, 189, 248, 0.4)', backgroundColor: '#081726' }]}>
-              <View style={[styles.statusDot, { backgroundColor: '#38bdf8' }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.statusHeroTitle}>
-                  Modo Híbrido: Tu WhatsApp en el Celular + IA TurnoFlow
-                </Text>
-                <Text style={styles.statusHeroDesc}>
-                  Seguí usando la aplicación de WhatsApp en tu teléfono normal. Respondé vos cuando quieras con tus propios dedos y dejá que el bot coordine turnos y precios automáticamente en paralelo.
-                </Text>
+            {qrStatus === 'CONNECTED' ? (
+              <View style={[styles.statusHero, { borderColor: '#22c55e', backgroundColor: '#071f12' }]}>
+                <View style={[styles.statusDot, { backgroundColor: '#22c55e' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.statusHeroTitle, { color: '#4ade80' }]}>
+                    ¡WhatsApp Vinculado y Activo 24/7!
+                  </Text>
+                  <Text style={styles.statusHeroDesc}>
+                    Tu teléfono {connectedPhone ? `(${connectedPhone})` : ''} está conectado. Los 5 agentes de IA están respondiendo consultas, cotizando tratamientos y coordinando turnos en paralelo.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.heroChatBtn, { backgroundColor: '#dc2626' }]}
+                  onPress={handleDisconnectQR}
+                >
+                  <PowerOff size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.heroChatBtnText}>Desvincular WhatsApp</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={[styles.heroChatBtn, { backgroundColor: '#0284c7' }]}
-                onPress={() => router.push('/playground')}
-              >
-                <Sparkles size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.heroChatBtnText}>Probar en Playground</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Tarjeta 1: ¿Cómo funciona este modo? */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
-                  <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>A</Text>
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>¿Cómo funciona el Modo QR con tu teléfono?</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Sin desinstalar WhatsApp ni perder tus chats existentes
+            ) : (
+              <View style={[styles.statusHero, { borderColor: 'rgba(56, 189, 248, 0.4)', backgroundColor: '#081726' }]}>
+                <View style={[styles.statusDot, { backgroundColor: '#38bdf8' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.statusHeroTitle}>
+                    Autoservicio: Vinculá tu WhatsApp escaneando el QR
                   </Text>
-                </View>
-              </View>
-
-              <View style={styles.stepsList}>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>1.</Text>
-                  <Text style={styles.stepText}>
-                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>Tu teléfono sigue activo al 100%:</Text> Abrís tu app de WhatsApp en el celular, ves los mensajes en tiempo real, mandás audios o fotos y hablás con tus clientes como siempre.
-                  </Text>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>2.</Text>
-                  <Text style={styles.stepText}>
-                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>La IA atiende en paralelo:</Text> Cuando un cliente escribe pidiendo precios, tratamientos o turnos, los 5 agentes de TurnoFlow le responden al instante.
-                  </Text>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>3.</Text>
-                  <Text style={styles.stepText}>
-                    <Text style={{ color: '#ffffff', fontWeight: '700' }}>Silencio inteligente (Atención Humana):</Text> Si vos empezás a escribirle al cliente en ese chat desde tu teléfono, TurnoFlow detecta que estás respondiendo vos y se silencia automáticamente para no interrumpirte.
+                  <Text style={styles.statusHeroDesc}>
+                    Seguí usando la app de WhatsApp en tu celular exactamente como hoy. La IA de TurnoFlow responde en paralelo y se silencia automáticamente si respondés vos.
                   </Text>
                 </View>
               </View>
-            </View>
+            )}
 
-            {/* Tarjeta 2: Conectar la pasarela QR */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
-                  <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>B</Text>
+            {/* Tarjeta de Escaneo Directo de QR */}
+            {qrStatus !== 'CONNECTED' && (
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
+                    <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>1</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.cardTitle}>Escanear Código QR con WhatsApp</Text>
+                    <Text style={styles.cardSubtitle}>
+                      Sin configurar servidores, APIs ni Docker: escaneá directamente desde tu pantalla
+                    </Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.cardTitle}>Vincular Pasarela WhatsApp Web (Evolution API o n8n)</Text>
-                  <Text style={styles.cardSubtitle}>
-                    URL de Webhook lista para recibir eventos de tu sesión vinculada por QR
-                  </Text>
-                </View>
-              </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>URL DEL WEBHOOK QR EXCLUSIVO DE TU SALÓN</Text>
-                <View style={styles.copyRow}>
-                  <TextInput
-                    style={[styles.input, styles.monoInput, { flex: 1 }]}
-                    value={tenantQRWebhookUrl}
-                    editable={false}
-                  />
-                  <TouchableOpacity
-                    style={[
-                      styles.actionCopyBtn,
-                      copiedKey === 'qr_url' && styles.actionCopyBtnSuccess
-                    ]}
-                    onPress={() => handleCopy(tenantQRWebhookUrl, 'qr_url')}
-                  >
-                    {copiedKey === 'qr_url' ? (
-                      <>
-                        <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
-                      </>
+                <View style={styles.qrContentRow}>
+                  {/* Caja de Imagen QR */}
+                  <View style={styles.qrImageBox}>
+                    {loadingQr ? (
+                      <View style={styles.qrPlaceholder}>
+                        <ActivityIndicator size="large" color="#38bdf8" />
+                        <Text style={styles.qrLoadingText}>Generando sesión segura...</Text>
+                      </View>
+                    ) : qrCodeData ? (
+                      <View style={{ alignItems: 'center' }}>
+                        <Image
+                          source={{ uri: qrCodeData }}
+                          style={styles.qrImage}
+                          resizeMode="contain"
+                        />
+                        <TouchableOpacity
+                          style={styles.refreshQrBtn}
+                          onPress={handleGenerateQR}
+                        >
+                          <RefreshCw size={13} color="#a1a1aa" style={{ marginRight: 6 }} />
+                          <Text style={styles.refreshQrBtnText}>Refrescar Código</Text>
+                        </TouchableOpacity>
+                      </View>
                     ) : (
-                      <>
-                        <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnText}>Copiar URL QR</Text>
-                      </>
+                      <View style={styles.qrPlaceholder}>
+                        <TouchableOpacity
+                          style={styles.generateQrPrimaryBtn}
+                          onPress={handleGenerateQR}
+                        >
+                          <QrCode size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                          <Text style={styles.generateQrPrimaryBtnText}>Generar Código QR</Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
-                  </TouchableOpacity>
+                  </View>
+
+                  {/* Instrucciones Paso a Paso para el Usuario */}
+                  <View style={styles.qrInstructionsBox}>
+                    <Text style={styles.instructionsTitle}>Pasos para conectar tu teléfono:</Text>
+
+                    <View style={styles.qrStepRow}>
+                      <View style={styles.stepBadge}>
+                        <Text style={styles.stepBadgeText}>1</Text>
+                      </View>
+                      <Text style={styles.stepDesc}>
+                        Abrí <Text style={{ color: '#ffffff', fontWeight: '700' }}>WhatsApp</Text> en tu teléfono celular.
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrStepRow}>
+                      <View style={styles.stepBadge}>
+                        <Text style={styles.stepBadgeText}>2</Text>
+                      </View>
+                      <Text style={styles.stepDesc}>
+                        Tocá Menú (<Text style={{ color: '#ffffff' }}>Android ⋮</Text>) o Ajustes (<Text style={{ color: '#ffffff' }}>iPhone ⚙️</Text>) y seleccioná <Text style={{ color: '#38bdf8', fontWeight: '700' }}>Dispositivos vinculados</Text>.
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrStepRow}>
+                      <View style={styles.stepBadge}>
+                        <Text style={styles.stepBadgeText}>3</Text>
+                      </View>
+                      <Text style={styles.stepDesc}>
+                        Tocá <Text style={{ color: '#38bdf8', fontWeight: '700' }}>Vincular un dispositivo</Text> y apuntá la cámara a este código QR.
+                      </Text>
+                    </View>
+
+                    <View style={styles.autoDetectBanner}>
+                      <CheckCircle size={15} color="#22c55e" style={{ marginRight: 8 }} />
+                      <Text style={styles.autoDetectText}>
+                        Detección en tiempo real: al escanear, la pantalla se conectará sola en 3 segundos.
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-                <Text style={styles.hint}>
-                  💡 Pegá esta URL en la configuración de Webhook de tu pasarela QR (Evolution API, n8n o Baileys) con el evento <Text style={{ color: '#38bdf8', fontWeight: 'bold' }}>messages.upsert</Text>.
-                </Text>
               </View>
+            )}
+
+            {/* Sección avanzada para Webhook QR */}
+            <View style={styles.card}>
+              <TouchableOpacity
+                style={styles.advancedToggleHeader}
+                onPress={() => setShowAdvancedQr(!showAdvancedQr)}
+              >
+                <HelpCircle size={16} color="#71717a" style={{ marginRight: 8 }} />
+                <Text style={styles.advancedToggleTitle}>
+                  ¿Tenés tu propio servidor Evolution API o n8n? (Configuración avanzada)
+                </Text>
+                <ArrowRight
+                  size={14}
+                  color="#71717a"
+                  style={{
+                    marginLeft: 'auto',
+                    transform: [{ rotate: showAdvancedQr ? '90deg' : '0deg' }]
+                  }}
+                />
+              </TouchableOpacity>
+
+              {showAdvancedQr && (
+                <View style={{ marginTop: 14 }}>
+                  <Text style={styles.label}>URL DEL WEBHOOK QR EXCLUSIVO DE TU SALÓN</Text>
+                  <View style={styles.copyRow}>
+                    <TextInput
+                      style={[styles.input, styles.monoInput, { flex: 1 }]}
+                      value={tenantQRWebhookUrl}
+                      editable={false}
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.actionCopyBtn,
+                        copiedKey === 'qr_url' && styles.actionCopyBtnSuccess
+                      ]}
+                      onPress={() => handleCopy(tenantQRWebhookUrl, 'qr_url')}
+                    >
+                      {copiedKey === 'qr_url' ? (
+                        <>
+                          <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                          <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
+                          <Text style={styles.actionCopyBtnText}>Copiar URL QR</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.hint}>
+                    💡 Si contás con tu propia pasarela externa de Baileys / Evolution API, pegá esta URL con el evento <Text style={{ color: '#38bdf8', fontWeight: 'bold' }}>messages.upsert</Text>.
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         ) : activeTab === 'whatsapp' ? (
@@ -924,6 +1061,130 @@ const styles = StyleSheet.create({
   successText: {
     color: '#4ade80',
     fontSize: 12,
+    fontWeight: '600'
+  },
+  qrContentRow: {
+    flexDirection: 'row',
+    gap: 24,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 10
+  },
+  qrImageBox: {
+    backgroundColor: '#0c0c0e',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 260,
+    minHeight: 280
+  },
+  qrImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 8,
+    backgroundColor: '#ffffff'
+  },
+  qrPlaceholder: {
+    width: 220,
+    height: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12
+  },
+  qrLoadingText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 8
+  },
+  generateQrPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284c7',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8
+  },
+  generateQrPrimaryBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  refreshQrBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 10
+  },
+  refreshQrBtnText: {
+    color: '#a1a1aa',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  qrInstructionsBox: {
+    flex: 1,
+    minWidth: 280,
+    gap: 12
+  },
+  instructionsTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  qrStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  stepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  stepBadgeText: {
+    color: '#38bdf8',
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  stepDesc: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18
+  },
+  autoDetectBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.25)',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 6
+  },
+  autoDetectText: {
+    color: '#86efac',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16
+  },
+  advancedToggleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4
+  },
+  advancedToggleTitle: {
+    color: '#a1a1aa',
+    fontSize: 13,
     fontWeight: '600'
   }
 });

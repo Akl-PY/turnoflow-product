@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Post, Delete, Body, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IntegrationsService } from './integrations.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Integrations')
 @Controller('integrations')
@@ -11,6 +12,36 @@ export class IntegrationsController {
   @ApiOperation({ summary: 'Consultar estado en vivo de integraciones externas' })
   getStatus() {
     return this.integrationsService.getStatus();
+  }
+
+  // ==========================================
+  // AUTOSERVICIO QR DE WHATSAPP (OPCIÓN B)
+  // ==========================================
+  @Post('whatsapp-qr/session')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generar o refrescar sesión de código QR para vincular WhatsApp' })
+  async generateQRSession(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.integrationsService.generateQRSession(orgId);
+  }
+
+  @Get('whatsapp-qr/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Consultar estado en vivo de la conexión QR de WhatsApp' })
+  async getQRStatus(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.integrationsService.getQRStatus(orgId);
+  }
+
+  @Delete('whatsapp-qr/session')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Desvincular WhatsApp de la organización' })
+  async disconnectQRSession(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.integrationsService.disconnectQRSession(orgId);
   }
 
   @Post('whatsapp/send-message')
