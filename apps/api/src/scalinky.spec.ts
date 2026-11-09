@@ -45,4 +45,23 @@ describe('Scalinky Integration Suite (Local Live Test)', () => {
     expect(possibilities[0].date).toBeDefined();
     expect(Array.isArray(possibilities[0].items)).toBe(true);
   });
+
+  it('debe rechazar credenciales inválidas para un negocio', async () => {
+    const result = await service.verifyOwner('hes194', {
+      email: 'hacker@fake.com',
+      password: 'wrong'
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('debe verificar exitosamente al dueño legítimo de hes194', async () => {
+    const result = await service.verifyOwner('hes194', {
+      email: 'danielgenarog@gmail.com',
+      password: 'dGG2026??'
+    });
+    expect(result.valid).toBe(true);
+    expect(result.businessName).toBe('HES1974');
+    expect(result.owner?.email).toBe('danielgenarog@gmail.com');
+    expect(result.owner?.name).toBe('Daniel Galetto');
+  });
 });

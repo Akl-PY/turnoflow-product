@@ -120,4 +120,32 @@ export class ScalinkyService {
       throw new Error(`Scalinky booking failed: ${msg}`);
     }
   }
+
+  /**
+   * Verifica que el usuario sea el dueño legítimo del negocio en Scalinky.
+   */
+  async verifyOwner(
+    slug: string,
+    credentials: { email: string; password: string }
+  ): Promise<{
+    valid: boolean;
+    businessId?: string;
+    businessName?: string;
+    slug?: string;
+    owner?: { userId: string; name: string; email: string; role: string };
+    message?: string;
+  }> {
+    try {
+      const res = await axios.post(
+        `${this.baseUrl}/business/slug/${slug}/verify-owner`,
+        credentials,
+        { headers: { 'Content-Type': 'application/json' }, timeout: 6000 }
+      );
+      return res.data;
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message;
+      this.logger.warn(`Verificación de dueño fallida en Scalinky (${slug}): ${msg}`);
+      return { valid: false, message: msg };
+    }
+  }
 }

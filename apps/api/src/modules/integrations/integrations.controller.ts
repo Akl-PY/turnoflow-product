@@ -110,4 +110,13 @@ export class IntegrationsController {
   ) {
     return this.scalinkyService.bookAppointment(slug, dto);
   }
+
+  @Post('scalinky/:slug/verify-owner')
+  @ApiOperation({ summary: 'Verificar credenciales del dueño legítimo de un negocio en Scalinky' })
+  async verifyScalinkyOwner(
+    @Param('slug') slug: string,
+    @Body() credentials: { email: string; password: string }
+  ) {
+    return this.scalinkyService.verifyOwner(slug, credentials);
+  }
 }
