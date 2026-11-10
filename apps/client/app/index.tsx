@@ -183,6 +183,14 @@ export default function DashboardScreen() {
 
             <View style={styles.hubActionsRow}>
               <TouchableOpacity
+                style={styles.btnChats}
+                onPress={() => router.push('/chats')}
+              >
+                <MessageSquare size={14} color="#047857" style={{ marginRight: 6 }} />
+                <Text style={styles.btnChatsText}>Chats & Control IA</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.btnGuide}
                 onPress={() => router.push('/guide')}
               >
@@ -470,6 +478,21 @@ const styles = StyleSheet.create({
     color: '#1d4ed8',
     fontSize: 13,
     fontWeight: '600'
+  },
+  btnChats: {
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  btnChatsText: {
+    color: '#047857',
+    fontSize: 13,
+    fontWeight: '700'
   },
   btnSecondary: {
     backgroundColor: '#f1f5f9',

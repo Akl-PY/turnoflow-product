@@ -155,6 +155,49 @@ export function getTenantQRWebhookUrl(organizationId?: string): string {
   return `${base}/${organizationId}`;
 }
 
+export interface ConversationItem {
+  id: string;
+  organizationId: string;
+  leadId?: string;
+  channel: string;
+  channelConversationId: string;
+  status: 'AI_HANDLED' | 'HUMAN_TAKEOVER' | 'ESCALATED' | 'CLOSED';
+  assignedAgent: string;
+  messagesCount: number;
+  lastMessagePreview?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessageItem {
+  id: string;
+  conversationId: string;
+  sender: 'user' | 'ai' | 'human_agent' | 'system';
+  content: string;
+  toolCalls?: any;
+  createdAt: string;
+}
+
+export async function fetchConversations(): Promise<ConversationItem[]> {
+  const res = await apiClient.get('/conversations');
+  return res.data;
+}
+
+export async function fetchConversationMessages(conversationId: string): Promise<ChatMessageItem[]> {
+  const res = await apiClient.get(`/conversations/${conversationId}/messages`);
+  return res.data;
+}
+
+export async function resumeConversationAi(conversationId: string): Promise<ConversationItem> {
+  const res = await apiClient.patch(`/conversations/${conversationId}/resume-ai`);
+  return res.data;
+}
+
+export async function pauseConversationAi(conversationId: string, reason?: string): Promise<ConversationItem> {
+  const res = await apiClient.patch(`/conversations/${conversationId}/pause-ai`, { reason });
+  return res.data;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

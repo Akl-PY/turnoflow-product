@@ -237,7 +237,10 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
   async findAll(organizationId: string): Promise<Conversation[]> {
     return this.conversationRepo.find({
-      where: { organizationId },
+      where: [
+        { organizationId },
+        { organizationId: 'default-org-id' }
+      ],
       order: { updatedAt: 'DESC' }
     });
   }
@@ -268,6 +271,20 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     conv.status = ConversationStatus.HUMAN_TAKEOVER;
     conv.updatedAt = new Date();
     return this.conversationRepo.save(conv);
+  }
+
+  async resumeAi(conversationId: string): Promise<Conversation> {
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    if (!conv) {
+      throw new BadRequestException('Conversación no encontrada.');
+    }
+    conv.status = ConversationStatus.AI_HANDLED;
+    conv.updatedAt = new Date();
+    const saved = await this.conversationRepo.save(conv);
+    this.logger.log(
+      `[IA REACTIVADA] Operador reactivó la atención automática para ${conv.channelConversationId}`
+    );
+    return saved;
   }
 
   async recordHumanIntervention(

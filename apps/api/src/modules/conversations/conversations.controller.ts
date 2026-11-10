@@ -477,4 +477,12 @@ export class ConversationsController {
   async pauseAi(@Param('id') id: string, @Body('reason') reason?: string) {
     return this.conversationsService.pauseAi(id, reason);
   }
+
+  @Patch(':id/resume-ai')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reactivar IA para una conversación pausada' })
+  async resumeAi(@Param('id') id: string) {
+    return this.conversationsService.resumeAi(id);
+  }
 }

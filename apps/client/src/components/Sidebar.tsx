@@ -13,12 +13,14 @@ import {
   ShieldCheck,
   LogOut,
   Building2,
-  Smartphone
+  Smartphone,
+  MessageSquare
 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
+  { path: '/chats', label: 'Chats & Control IA', icon: MessageSquare },
   { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
