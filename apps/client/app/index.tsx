@@ -237,7 +237,7 @@ export default function DashboardScreen() {
             <View style={[styles.statusChip, styles.chipBlue]}>
               <View style={[styles.statusDot, styles.dotBlue]} />
               <Text style={styles.chipLabel}>Asistente IA:</Text>
-              <Text style={[styles.chipValue, styles.textBlue]}>Google Gemini 2.5 Flash</Text>
+              <Text style={[styles.chipValue, styles.textBlue]}>Google Gemini 1.5 Flash</Text>
             </View>
           </View>
 

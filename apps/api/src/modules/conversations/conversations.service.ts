@@ -114,19 +114,30 @@ export class ConversationsService {
     });
     await this.messageRepo.save(userMsg);
 
-    // 3. Procesar con motor de IA
-    const aiResult = this.aiService
-      ? await this.aiService.processIncomingMessage({
-          organizationId: orgId,
-          conversationId: conversation.id,
-          userText: params.messageText
-        })
-      : {
-          replyText: 'Gracias por comunicarte con nosotros.',
-          toolExecutions: [],
-          handoffToHuman: false,
-          handoffReason: undefined
-        };
+    // 3. Procesar con motor de IA de forma segura
+    let aiResult;
+    try {
+      aiResult = this.aiService
+        ? await this.aiService.processIncomingMessage({
+            organizationId: orgId,
+            conversationId: conversation.id,
+            userText: params.messageText
+          })
+        : {
+            replyText: 'Gracias por comunicarte con nosotros.',
+            toolExecutions: [],
+            handoffToHuman: false,
+            handoffReason: undefined
+          };
+    } catch (err: any) {
+      this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
+      aiResult = {
+        replyText: '¡Hola! Recibimos tu consulta. En este momento una recepcionista del equipo te responderá a la brevedad.',
+        toolExecutions: [],
+        handoffToHuman: true,
+        handoffReason: `Fallo de proveedor IA: ${err.message}`
+      };
+    }
 
     // Guardar respuesta del asistente
     const aiMsg = this.messageRepo.create({

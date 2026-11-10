@@ -17,7 +17,8 @@ export class GeminiProvider implements AiProviderInterface {
 
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-    this.defaultModel = process.env.AI_MODEL || 'gemini-2.5-flash';
+    // gemini-1.5-flash cuenta con 1.500 solicitudes gratuitas diarias (a diferencia de gemini-2.5-flash que es experimental y limita a 20)
+    this.defaultModel = process.env.AI_MODEL || 'gemini-1.5-flash';
   }
 
   async chatCompletion(
@@ -28,7 +29,15 @@ export class GeminiProvider implements AiProviderInterface {
       throw new Error('GEMINI_API_KEY (o GOOGLE_API_KEY) no está configurada.');
     }
 
-    const model = options?.model || this.defaultModel;
+    const primaryModel = options?.model || this.defaultModel;
+    // Lista de modelos ordenados para fallback automático si el principal agota su cuota
+    const modelsToTry = [
+      primaryModel,
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-8b',
+      'gemini-2.0-flash'
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+
     const temperature = options?.temperature ?? 0.2;
     const maxTokens = options?.maxTokens ?? 1024;
 
@@ -70,48 +79,66 @@ export class GeminiProvider implements AiProviderInterface {
       ];
     }
 
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-      const response = await axios.post(url, payload, {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      });
+    let lastError: any = null;
 
-      const candidate = response.data.candidates?.[0];
-      const parts = candidate?.content?.parts || [];
+    for (const model of modelsToTry) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        const response = await axios.post(url, payload, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 25000
+        });
 
-      let content = '';
-      const toolCalls: ToolCall[] = [];
+        const candidate = response.data.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
 
-      for (const part of parts) {
-        if (part.text) {
-          content += part.text;
+        let content = '';
+        const toolCalls: ToolCall[] = [];
+
+        for (const part of parts) {
+          if (part.text) {
+            content += part.text;
+          }
+          if (part.functionCall) {
+            toolCalls.push({
+              id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: part.functionCall.name,
+              arguments: part.functionCall.args || {}
+            });
+          }
         }
-        if (part.functionCall) {
-          toolCalls.push({
-            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            name: part.functionCall.name,
-            arguments: part.functionCall.args || {}
-          });
+
+        const usageMetadata = response.data.usageMetadata || {};
+
+        return {
+          content: content.trim(),
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          usage: {
+            inputTokens: usageMetadata.promptTokenCount || 0,
+            outputTokens: usageMetadata.candidatesTokenCount || 0
+          }
+        };
+      } catch (error: any) {
+        lastError = error;
+        const errDetails = error.response?.data?.error?.message || error.message;
+        const isQuota =
+          error.response?.status === 429 ||
+          errDetails?.toLowerCase().includes('quota') ||
+          errDetails?.toLowerCase().includes('rate');
+
+        this.logger.warn(`Modelo ${model} no disponible (${errDetails}). Intentando siguiente opción...`);
+
+        // Si no es error de cuota/rate limit, no tiene sentido reintentar otros modelos
+        if (!isQuota) {
+          break;
         }
       }
-
-      const usageMetadata = response.data.usageMetadata || {};
-
-      return {
-        content: content.trim(),
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        usage: {
-          inputTokens: usageMetadata.promptTokenCount || 0,
-          outputTokens: usageMetadata.candidatesTokenCount || 0
-        }
-      };
-    } catch (error: any) {
-      const errDetails = error.response?.data?.error?.message || error.message;
-      this.logger.error(`Error en Gemini API: ${errDetails}`);
-      throw new Error(`Gemini Provider falló: ${errDetails}`);
     }
+
+    const finalErrMsg = lastError?.response?.data?.error?.message || lastError?.message || 'Error desconocido';
+    this.logger.error(`Error en Gemini API: ${finalErrMsg}`);
+    throw new Error(`Gemini Provider falló: ${finalErrMsg}`);
   }
 }
