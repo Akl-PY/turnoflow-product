@@ -204,7 +204,41 @@ export class ConversationsController {
         return { status: 'ignored_bot_outgoing' };
       }
 
-      // Si no lo envió el bot, fue un operador/dueño humano desde el celular o WhatsApp Web
+      const textClean = (typeof rawText === 'string' ? rawText.toLowerCase().trim() : '');
+
+      // Patrones automáticos del bot (mensajes del sistema, derivaciones, saludos o cotizaciones)
+      // NUNCA deben tomarse como intervención humana manual
+      const automatedBotPhrases = [
+        'recibimos tu consulta',
+        'recepcionista del equipo',
+        'en este momento una recepcionista',
+        'en qué te puedo ayudar hoy',
+        'te puedo colaborar hoy',
+        'bienvenido/a',
+        'bienvenido a',
+        'tenemos turnos disponibles',
+        'disculpa la demora',
+        'disculpa el inconveniente',
+        'puesta a punto',
+        'limpieza de pileta'
+      ];
+      if (automatedBotPhrases.some((phrase) => textClean.includes(phrase))) {
+        return { status: 'ignored_automated_bot_phrase' };
+      }
+
+      // Verificar si coincide con el último mensaje enviado por la IA en base de datos
+      const recentAiMsg = await this.conversationsService.findRecentAiMessage(resolvedOrgId, senderPhone);
+      if (recentAiMsg && textClean) {
+        const dbContentLower = recentAiMsg.content.toLowerCase();
+        if (
+          dbContentLower.includes(textClean) ||
+          textClean.includes(dbContentLower.substring(0, 40))
+        ) {
+          return { status: 'ignored_matching_ai_db_message' };
+        }
+      }
+
+      // Si no fue el bot, fue un operador/dueño humano desde el celular o WhatsApp Web
       // Pausar inmediatamente la IA para este cliente por 24hs
       this.logger.log(
         `[INTERVENCIÓN MANUAL] Operador humano respondió a ${senderPhone} desde WhatsApp. Bot pausado por 24 horas.`

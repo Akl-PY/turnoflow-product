@@ -25,11 +25,11 @@ export class IntegrationsService {
       this.recentBotMessages.set(`id:${messageId}`, now);
     }
     if (text) {
-      const textKey = `text:${text.trim().substring(0, 80)}`;
-      this.recentBotMessages.set(textKey, now);
+      const clean = text.replace(/\s+/g, ' ').trim().toLowerCase().substring(0, 60);
+      this.recentBotMessages.set(`text:${clean}`, now);
     }
 
-    if (this.recentBotMessages.size > 200) {
+    if (this.recentBotMessages.size > 300) {
       for (const [k, ts] of this.recentBotMessages.entries()) {
         if (now - ts > 300000) {
           this.recentBotMessages.delete(k);
@@ -44,8 +44,8 @@ export class IntegrationsService {
       return true;
     }
     if (text) {
-      const textKey = `text:${text.trim().substring(0, 80)}`;
-      if (this.recentBotMessages.has(textKey)) {
+      const clean = text.replace(/\s+/g, ' ').trim().toLowerCase().substring(0, 60);
+      if (this.recentBotMessages.has(`text:${clean}`)) {
         return true;
       }
     }

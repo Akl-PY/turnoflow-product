@@ -176,28 +176,11 @@ export class ConversationsService {
     } catch (err: any) {
       this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
 
-      // Consultar si ya se le había enviado aviso de recepcionista o si la conversación ya estaba derivada
-      const lastAiMessage = await this.messageRepo.findOne({
-        where: {
-          conversationId: conversation.id,
-          sender: MessageSender.AI
-        },
-        order: { createdAt: 'DESC' }
-      });
-
-      const alreadyNotified =
-        lastAiMessage?.content?.includes('recepcionista') ||
-        lastAiMessage?.content?.includes('asistencia humana') ||
-        lastAiMessage?.content?.includes('un asesor') ||
-        conversation.status === ConversationStatus.HUMAN_TAKEOVER;
-
       aiResult = {
-        replyText: alreadyNotified
-          ? '' // No saturar al cliente con mensajes repetidos si el modelo cayó; frenar en silencio absoluto
-          : '¡Hola! Recibimos tu consulta. En este momento una recepcionista del equipo te responderá a la brevedad.',
+        replyText: 'Disculpa la demora momentánea. ¿Podrías reiterarme tu consulta o qué servicio te gustaría consultar?',
         toolExecutions: [],
-        handoffToHuman: true,
-        handoffReason: `Fallo de proveedor IA: ${err.message}`
+        handoffToHuman: false, // Error técnico transitorio: NO bloquear la conversación por 24hs
+        handoffReason: undefined
       };
     }
 
@@ -328,5 +311,18 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       `[PAUSA HUMANA] Operador intervino manualmente para ${cleanPhone}. Bot silenciado durante 24 horas.`
     );
     return conversation;
+  }
+
+  async findRecentAiMessage(organizationId: string, phone: string): Promise<Message | null> {
+    const conv = await this.findByPhone(organizationId, phone);
+    if (!conv) return null;
+
+    return this.messageRepo.findOne({
+      where: {
+        conversationId: conv.id,
+        sender: MessageSender.AI
+      },
+      order: { createdAt: 'DESC' }
+    });
   }
 }
