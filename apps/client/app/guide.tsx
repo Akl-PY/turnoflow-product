@@ -33,7 +33,7 @@ export default function GuideScreen() {
 
   const openManualPdf = () => {
     if (Platform.OS === 'web') {
-      window.open('https://turnoflowapi-production.up.railway.app/export/manual', '_blank');
+      window.open('https://turnoflowapi-production.up.railway.app/api/export/manual', '_blank');
     }
   };
 
