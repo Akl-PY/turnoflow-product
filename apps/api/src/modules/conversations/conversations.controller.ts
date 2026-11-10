@@ -86,9 +86,16 @@ export class ConversationsController {
 
     // 0. Si es un evento de actualización de conexión (escaneo de QR completado):
     if (body.event === 'connection.update' || data.state === 'open') {
-      const phone = data.phone || data.user?.id || data.sender;
-      this.integrationsService.markQRConnected(organizationId, phone);
-      return { status: 'connection_recorded', phone };
+      const rawPhone = data.phone || data.user?.id || data.owner || data.sender || body.sender;
+      let cleanPhone: string | undefined;
+      if (rawPhone && typeof rawPhone === 'string') {
+        const digits = rawPhone.split(':')[0].replace(/\D/g, '');
+        if (digits.length >= 8) {
+          cleanPhone = `+${digits}`;
+        }
+      }
+      this.integrationsService.markQRConnected(organizationId, cleanPhone);
+      return { status: 'connection_recorded', phone: cleanPhone };
     }
 
     // 1. Si el mensaje lo envió el propio dueño desde su celular (fromMe === true):

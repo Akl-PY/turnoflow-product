@@ -302,7 +302,9 @@ export default function OnboardingScreen() {
                     ¡WhatsApp Vinculado y Activo 24/7!
                   </Text>
                   <Text style={styles.statusHeroDesc}>
-                    Tu teléfono {connectedPhone ? `(${connectedPhone})` : ''} está conectado. Los 5 agentes de IA están respondiendo consultas, cotizando tratamientos y coordinando turnos en paralelo.
+                    {connectedPhone
+                      ? `Tu WhatsApp (${connectedPhone}) está conectado exitosamente. La IA de TurnoFlow está respondiendo consultas y coordinando turnos en tiempo real.`
+                      : 'Tu WhatsApp está conectado exitosamente. La IA de TurnoFlow está respondiendo consultas y coordinando turnos en tiempo real.'}
                   </Text>
                 </View>
                 <TouchableOpacity

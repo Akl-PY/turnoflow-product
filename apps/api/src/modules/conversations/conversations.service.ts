@@ -1,10 +1,12 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { Conversation } from '../../entities/conversation.entity';
 import { Message } from '../../entities/message.entity';
+import { BusinessProfile } from '../../entities/business-profile.entity';
 import { AiService } from '../ai/ai.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import { ConversationStatus, MessageSender } from '@turnoflow/shared';
 
 @Injectable()
@@ -16,7 +18,13 @@ export class ConversationsService {
     private readonly conversationRepo: Repository<Conversation>,
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
-    private readonly aiService: AiService
+    @Optional()
+    @InjectRepository(BusinessProfile)
+    private readonly profileRepo?: Repository<BusinessProfile>,
+    @Optional()
+    private readonly aiService?: AiService,
+    @Optional()
+    private readonly integrationsService?: IntegrationsService
   ) {}
 
   getTenantVerifyToken(organizationId: string): string {
@@ -104,11 +112,18 @@ export class ConversationsService {
     }
 
     // 3. Procesar con motor de IA
-    const aiResult = await this.aiService.processIncomingMessage({
-      organizationId: orgId,
-      conversationId: conversation.id,
-      userText: params.messageText
-    });
+    const aiResult = this.aiService
+      ? await this.aiService.processIncomingMessage({
+          organizationId: orgId,
+          conversationId: conversation.id,
+          userText: params.messageText
+        })
+      : {
+          replyText: 'Gracias por comunicarte con nosotros.',
+          toolExecutions: [],
+          handoffToHuman: false,
+          handoffReason: undefined
+        };
 
     // Guardar respuesta del asistente
     const aiMsg = this.messageRepo.create({
@@ -124,6 +139,26 @@ export class ConversationsService {
     conversation.messagesCount += 2;
     if (aiResult.handoffToHuman) {
       conversation.status = ConversationStatus.HUMAN_TAKEOVER;
+
+      // Alerta urgente al administrador por WhatsApp
+      if (this.profileRepo && this.integrationsService) {
+        try {
+          const profile = await this.profileRepo.findOne({ where: { organizationId: orgId } });
+          const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
+          if (adminPhone && adminPhone.replace(/\D/g, '') !== params.senderPhone.replace(/\D/g, '')) {
+            const alertText = `🚨 *[TurnoFlow Alerta de Atención]*
+El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) necesita asistencia humana.
+
+*Motivo:* ${aiResult.handoffReason || 'Consulta no resuelta / Pedido de operador'}
+*Mensaje del cliente:* "${params.messageText}"
+
+👉 Podés responderle directamente a su WhatsApp o gestionar el chat desde el panel de TurnoFlow.`;
+            await this.integrationsService.sendQRWhatsAppMessage(orgId, adminPhone, alertText).catch(() => null);
+          }
+        } catch (err: any) {
+          this.logger.warn(`No se pudo enviar alerta al admin: ${err.message}`);
+        }
+      }
     }
     await this.conversationRepo.save(conversation);
 

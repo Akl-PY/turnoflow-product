@@ -140,6 +140,62 @@ export class IntegrationsService {
 
   async getQRStatus(organizationId: string): Promise<{ status: string; connectedPhone?: string; connectedAt?: string }> {
     const session = this.qrSessions.get(organizationId);
+    const instanceName = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    // Consulta en vivo a Evolution API si está configurada
+    if (evolutionUrl && evolutionKey) {
+      try {
+        const stateRes = await axios.get(`${evolutionUrl}/instance/connectionState/${instanceName}`, {
+          headers: { apikey: evolutionKey, Authorization: `Bearer ${evolutionKey}` },
+          timeout: 3000
+        });
+
+        const state = stateRes.data?.instance?.state || stateRes.data?.state;
+        if (state === 'open') {
+          let realPhone = session?.connectedPhone;
+          if (!realPhone) {
+            try {
+              const instRes = await axios.get(`${evolutionUrl}/instance/fetchInstances?instanceName=${instanceName}`, {
+                headers: { apikey: evolutionKey, Authorization: `Bearer ${evolutionKey}` },
+                timeout: 3000
+              });
+              const instList = Array.isArray(instRes.data) ? instRes.data : [instRes.data];
+              const myInst = instList.find((i: any) => i.name === instanceName || i.instanceName === instanceName) || instList[0];
+              const rawOwner = myInst?.owner || myInst?.ownerJid;
+              if (typeof rawOwner === 'string' && rawOwner.includes('@')) {
+                const num = rawOwner.split(':')[0].replace(/\D/g, '');
+                if (num.length >= 8) {
+                  realPhone = `+${num}`;
+                }
+              }
+            } catch {
+              // Silencioso
+            }
+          }
+
+          const connectedSession: QRSessionState = {
+            organizationId,
+            status: 'CONNECTED',
+            connectedPhone: realPhone,
+            connectedAt: session?.connectedAt || new Date()
+          };
+          this.qrSessions.set(organizationId, connectedSession);
+
+          return {
+            status: 'CONNECTED',
+            connectedPhone: realPhone,
+            connectedAt: connectedSession.connectedAt?.toISOString()
+          };
+        }
+      } catch {
+        // Si Evolution API no responde en este tick, recurrimos al estado en memoria
+      }
+    }
+
     if (!session) {
       return { status: 'DISCONNECTED' };
     }
@@ -153,7 +209,10 @@ export class IntegrationsService {
   markQRConnected(organizationId: string, phone?: string) {
     const existing = this.qrSessions.get(organizationId) || { organizationId, status: 'CONNECTED' };
     existing.status = 'CONNECTED';
-    existing.connectedPhone = phone || '+5491188990011';
+    if (phone) {
+      const clean = phone.replace(/@.*$/, '').replace(/\D/g, '');
+      existing.connectedPhone = clean.length >= 8 ? `+${clean}` : phone;
+    }
     existing.connectedAt = new Date();
     this.qrSessions.set(organizationId, existing);
   }

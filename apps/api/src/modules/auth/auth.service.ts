@@ -78,14 +78,14 @@ export class AuthService implements OnModuleInit {
         });
         await this.userRepo.save(adminUser);
 
-        await this.provisionOrganizationResources(org.id, 'TurnoFlow Beauty Studio', true);
+        await this.provisionOrganizationResources(org.id, 'TurnoFlow Beauty Studio', false);
         this.logger.log(`✅ Auto-seed completado: ${adminEmail} (${org.name})`);
       } else {
         // Asegurar que la organización del admin tenga su perfil, agentes y automatizaciones sembradas
         await this.provisionOrganizationResources(
           existingAdmin.organizationId,
           'TurnoFlow Beauty Studio',
-          true
+          false
         );
       }
     } catch (error) {

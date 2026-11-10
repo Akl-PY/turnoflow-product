@@ -95,4 +95,29 @@ export class DashboardService {
 
     return activity.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }
+
+  async resetDemoData(organizationId: string): Promise<{ success: boolean; message: string }> {
+    // 1. Borrar mensajes y conversaciones
+    const convs = await this.conversationRepo.find({ where: { organizationId } });
+    if (convs.length > 0) {
+      const convIds = convs.map((c) => c.id);
+      await this.messageRepo
+        .createQueryBuilder()
+        .delete()
+        .where('conversationId IN (:...convIds)', { convIds })
+        .execute();
+      await this.conversationRepo.delete({ organizationId });
+    }
+
+    // 2. Borrar citas
+    await this.appointmentRepo.delete({ organizationId });
+
+    // 3. Borrar leads
+    await this.leadRepo.delete({ organizationId });
+
+    return {
+      success: true,
+      message: 'Todos los datos de prueba han sido limpiados. El panel ahora está en 0 para pruebas reales.'
+    };
+  }
 }

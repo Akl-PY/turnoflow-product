@@ -133,13 +133,39 @@ export class AiService {
         ? this.bookingAgent.getToolDefinitions()
         : this.receptionistAgent.getToolDefinitions();
 
+    const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+    let scalinkyInfo = '';
+
+    if (this.scalinkyService) {
+      try {
+        const isHealthy = await this.scalinkyService.isHealthy();
+        if (isHealthy) {
+          const scServices = await this.scalinkyService.getServices(scalinkySlug);
+          if (scServices.length > 0) {
+            const scStaff = await this.scalinkyService.getStaff(scalinkySlug);
+            const staffListStr = scStaff.map((s) => s.name).join(', ');
+            const servListStr = scServices
+              .map((s) => `- ${s.name}: $${s.price} (Duración: ${s.duration_minutes} min)`)
+              .join('\n');
+            scalinkyInfo = `\n\nSISTEMA DE TURNOS Y PRECIOS EN VIVO (Scalinky - Negocio: ${scalinkySlug}):
+Profesionales activos: ${staffListStr || 'Staff del salón'}
+Servicios y Precios vigentes:
+${servListStr}
+(IMPORTANTE: Utiliza SIEMPRE estos precios y servicios para responder y cotizar al cliente).`;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`No se pudo precargar catálogo Scalinky: ${err.message}`);
+      }
+    }
+
     const systemPrompt = `Eres el Agente Inteligente de ${profile.businessName}.
 Rubro: ${profile.vertical}.
 Ubicación: ${profile.location}.
 Zona Horaria: ${profile.timezone}.
 Moneda: ${profile.currency}.
 Política de Cancelación: ${profile.cancellationPolicy}.
-Instrucciones Especiales: ${profile.specialInstructions || 'Ninguna'}.
+Instrucciones Especiales: ${profile.specialInstructions || 'Ninguna'}.${scalinkyInfo}
 
 REGLAS ESTRICTAS:
 - Responde con calidez y concisión en español latinoamericano.
@@ -235,15 +261,64 @@ REGLAS ESTRICTAS:
     switch (name) {
       case 'get_services': {
         const category = args.category as string;
-        let list = profile.services || [];
-        if (category) {
-          list = list.filter((s) => s.category.toLowerCase() === category.toLowerCase());
+        let list: any[] = [];
+        const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+
+        if (this.scalinkyService) {
+          try {
+            const scServices = await this.scalinkyService.getServices(scalinkySlug);
+            if (scServices.length > 0) {
+              list = scServices.map((s) => ({
+                id: s.service_id,
+                name: s.name,
+                price: s.price,
+                currency: profile.currency || 'USD',
+                durationMinutes: s.duration_minutes,
+                description: s.description || s.name,
+                category: 'General',
+                source: 'scalinky'
+              }));
+            }
+          } catch {
+            // Silencioso
+          }
+        }
+
+        if (list.length === 0) {
+          list = profile.services || [];
+          if (category) {
+            list = list.filter((s) => s.category?.toLowerCase() === category.toLowerCase());
+          }
         }
         return { success: true, data: list };
       }
 
       case 'get_service_price': {
         const query = ((args.serviceName as string) || '').toLowerCase();
+        const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+
+        if (this.scalinkyService) {
+          try {
+            const scServices = await this.scalinkyService.getServices(scalinkySlug);
+            const scFound = scServices.find((s) => s.name.toLowerCase().includes(query));
+            if (scFound) {
+              return {
+                success: true,
+                data: {
+                  name: scFound.name,
+                  price: scFound.price,
+                  currency: profile.currency || 'USD',
+                  durationMinutes: scFound.duration_minutes,
+                  description: scFound.description || scFound.name,
+                  source: 'scalinky'
+                }
+              };
+            }
+          } catch {
+            // Silencioso
+          }
+        }
+
         const found = (profile.services || []).find((s) =>
           s.name.toLowerCase().includes(query)
         );
@@ -255,7 +330,8 @@ REGLAS ESTRICTAS:
               price: found.price,
               currency: found.currency,
               durationMinutes: found.durationMinutes,
-              description: found.description
+              description: found.description,
+              source: 'panel'
             }
           };
         }

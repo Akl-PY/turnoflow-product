@@ -23,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
         <View style={styles.statusPill}>
           <View style={styles.pulseDot} />
           <Phone size={12} color="#22c55e" style={{ marginRight: 4 }} />
-          <Text style={styles.statusText}>WhatsApp Cloud: Activo</Text>
+          <Text style={styles.statusText}>WhatsApp IA 24/7</Text>
         </View>
 
         {/* Playground Quick Button */}

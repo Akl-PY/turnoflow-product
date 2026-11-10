@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,5 +22,12 @@ export class DashboardController {
   async getActivity(@Request() req: any) {
     const orgId = req.user.organizationId;
     return this.dashboardService.getRecentActivity(orgId);
+  }
+
+  @Post('reset-demo-data')
+  @ApiOperation({ summary: 'Limpiar todos los datos de prueba (leads, citas y mensajes) para empezar de cero' })
+  async resetDemoData(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.dashboardService.resetDemoData(orgId);
   }
 }
