@@ -38,6 +38,29 @@ import {
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
+  // Caché de Enfriamiento (Circuit Breaker con TTL de 30 minutos)
+  private readonly providerCooldowns = new Map<string, { reason: string; blockedUntil: number }>();
+
+  isProviderCoolingDown(providerName: string): boolean {
+    const key = providerName.toLowerCase();
+    const entry = this.providerCooldowns.get(key);
+    if (!entry) return false;
+    if (Date.now() > entry.blockedUntil) {
+      this.providerCooldowns.delete(key);
+      this.logger.log(`[AI CIRCUIT BREAKER] Proveedor ${providerName} ha salido del período de enfriamiento (30 min). Reactivando.`);
+      return false;
+    }
+    return true;
+  }
+
+  markProviderCooldown(providerName: string, reason: string, durationMinutes = 30): void {
+    const key = providerName.toLowerCase();
+    const blockedUntil = Date.now() + durationMinutes * 60 * 1000;
+    this.providerCooldowns.set(key, { reason, blockedUntil });
+    this.logger.warn(
+      `[AI CIRCUIT BREAKER] Proveedor ${providerName} bloqueado en memoria por ${durationMinutes} minutos. Razón: ${reason}. Se omitirá en los próximos mensajes.`
+    );
+  }
 
   constructor(
     @InjectRepository(BusinessProfile)
@@ -74,40 +97,42 @@ export class AiService {
       process.env.OPENROUTER_API_KEY
     );
     const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+    const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
 
     if (configured === 'openai' || configured === 'openrouter' || configured === 'groq') {
+      if (this.isProviderCoolingDown('openai')) {
+        this.logger.warn('[CIRCUIT BREAKER] OpenAI/Groq en enfriamiento de 30m por cuota. Conmutando a Gemini.');
+        if (hasGemini && !this.isProviderCoolingDown('gemini')) return this.geminiProvider;
+        return this.mockAiProvider;
+      }
       if (!hasOpenAiCompatible) {
-        if (hasGemini) {
-          this.logger.warn('Claves OpenAI/Groq no detectadas, usando Gemini disponible.');
-          return this.geminiProvider;
-        }
-        this.logger.warn('OPENAI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+        if (hasGemini && !this.isProviderCoolingDown('gemini')) return this.geminiProvider;
         return this.mockAiProvider;
       }
       return this.openAiProvider;
     }
+
     if (configured === 'gemini') {
+      if (this.isProviderCoolingDown('gemini')) {
+        this.logger.warn('[CIRCUIT BREAKER] Gemini en enfriamiento de 30m por cuota. Conmutando a OpenAI/Groq/OpenRouter.');
+        if (hasOpenAiCompatible && !this.isProviderCoolingDown('openai')) return this.openAiProvider;
+        if (hasAnthropic) return this.anthropicProvider;
+        return this.mockAiProvider;
+      }
       if (!hasGemini) {
-        if (hasOpenAiCompatible) {
-          this.logger.warn('GEMINI_API_KEY no configurada. Conmutando automáticamente a OpenAI/Groq/OpenRouter.');
-          return this.openAiProvider;
-        }
-        this.logger.warn('GEMINI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+        if (hasOpenAiCompatible && !this.isProviderCoolingDown('openai')) return this.openAiProvider;
         return this.mockAiProvider;
       }
       return this.geminiProvider;
     }
+
     if (configured === 'mock') {
       return this.mockAiProvider;
     }
-    if (!process.env.ANTHROPIC_API_KEY) {
-      if (hasGemini) {
-        return this.geminiProvider;
-      }
-      if (hasOpenAiCompatible) {
-        return this.openAiProvider;
-      }
-      this.logger.warn('ANTHROPIC_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
+
+    if (!hasAnthropic || this.isProviderCoolingDown('anthropic')) {
+      if (hasGemini && !this.isProviderCoolingDown('gemini')) return this.geminiProvider;
+      if (hasOpenAiCompatible && !this.isProviderCoolingDown('openai')) return this.openAiProvider;
       return this.mockAiProvider;
     }
     return this.anthropicProvider;
@@ -309,37 +334,52 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
           maxTokens: 1000
         });
       } catch (err: any) {
-        const hasOpenAiCompatible = !!(
-          process.env.OPENAI_API_KEY ||
-          process.env.GROQ_API_KEY ||
-          process.env.OPENROUTER_API_KEY
-        );
-        const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const errMsg = (err?.message || '').toLowerCase();
+        const isQuotaOrLimit =
+          errMsg.includes('quota') ||
+          errMsg.includes('429') ||
+          errMsg.includes('rate') ||
+          errMsg.includes('limit') ||
+          errMsg.includes('exhausted') ||
+          errMsg.includes('no longer available') ||
+          errMsg.includes('not found');
 
-        if (activeProvider !== this.openAiProvider && hasOpenAiCompatible) {
+        // Si fue error de cuota o rate limit, marcar el proveedor en enfriamiento por 30 minutos (Redis/Memoria)
+        if (isQuotaOrLimit) {
+          this.markProviderCooldown(activeProvider.providerName, err.message, 30);
+        }
+
+        const candidates = [
+          this.openAiProvider,
+          this.geminiProvider,
+          this.anthropicProvider
+        ].filter((p) => p !== activeProvider && !this.isProviderCoolingDown(p.providerName));
+
+        let failedOver = false;
+        for (const nextProvider of candidates) {
+          try {
+            this.logger.warn(
+              `[AI FAILOVER EN CALIENTE] Conmutando de inmediato a ${nextProvider.providerName} para responder al cliente...`
+            );
+            response = await nextProvider.chatCompletion(messages, {
+              model: overrideModel,
+              tools,
+              temperature: 0.2,
+              maxTokens: 1000
+            });
+            activeProvider = nextProvider;
+            failedOver = true;
+            break;
+          } catch (nextErr: any) {
+            this.logger.warn(`Failover con ${nextProvider.providerName} falló: ${nextErr.message}`);
+          }
+        }
+
+        if (!failedOver) {
           this.logger.warn(
-            `[AI FAILOVER] Proveedor ${activeProvider.providerName} no disponible (${err.message}). Conmutando automáticamente a OpenAI/Groq/OpenRouter...`
+            `[INTELLIGENT KNOWLEDGE FALLBACK] Modelos de IA no disponibles. Generando respuesta contextual inmediata basada en el catálogo y servicios de ${profile.businessName}.`
           );
-          activeProvider = this.openAiProvider;
-          response = await activeProvider.chatCompletion(messages, {
-            model: overrideModel,
-            tools,
-            temperature: 0.2,
-            maxTokens: 1000
-          });
-        } else if (activeProvider !== this.geminiProvider && hasGemini) {
-          this.logger.warn(
-            `[AI FAILOVER] Proveedor ${activeProvider.providerName} no disponible (${err.message}). Conmutando automáticamente a Gemini...`
-          );
-          activeProvider = this.geminiProvider;
-          response = await activeProvider.chatCompletion(messages, {
-            model: overrideModel,
-            tools,
-            temperature: 0.2,
-            maxTokens: 1000
-          });
-        } else {
-          throw err;
+          response = this.generateKnowledgeBasedFallback(userText, profile, activeRole);
         }
       }
 
@@ -826,5 +866,91 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
       ]
     });
     return this.businessProfileRepo.save(profile);
+  }
+
+  private generateKnowledgeBasedFallback(
+    userText: string,
+    profile: BusinessProfile,
+    role: AgentRoleType
+  ): CompletionResponse {
+    const textLower = userText.toLowerCase().trim();
+    const services = Array.isArray(profile.services) ? profile.services : [];
+    const currency = profile.currency || 'USD';
+
+    // 1. Coincidencia con servicio específico
+    const matchedService = services.find(
+      (s) =>
+        textLower.includes(s.name.toLowerCase()) ||
+        s.name
+          .toLowerCase()
+          .split(' ')
+          .some((word) => word.length > 4 && textLower.includes(word))
+    );
+
+    if (matchedService) {
+      return {
+        content: `El servicio de ${matchedService.name} tiene un valor de $${matchedService.price} ${currency} (${matchedService.durationMinutes || 60} min). ${matchedService.description ? matchedService.description + '. ' : ''}¿Te gustaría que verifiquemos disponibilidad para agendar tu turno?`,
+        usage: { inputTokens: 0, outputTokens: 0 }
+      };
+    }
+
+    // 2. Consulta de lista de servicios o precios
+    if (
+      textLower.includes('precio') ||
+      textLower.includes('servicio') ||
+      textLower.includes('cuanto') ||
+      textLower.includes('cuánto') ||
+      textLower.includes('vendes') ||
+      textLower.includes('haces') ||
+      textLower.includes('ofrecen') ||
+      textLower.includes('costo')
+    ) {
+      const topServices = services
+        .slice(0, 6)
+        .map((s) => `• ${s.name}: $${s.price} ${currency}`)
+        .join('\n');
+      return {
+        content: `En ${profile.businessName} te ofrecemos los siguientes servicios principales:\n\n${topServices}\n\n¿Te interesa consultar o agendar alguno en particular?`,
+        usage: { inputTokens: 0, outputTokens: 0 }
+      };
+    }
+
+    // 3. Consulta de horarios o ubicación
+    if (
+      textLower.includes('horario') ||
+      textLower.includes('dias') ||
+      textLower.includes('días') ||
+      textLower.includes('hora') ||
+      textLower.includes('donde') ||
+      textLower.includes('dónde') ||
+      textLower.includes('ubicacion') ||
+      textLower.includes('ubicación')
+    ) {
+      return {
+        content: `Estamos disponibles de Lunes a Sábados. ${profile.location ? `Nuestra ubicación es ${profile.location}. ` : ''}¿En qué horario te gustaría coordinar tu atención?`,
+        usage: { inputTokens: 0, outputTokens: 0 }
+      };
+    }
+
+    // 4. Consulta de turnos / disponibilidad
+    if (
+      textLower.includes('turno') ||
+      textLower.includes('agendar') ||
+      textLower.includes('cita') ||
+      textLower.includes('mañana') ||
+      textLower.includes('hoy') ||
+      textLower.includes('disponib')
+    ) {
+      return {
+        content: `Con gusto coordinamos tu turno en ${profile.businessName}. ¿Qué servicio necesitas y en qué día y rango de horario prefieres?`,
+        usage: { inputTokens: 0, outputTokens: 0 }
+      };
+    }
+
+    // 5. Saludo o respuesta general
+    return {
+      content: `¡Hola! Bienvenido/a a ${profile.businessName}. Con gusto te ayudo con información de nuestros servicios, precios y coordinación de turnos. ¿En qué te puedo orientar hoy?`,
+      usage: { inputTokens: 0, outputTokens: 0 }
+    };
   }
 }
