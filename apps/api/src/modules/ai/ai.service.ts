@@ -19,6 +19,7 @@ import { SupervisorAgent } from './agents/supervisor.agent';
 import {
   AiProviderInterface,
   ChatMessage,
+  CompletionResponse,
   ToolCall
 } from './interfaces/ai-provider.interface';
 import {
@@ -62,15 +63,30 @@ export class AiService {
 
   getProvider(providerType?: AIProviderType | string): AiProviderInterface {
     const configured = (providerType || process.env.AI_PROVIDER || 'gemini').toLowerCase();
+    const hasOpenAiCompatible = !!(
+      process.env.OPENAI_API_KEY ||
+      process.env.GROQ_API_KEY ||
+      process.env.OPENROUTER_API_KEY
+    );
+    const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+
     if (configured === 'openai' || configured === 'openrouter' || configured === 'groq') {
-      if (!process.env.OPENAI_API_KEY) {
+      if (!hasOpenAiCompatible) {
+        if (hasGemini) {
+          this.logger.warn('Claves OpenAI/Groq no detectadas, usando Gemini disponible.');
+          return this.geminiProvider;
+        }
         this.logger.warn('OPENAI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
         return this.mockAiProvider;
       }
       return this.openAiProvider;
     }
     if (configured === 'gemini') {
-      if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+      if (!hasGemini) {
+        if (hasOpenAiCompatible) {
+          this.logger.warn('GEMINI_API_KEY no configurada. Conmutando automáticamente a OpenAI/Groq/OpenRouter.');
+          return this.openAiProvider;
+        }
         this.logger.warn('GEMINI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
         return this.mockAiProvider;
       }
@@ -80,8 +96,11 @@ export class AiService {
       return this.mockAiProvider;
     }
     if (!process.env.ANTHROPIC_API_KEY) {
-      if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+      if (hasGemini) {
         return this.geminiProvider;
+      }
+      if (hasOpenAiCompatible) {
+        return this.openAiProvider;
       }
       this.logger.warn('ANTHROPIC_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
       return this.mockAiProvider;
@@ -202,7 +221,8 @@ REGLAS ESTRICTAS:
 - Si te preguntan por los horarios de atención, infórmalos claramente según "Horarios de Atención".
 - No inventes tarifas ni servicios no registrados.
 - No brindes diagnósticos médicos ni prescribas tratamientos.
-- Para verificar disponibilidad o confirmar citas utiliza SIEMPRE las herramientas disponibles.`;
+- Para verificar disponibilidad o confirmar citas utiliza SIEMPRE las herramientas disponibles.
+- Si el cliente solicita explícitamente hablar con una persona, recepcionista o dueño, o expresa un reclamo urgente: utiliza SIEMPRE la herramienta handoff_to_human y confírmale de forma amable que ya avisaste al equipo humano y que le responderán a la brevedad.`;
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -214,15 +234,53 @@ REGLAS ESTRICTAS:
     let handoffReason: string | undefined;
     let iterations = 0;
     const maxIterations = 5;
+    let activeProvider = provider;
 
     while (iterations < maxIterations) {
       iterations++;
-      const response = await provider.chatCompletion(messages, {
-        model: overrideModel,
-        tools,
-        temperature: 0.2,
-        maxTokens: 1000
-      });
+      let response: CompletionResponse;
+
+      try {
+        response = await activeProvider.chatCompletion(messages, {
+          model: overrideModel,
+          tools,
+          temperature: 0.2,
+          maxTokens: 1000
+        });
+      } catch (err: any) {
+        const hasOpenAiCompatible = !!(
+          process.env.OPENAI_API_KEY ||
+          process.env.GROQ_API_KEY ||
+          process.env.OPENROUTER_API_KEY
+        );
+        const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+
+        if (activeProvider !== this.openAiProvider && hasOpenAiCompatible) {
+          this.logger.warn(
+            `[AI FAILOVER] Proveedor ${activeProvider.providerName} no disponible (${err.message}). Conmutando automáticamente a OpenAI/Groq/OpenRouter...`
+          );
+          activeProvider = this.openAiProvider;
+          response = await activeProvider.chatCompletion(messages, {
+            model: overrideModel,
+            tools,
+            temperature: 0.2,
+            maxTokens: 1000
+          });
+        } else if (activeProvider !== this.geminiProvider && hasGemini) {
+          this.logger.warn(
+            `[AI FAILOVER] Proveedor ${activeProvider.providerName} no disponible (${err.message}). Conmutando automáticamente a Gemini...`
+          );
+          activeProvider = this.geminiProvider;
+          response = await activeProvider.chatCompletion(messages, {
+            model: overrideModel,
+            tools,
+            temperature: 0.2,
+            maxTokens: 1000
+          });
+        } else {
+          throw err;
+        }
+      }
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
         // Verificación de grounding de salida
@@ -232,8 +290,31 @@ REGLAS ESTRICTAS:
           this.logger.warn(`Grounding violation: ${grounding.violation}`);
         }
 
+        const finalContent = response.content || '¿En qué más te puedo colaborar hoy?';
+        const textLower = finalContent.toLowerCase();
+        const humanTransferPatterns = [
+          'recepcionista te responderá',
+          'persona te responderá',
+          'humano te responderá',
+          'humana te responderá',
+          'asesor se comunicará',
+          'equipo se comunicará',
+          'comunicará contigo a la brevedad',
+          'comunicará con vos a la brevedad',
+          'te paso con una persona',
+          'te comunico con un asesor',
+          'te comunico con una recepcionista'
+        ];
+        if (!handoffToHuman && humanTransferPatterns.some((pattern) => textLower.includes(pattern))) {
+          handoffToHuman = true;
+          handoffReason = 'Promesa de atención humana en la respuesta';
+          await this.conversationRepo.update(conversationId, {
+            status: ConversationStatus.HUMAN_TAKEOVER
+          });
+        }
+
         return {
-          replyText: response.content || '¿En qué más te puedo colaborar hoy?',
+          replyText: finalContent,
           toolExecutions,
           handoffToHuman,
           handoffReason

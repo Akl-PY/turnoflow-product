@@ -10,7 +10,8 @@ import {
   UseGuards,
   Request,
   HttpCode,
-  HttpStatus
+  HttpStatus,
+  Logger
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -23,6 +24,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @ApiTags('Conversations & Webhooks')
 @Controller('conversations')
 export class ConversationsController {
+  private readonly logger = new Logger(ConversationsController.name);
+
   constructor(
     private readonly conversationsService: ConversationsService,
     private readonly integrationsService: IntegrationsService,
@@ -130,12 +133,7 @@ export class ConversationsController {
       return { status: 'ignored_event', event: body.event };
     }
 
-    // 1. Si el mensaje fue enviado por la propia línea (fromMe === true), ignorarlo para no hacer bucle ni pausar la IA
-    if (key.fromMe) {
-      return { status: 'ignored_from_me' };
-    }
-
-    // 2. Resolver el JID real del cliente (soportando @lid + remoteJidAlt en Evolution API v2.3.7)
+    // 1. Resolver el JID real del contacto (soportando @lid + remoteJidAlt en Evolution API v2.3.7)
     const primaryJid = typeof key.remoteJid === 'string' ? key.remoteJid : '';
     const altJid = typeof key.remoteJidAlt === 'string' ? key.remoteJidAlt : '';
 
@@ -156,7 +154,7 @@ export class ConversationsController {
       return { status: 'ignored_unresolved_lid' };
     }
 
-    // 3. Extraer texto del cliente
+    // 2. Extraer texto del mensaje
     const rawText =
       message.conversation ||
       message.extendedTextMessage?.text ||
@@ -166,10 +164,6 @@ export class ConversationsController {
       body.text ||
       '';
 
-    if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
-      return { status: 'ignored_non_text_or_empty' };
-    }
-
     const senderPhone = bestJid
       .replace('@s.whatsapp.net', '')
       .replace('@c.us', '')
@@ -178,6 +172,35 @@ export class ConversationsController {
 
     if (!senderPhone || senderPhone.length < 7) {
       return { status: 'ignored_invalid_phone' };
+    }
+
+    // 3. Manejo de mensajes salientes (fromMe === true)
+    if (key.fromMe) {
+      const isFromBot = this.integrationsService.isBotSentMessage(
+        key.id || data.id,
+        typeof rawText === 'string' ? rawText : undefined
+      );
+
+      // Si el mensaje lo envió el propio bot de TurnoFlow, ignorarlo para no generar bucles
+      if (isFromBot) {
+        return { status: 'ignored_bot_outgoing' };
+      }
+
+      // Si no lo envió el bot, fue un operador/dueño humano desde el celular o WhatsApp Web
+      // Pausar inmediatamente la IA para este cliente por 24hs
+      this.logger.log(
+        `[INTERVENCIÓN MANUAL] Operador humano respondió a ${senderPhone} desde WhatsApp. Bot pausado por 24 horas.`
+      );
+      await this.conversationsService.recordHumanIntervention(
+        resolvedOrgId,
+        senderPhone,
+        typeof rawText === 'string' ? rawText.trim() : undefined
+      );
+      return { status: 'human_takeover_recorded', phone: senderPhone };
+    }
+
+    if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
+      return { status: 'ignored_non_text_or_empty' };
     }
 
     const senderName = data.pushName || body.pushName || 'Cliente';
@@ -197,8 +220,8 @@ export class ConversationsController {
       return { status: 'duplicate_ignored' };
     }
 
-    // Enviar la respuesta generada por la IA al WhatsApp del cliente
-    if (result.replyMessage) {
+    // Enviar la respuesta generada por la IA al WhatsApp del cliente si hay texto para responder
+    if (result.replyMessage && result.replyMessage.trim()) {
       await this.integrationsService.sendQRWhatsAppMessage(
         resolvedOrgId,
         senderPhone,

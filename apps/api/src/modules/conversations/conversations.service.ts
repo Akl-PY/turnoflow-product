@@ -84,25 +84,53 @@ export class ConversationsService {
     }
 
     // 2. Buscar o crear conversación
-    let conversation = await this.conversationRepo.findOne({
-      where: {
-        organizationId: orgId,
-        channelConversationId: params.senderPhone
-      }
-    });
+    let conversation = await this.findByPhone(orgId, params.senderPhone);
 
     if (!conversation) {
       conversation = this.conversationRepo.create({
         organizationId: orgId,
         channel: params.channel,
-        channelConversationId: params.senderPhone,
+        channelConversationId: params.senderPhone.startsWith('+') ? params.senderPhone : `+${params.senderPhone}`,
         status: ConversationStatus.AI_HANDLED,
         messagesCount: 0
       });
       conversation = await this.conversationRepo.save(conversation);
     } else if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
-      // Reactivar atención de IA para nuevas consultas del cliente
-      conversation.status = ConversationStatus.AI_HANDLED;
+      const lastUpdate = conversation.updatedAt ? new Date(conversation.updatedAt).getTime() : 0;
+      const hoursSinceHandoff = (Date.now() - lastUpdate) / (1000 * 60 * 60);
+
+      // Si pasaron menos de 24 horas desde la intervención humana, el bot permanece en silencio absoluto
+      if (hoursSinceHandoff < 24) {
+        this.logger.log(
+          `[SILENCIO 24HS] Chat en atención humana (${hoursSinceHandoff.toFixed(1)}hs transcurridas < 24hs). Guardando mensaje de ${params.senderPhone} sin responder con IA.`
+        );
+
+        // Guardar mensaje del usuario en BD para que el operador lo lea
+        const userMsg = this.messageRepo.create({
+          conversationId: conversation.id,
+          sender: MessageSender.USER,
+          content: params.messageText,
+          externalMessageId: params.externalMessageId
+        });
+        await this.messageRepo.save(userMsg);
+
+        conversation.lastMessagePreview = params.messageText.substring(0, 100);
+        conversation.messagesCount += 1;
+        await this.conversationRepo.save(conversation);
+
+        return {
+          replyMessage: '',
+          handoffToHuman: true,
+          duplicate: false
+        };
+      } else {
+        // Pasaron 24 horas o más: reactivación automática de la IA para nuevas consultas
+        this.logger.log(
+          `[AUTO-REACTIVACIÓN 24HS] Han pasado ${hoursSinceHandoff.toFixed(1)}hs (>= 24hs). Reactivando IA automáticamente para ${params.senderPhone}.`
+        );
+        conversation.status = ConversationStatus.AI_HANDLED;
+        await this.conversationRepo.save(conversation);
+      }
     }
 
     // Guardar mensaje entrante del usuario
@@ -153,6 +181,7 @@ export class ConversationsService {
     conversation.messagesCount += 2;
     if (aiResult.handoffToHuman) {
       conversation.status = ConversationStatus.HUMAN_TAKEOVER;
+      conversation.updatedAt = new Date();
 
       // Alerta urgente al administrador por WhatsApp
       if (this.profileRepo && this.integrationsService) {
@@ -198,8 +227,13 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
   }
 
   async findByPhone(organizationId: string, phone: string): Promise<Conversation | null> {
+    const cleanDigits = phone.replace(/\D/g, '');
     return this.conversationRepo.findOne({
-      where: { organizationId, channelConversationId: phone }
+      where: [
+        { organizationId, channelConversationId: phone },
+        { organizationId, channelConversationId: `+${cleanDigits}` },
+        { organizationId, channelConversationId: cleanDigits }
+      ]
     });
   }
 
@@ -209,6 +243,50 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       throw new BadRequestException('Conversación no encontrada.');
     }
     conv.status = ConversationStatus.HUMAN_TAKEOVER;
+    conv.updatedAt = new Date();
     return this.conversationRepo.save(conv);
+  }
+
+  async recordHumanIntervention(
+    organizationId: string,
+    clientPhone: string,
+    messageText?: string
+  ): Promise<Conversation> {
+    let conversation = await this.findByPhone(organizationId, clientPhone);
+    const cleanPhone = clientPhone.startsWith('+') ? clientPhone : `+${clientPhone.replace(/\D/g, '')}`;
+
+    if (!conversation) {
+      conversation = this.conversationRepo.create({
+        organizationId,
+        channel: 'whatsapp_qr',
+        channelConversationId: cleanPhone,
+        status: ConversationStatus.HUMAN_TAKEOVER,
+        messagesCount: 1,
+        lastMessagePreview: messageText ? messageText.substring(0, 100) : 'Atención manual'
+      });
+      conversation = await this.conversationRepo.save(conversation);
+    } else {
+      conversation.status = ConversationStatus.HUMAN_TAKEOVER;
+      conversation.updatedAt = new Date();
+      if (messageText) {
+        conversation.lastMessagePreview = messageText.substring(0, 100);
+        conversation.messagesCount += 1;
+      }
+      await this.conversationRepo.save(conversation);
+    }
+
+    if (messageText) {
+      const msg = this.messageRepo.create({
+        conversationId: conversation.id,
+        sender: MessageSender.AI,
+        content: messageText
+      });
+      await this.messageRepo.save(msg);
+    }
+
+    this.logger.log(
+      `[PAUSA HUMANA] Operador intervino manualmente para ${cleanPhone}. Bot silenciado durante 24 horas.`
+    );
+    return conversation;
   }
 }

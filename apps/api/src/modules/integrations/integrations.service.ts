@@ -17,6 +17,40 @@ interface QRSessionState {
 export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
   private readonly qrSessions = new Map<string, QRSessionState>();
+  private readonly recentBotMessages = new Map<string, number>();
+
+  recordBotSentMessage(messageId?: string, text?: string) {
+    const now = Date.now();
+    if (messageId) {
+      this.recentBotMessages.set(`id:${messageId}`, now);
+    }
+    if (text) {
+      const textKey = `text:${text.trim().substring(0, 80)}`;
+      this.recentBotMessages.set(textKey, now);
+    }
+
+    if (this.recentBotMessages.size > 200) {
+      for (const [k, ts] of this.recentBotMessages.entries()) {
+        if (now - ts > 300000) {
+          this.recentBotMessages.delete(k);
+        }
+      }
+    }
+  }
+
+  isBotSentMessage(messageId?: string, text?: string): boolean {
+    const now = Date.now();
+    if (messageId && this.recentBotMessages.has(`id:${messageId}`)) {
+      return true;
+    }
+    if (text) {
+      const textKey = `text:${text.trim().substring(0, 80)}`;
+      if (this.recentBotMessages.has(textKey)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   async generateQRSession(organizationId: string): Promise<{ qrCode: string; pairingCode?: string; status: string; expiresAt: string }> {
     const rawUrl = process.env.EVOLUTION_API_URL || '';
@@ -246,11 +280,13 @@ export class IntegrationsService {
     const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
 
     if (!evolutionUrl || !evolutionKey) {
+      this.recordBotSentMessage(undefined, text);
       this.logger.log(`[QR MOCK] WhatsApp QR saliente a ${to}: "${text.substring(0, 60)}..."`);
       return { success: true, messageId: `mock-wa-qr-${Date.now()}` };
     }
 
     try {
+      this.recordBotSentMessage(undefined, text);
       const instanceName =
         explicitInstanceName || `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
       const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
@@ -271,8 +307,13 @@ export class IntegrationsService {
         }
       );
 
-      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution (${instanceName}): ${response.data?.key?.id || 'ok'}`);
-      return { success: true, messageId: response.data?.key?.id };
+      const msgId = response.data?.key?.id;
+      if (msgId) {
+        this.recordBotSentMessage(msgId, text);
+      }
+
+      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`);
+      return { success: true, messageId: msgId };
     } catch (err: any) {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
       return { success: false };
