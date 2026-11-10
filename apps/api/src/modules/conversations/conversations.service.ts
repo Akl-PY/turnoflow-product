@@ -112,7 +112,7 @@ export class ConversationsService {
       });
       conversation = await this.conversationRepo.save(conversation);
     } else if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
-      // Buscar la última intervención humana real en los mensajes
+      // Buscar la última intervención humana (desde WhatsApp o desde el Panel)
       const lastHumanMsg = await this.messageRepo.findOne({
         where: {
           conversationId: conversation.id,
@@ -121,23 +121,15 @@ export class ConversationsService {
         order: { createdAt: 'DESC' }
       });
 
+      // Si existe mensaje humano medimos desde ahí; si no, desde que se pausó la conversación
       const lastInterventionTime = lastHumanMsg
         ? new Date(lastHumanMsg.createdAt).getTime()
-        : 0;
+        : (conversation.updatedAt ? new Date(conversation.updatedAt).getTime() : Date.now());
 
-      const hoursSinceHandoff = lastInterventionTime > 0
-        ? (Date.now() - lastInterventionTime) / (1000 * 60 * 60)
-        : 999;
+      const hoursSinceHandoff = (Date.now() - lastInterventionTime) / (1000 * 60 * 60);
 
-      // Si no hubo intervención humana real o si pasaron 24hs o más: reactivar IA automáticamente
-      if (!lastHumanMsg || hoursSinceHandoff >= 24) {
-        this.logger.log(
-          `[AUTO-REACTIVACIÓN] ${!lastHumanMsg ? 'Sin mensaje humano previo' : `Han pasado ${hoursSinceHandoff.toFixed(1)}hs (>= 24hs)`}. Reactivando IA automáticamente para ${params.senderPhone}.`
-        );
-        conversation.status = ConversationStatus.AI_HANDLED;
-        await this.conversationRepo.save(conversation);
-      } else {
-        // Si un operador humano intervino hace menos de 24 horas, el bot permanece en silencio
+      // Si pasaron menos de 24 horas desde la intervención, el bot permanece en SILENCIO ABSOLUTO
+      if (hoursSinceHandoff < 24) {
         this.logger.log(
           `[SILENCIO 24HS] Chat en atención humana (${hoursSinceHandoff.toFixed(1)}hs transcurridas < 24hs). Guardando mensaje de ${params.senderPhone} sin responder con IA.`
         );
@@ -151,15 +143,24 @@ export class ConversationsService {
         });
         await this.messageRepo.save(userMsg);
 
-        conversation.lastMessagePreview = params.messageText.substring(0, 100);
-        conversation.messagesCount += 1;
-        await this.conversationRepo.save(conversation);
+        // Actualizar preview sin alterar updatedAt para no estirar artificialmente las 24hs
+        await this.conversationRepo.update(conversation.id, {
+          lastMessagePreview: params.messageText.substring(0, 100),
+          messagesCount: (conversation.messagesCount || 0) + 1
+        });
 
         return {
           replyMessage: '',
           handoffToHuman: true,
           duplicate: false
         };
+      } else {
+        // Pasaron 24 horas o más: reactivación automática de la IA para nuevas consultas
+        this.logger.log(
+          `[AUTO-REACTIVACIÓN 24HS] Han pasado ${hoursSinceHandoff.toFixed(1)}hs (>= 24hs). Reactivando IA automáticamente para ${params.senderPhone}.`
+        );
+        conversation.status = ConversationStatus.AI_HANDLED;
+        await this.conversationRepo.save(conversation);
       }
     }
 
@@ -190,11 +191,41 @@ export class ConversationsService {
     } catch (err: any) {
       this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
 
+      // Comprobar si el último mensaje ya fue una disculpa o aviso de demora
+      const lastMsg = await this.messageRepo.findOne({
+        where: { conversationId: conversation.id },
+        order: { createdAt: 'DESC' }
+      });
+
+      const isRepeatedFailure =
+        lastMsg &&
+        lastMsg.sender === MessageSender.AI &&
+        (lastMsg.content.includes('demora técnica') ||
+          lastMsg.content.includes('Disculpa la demora') ||
+          lastMsg.content.includes('equipo'));
+
+      if (isRepeatedFailure) {
+        // Si ya le avisamos hace un instante, NO spamear al cliente en cada mensaje que mande
+        this.logger.warn(
+          `[AI ERROR SILENCE] Error recurrente de IA en conversación ${conversation.id}. Silenciando bot para no cansar al cliente.`
+        );
+        conversation.status = ConversationStatus.HUMAN_TAKEOVER;
+        await this.conversationRepo.save(conversation);
+
+        return {
+          replyMessage: '',
+          handoffToHuman: true,
+          duplicate: false
+        };
+      }
+
+      // Primera falla: avisar educadamente y pausar el bot de inmediato
       aiResult = {
-        replyText: 'Disculpa la demora momentánea. ¿Podrías reiterarme tu consulta o qué servicio te gustaría consultar?',
+        replyText:
+          'En este momento estoy teniendo una pequeña demora técnica. Ya le avisé a nuestro equipo para que te responda en breve.',
         toolExecutions: [],
-        handoffToHuman: false, // Error técnico transitorio: NO bloquear la conversación por 24hs
-        handoffReason: undefined
+        handoffToHuman: true,
+        handoffReason: 'Falla técnica del proveedor de IA'
       };
     }
 
@@ -392,7 +423,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     if (messageText) {
       const msg = this.messageRepo.create({
         conversationId: conversation.id,
-        sender: MessageSender.AI,
+        sender: MessageSender.HUMAN_AGENT,
         content: messageText
       });
       await this.messageRepo.save(msg);
