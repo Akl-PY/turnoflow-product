@@ -16,9 +16,13 @@ export class GeminiProvider implements AiProviderInterface {
   private readonly defaultModel: string;
 
   constructor() {
-    this.apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-    // gemini-1.5-flash cuenta con 1.500 solicitudes gratuitas diarias (a diferencia de gemini-2.5-flash que es experimental y limita a 20)
-    this.defaultModel = process.env.AI_MODEL || 'gemini-1.5-flash';
+    const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    this.apiKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
+
+    const rawModel = process.env.AI_MODEL || '';
+    const cleanModel = rawModel.replace(/^['"]|['"]$/g, '').trim();
+    // gemini-1.5-flash cuenta con 1.500 solicitudes gratuitas diarias (a diferencia de gemini-2.5-flash que en free tier limita a 20)
+    this.defaultModel = cleanModel || 'gemini-1.5-flash';
   }
 
   async chatCompletion(
@@ -29,7 +33,8 @@ export class GeminiProvider implements AiProviderInterface {
       throw new Error('GEMINI_API_KEY (o GOOGLE_API_KEY) no está configurada.');
     }
 
-    const primaryModel = options?.model || this.defaultModel;
+    const rawRequested = options?.model || this.defaultModel;
+    const primaryModel = rawRequested.replace(/^['"]|['"]$/g, '').trim();
     // Lista de modelos ordenados para fallback automático si el principal agota su cuota
     const modelsToTry = [
       primaryModel,
