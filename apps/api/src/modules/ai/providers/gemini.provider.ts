@@ -21,8 +21,8 @@ export class GeminiProvider implements AiProviderInterface {
 
     const rawModel = process.env.AI_MODEL || '';
     const cleanModel = rawModel.replace(/^['"]|['"]$/g, '').trim();
-    // gemini-1.5-flash cuenta con 1.500 solicitudes gratuitas diarias (a diferencia de gemini-2.5-flash que en free tier limita a 20)
-    this.defaultModel = cleanModel || 'gemini-1.5-flash';
+    // gemini-3.5-flash y gemini-3.5-flash-lite son los modelos activos de Google AI Studio con cuota disponible
+    this.defaultModel = cleanModel || 'gemini-3.5-flash';
   }
 
   async chatCompletion(
@@ -35,12 +35,13 @@ export class GeminiProvider implements AiProviderInterface {
 
     const rawRequested = options?.model || this.defaultModel;
     const primaryModel = rawRequested.replace(/^['"]|['"]$/g, '').trim();
-    // Lista de modelos ordenados para fallback automático si el principal agota su cuota
+
+    // Lista de modelos ordenados para fallback automático si el principal está deprecated o agota cuota
     const modelsToTry = [
       primaryModel,
-      'gemini-1.5-flash',
-      'gemini-1.5-flash-8b',
-      'gemini-2.0-flash'
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash'
     ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
     const temperature = options?.temperature ?? 0.2;
@@ -128,15 +129,18 @@ export class GeminiProvider implements AiProviderInterface {
       } catch (error: any) {
         lastError = error;
         const errDetails = error.response?.data?.error?.message || error.message;
-        const isQuota =
-          error.response?.status === 429 ||
+        const status = error.response?.status;
+        const isRetryable =
+          status === 429 ||
+          status === 404 ||
           errDetails?.toLowerCase().includes('quota') ||
-          errDetails?.toLowerCase().includes('rate');
+          errDetails?.toLowerCase().includes('rate') ||
+          errDetails?.toLowerCase().includes('not found') ||
+          errDetails?.toLowerCase().includes('no longer available');
 
-        this.logger.warn(`Modelo ${model} no disponible (${errDetails}). Intentando siguiente opción...`);
+        this.logger.warn(`Modelo ${model} no disponible (${status || ''} ${errDetails}). Intentando siguiente opción...`);
 
-        // Si no es error de cuota/rate limit, no tiene sentido reintentar otros modelos
-        if (!isQuota) {
+        if (!isRetryable) {
           break;
         }
       }
