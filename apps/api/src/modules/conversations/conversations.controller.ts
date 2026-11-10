@@ -137,8 +137,25 @@ export class ConversationsController {
     const primaryJid = typeof key.remoteJid === 'string' ? key.remoteJid : '';
     const altJid = typeof key.remoteJidAlt === 'string' ? key.remoteJidAlt : '';
 
-    // Ignorar grupos y estados de difusión
-    if (primaryJid.includes('@g.us') || primaryJid.includes('@broadcast') || altJid.includes('@g.us')) {
+    // Ignorar grupos y estados de difusión (Blindaje estricto contra grupos de WhatsApp)
+    const isGroupOrBroadcast =
+      body.isGroup === true ||
+      data.isGroup === true ||
+      body.group === true ||
+      data.group === true ||
+      !!key.participant ||
+      !!data.participant ||
+      primaryJid.endsWith('@g.us') ||
+      primaryJid.includes('@g.us') ||
+      primaryJid.includes('@broadcast') ||
+      primaryJid.includes('@newsletter') ||
+      primaryJid.includes('@temp') ||
+      altJid.endsWith('@g.us') ||
+      altJid.includes('@g.us') ||
+      altJid.includes('@broadcast') ||
+      altJid.includes('@newsletter');
+
+    if (isGroupOrBroadcast) {
       return { status: 'ignored_group_or_broadcast' };
     }
 
@@ -170,8 +187,9 @@ export class ConversationsController {
       .split(':')[0]
       .replace(/\D/g, '');
 
-    if (!senderPhone || senderPhone.length < 7) {
-      return { status: 'ignored_invalid_phone' };
+    const digitsOnly = senderPhone.replace(/\D/g, '');
+    if (!senderPhone || digitsOnly.startsWith('120363') || digitsOnly.length > 15 || digitsOnly.length < 8) {
+      return { status: 'ignored_group_or_invalid_phone', senderPhone };
     }
 
     // 3. Manejo de mensajes salientes (fromMe === true)
@@ -279,6 +297,18 @@ export class ConversationsController {
     }
 
     const senderPhone = message.from;
+    const cleanPhoneDigits = (senderPhone || '').replace(/\D/g, '');
+    if (
+      !senderPhone ||
+      senderPhone.includes('@g.us') ||
+      cleanPhoneDigits.startsWith('120363') ||
+      cleanPhoneDigits.length > 15 ||
+      cleanPhoneDigits.length < 8 ||
+      message.group_id
+    ) {
+      return { status: 'ignored_group_message' };
+    }
+
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
 
@@ -347,6 +377,18 @@ export class ConversationsController {
     }
 
     const senderPhone = message.from;
+    const cleanPhoneDigits = (senderPhone || '').replace(/\D/g, '');
+    if (
+      !senderPhone ||
+      senderPhone.includes('@g.us') ||
+      cleanPhoneDigits.startsWith('120363') ||
+      cleanPhoneDigits.length > 15 ||
+      cleanPhoneDigits.length < 8 ||
+      message.group_id
+    ) {
+      return { status: 'ignored_group_message' };
+    }
+
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
     const metadata = changes?.value?.metadata;

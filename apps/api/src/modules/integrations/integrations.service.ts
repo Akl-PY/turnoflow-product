@@ -279,6 +279,18 @@ export class IntegrationsService {
     const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
     const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
 
+    const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
+    if (
+      to.includes('@g.us') ||
+      to.includes('@broadcast') ||
+      to.includes('@newsletter') ||
+      cleanPhone.startsWith('120363') ||
+      cleanPhone.length > 15
+    ) {
+      this.logger.warn(`Intento de envío de mensaje QR a grupo bloqueado por blindaje: ${to}`);
+      return { success: false };
+    }
+
     if (!evolutionUrl || !evolutionKey) {
       this.recordBotSentMessage(undefined, text);
       this.logger.log(`[QR MOCK] WhatsApp QR saliente a ${to}: "${text.substring(0, 60)}..."`);

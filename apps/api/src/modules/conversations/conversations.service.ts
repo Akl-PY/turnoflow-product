@@ -13,6 +13,7 @@ import { ConversationStatus, MessageSender } from '@turnoflow/shared';
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
   private readonly processingExternalIds = new Set<string>();
+  private readonly recentAdminAlerts = new Map<string, number>();
 
   constructor(
     @InjectRepository(Conversation)
@@ -63,6 +64,21 @@ export class ConversationsService {
     organizationId?: string;
   }): Promise<{ replyMessage: string; handoffToHuman: boolean; duplicate?: boolean }> {
     const orgId = params.organizationId || 'default-org-id';
+
+    // Blindaje estricto: rechazar cualquier mensaje proveniente de grupos de WhatsApp, canales o difusiones
+    const cleanDigits = (params.senderPhone || '').replace(/\D/g, '');
+    if (
+      params.channel === 'whatsapp_group' ||
+      params.senderPhone.includes('@g.us') ||
+      params.senderPhone.includes('@broadcast') ||
+      params.senderPhone.includes('@newsletter') ||
+      cleanDigits.startsWith('120363') ||
+      cleanDigits.length > 15 ||
+      cleanDigits.length < 8
+    ) {
+      this.logger.warn(`[BLINDAJE GRUPO] Mensaje de grupo o número inválido descartado: ${params.senderPhone}`);
+      return { replyMessage: '', handoffToHuman: false, duplicate: false };
+    }
 
     // 1. Verificación atómica en memoria + base de datos (Idempotencia contra doble evento @lid / global webhook)
     if (params.externalMessageId) {
@@ -159,36 +175,60 @@ export class ConversationsService {
           };
     } catch (err: any) {
       this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
+
+      // Consultar si ya se le había enviado aviso de recepcionista o si la conversación ya estaba derivada
+      const lastAiMessage = await this.messageRepo.findOne({
+        where: {
+          conversationId: conversation.id,
+          sender: MessageSender.AI
+        },
+        order: { createdAt: 'DESC' }
+      });
+
+      const alreadyNotified =
+        lastAiMessage?.content?.includes('recepcionista') ||
+        lastAiMessage?.content?.includes('asistencia humana') ||
+        lastAiMessage?.content?.includes('un asesor') ||
+        conversation.status === ConversationStatus.HUMAN_TAKEOVER;
+
       aiResult = {
-        replyText: '¡Hola! Recibimos tu consulta. En este momento una recepcionista del equipo te responderá a la brevedad.',
+        replyText: alreadyNotified
+          ? '' // No saturar al cliente con mensajes repetidos si el modelo cayó; frenar en silencio absoluto
+          : '¡Hola! Recibimos tu consulta. En este momento una recepcionista del equipo te responderá a la brevedad.',
         toolExecutions: [],
         handoffToHuman: true,
         handoffReason: `Fallo de proveedor IA: ${err.message}`
       };
     }
 
-    // Guardar respuesta del asistente
-    const aiMsg = this.messageRepo.create({
-      conversationId: conversation.id,
-      sender: MessageSender.AI,
-      content: aiResult.replyText,
-      toolCalls: aiResult.toolExecutions
-    });
-    await this.messageRepo.save(aiMsg);
+    // Guardar respuesta del asistente solo si hay texto para enviar
+    if (aiResult.replyText && aiResult.replyText.trim()) {
+      const aiMsg = this.messageRepo.create({
+        conversationId: conversation.id,
+        sender: MessageSender.AI,
+        content: aiResult.replyText,
+        toolCalls: aiResult.toolExecutions
+      });
+      await this.messageRepo.save(aiMsg);
+      conversation.lastMessagePreview = aiResult.replyText.substring(0, 100);
+      conversation.messagesCount += 1;
+    }
 
-    // Actualizar metadata de la conversación
-    conversation.lastMessagePreview = aiResult.replyText.substring(0, 100);
-    conversation.messagesCount += 2;
     if (aiResult.handoffToHuman) {
       conversation.status = ConversationStatus.HUMAN_TAKEOVER;
       conversation.updatedAt = new Date();
 
-      // Alerta urgente al administrador por WhatsApp
-      if (this.profileRepo && this.integrationsService) {
+      // Alerta urgente al administrador por WhatsApp (limitada a 1 cada 6 horas por cliente para no saturar al admin)
+      const now = Date.now();
+      const lastAlertTs = this.recentAdminAlerts.get(params.senderPhone) || 0;
+      const hoursSinceLastAlert = (now - lastAlertTs) / (1000 * 60 * 60);
+
+      if (hoursSinceLastAlert >= 6 && this.profileRepo && this.integrationsService) {
         try {
           const profile = await this.profileRepo.findOne({ where: { organizationId: orgId } });
           const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
           if (adminPhone && adminPhone.replace(/\D/g, '') !== params.senderPhone.replace(/\D/g, '')) {
+            this.recentAdminAlerts.set(params.senderPhone, now);
             const alertText = `🚨 *[TurnoFlow Alerta de Atención]*
 El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) necesita asistencia humana.
 
