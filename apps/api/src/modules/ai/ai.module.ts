@@ -5,6 +5,7 @@ import { Lead } from '../../entities/lead.entity';
 import { Appointment } from '../../entities/appointment.entity';
 import { Conversation } from '../../entities/conversation.entity';
 import { AgentConfigEntity } from '../../entities/agent-config.entity';
+import { Message } from '../../entities/message.entity';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { AiService } from './ai.service';
 import { AiController } from './ai.controller';
@@ -26,6 +27,7 @@ import { SupervisorAgent } from './agents/supervisor.agent';
       Lead,
       Appointment,
       Conversation,
+      Message,
       AgentConfigEntity
     ])
   ],

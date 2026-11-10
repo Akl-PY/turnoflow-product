@@ -5,6 +5,7 @@ import { BusinessProfile } from '../../entities/business-profile.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Appointment } from '../../entities/appointment.entity';
 import { Conversation } from '../../entities/conversation.entity';
+import { Message } from '../../entities/message.entity';
 import { AgentConfigEntity } from '../../entities/agent-config.entity';
 import { ScalinkyService } from '../integrations/scalinky.service';
 import { AnthropicProvider } from './providers/anthropic.provider';
@@ -30,7 +31,8 @@ import {
   LeadIntent,
   LeadPriority,
   AppointmentStatus,
-  ToolExecutionRecord
+  ToolExecutionRecord,
+  MessageSender
 } from '@turnoflow/shared';
 
 @Injectable()
@@ -58,7 +60,10 @@ export class AiService {
     private readonly bookingAgent: BookingAgent,
     private readonly supervisorAgent: SupervisorAgent,
     @Optional()
-    private readonly scalinkyService?: ScalinkyService
+    private readonly scalinkyService?: ScalinkyService,
+    @Optional()
+    @InjectRepository(Message)
+    private readonly messageRepo?: Repository<Message>
   ) {}
 
   getProvider(providerType?: AIProviderType | string): AiProviderInterface {
@@ -205,27 +210,83 @@ ${servListStr}
             .join('\n')
         : 'Consultar mediante herramienta get_services';
 
-    const systemPrompt = `Eres el Asente Inteligente de Recepción de ${profile.businessName}.
+    const now = new Date();
+    const timeZone = profile.timezone || 'America/Argentina/Buenos_Aires';
+    let dateFormatted = now.toISOString().split('T')[0];
+    let timeFormatted = '12:00';
+    try {
+      dateFormatted = now.toLocaleDateString('es-AR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone
+      });
+      timeFormatted = now.toLocaleTimeString('es-AR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone
+      });
+    } catch {
+      // Ignorar si falla formato localizado
+    }
+    const isoDate = now.toISOString().split('T')[0];
+
+    const systemPrompt = `Eres el Asistente Inteligente de Recepción y Ventas de ${profile.businessName}.
 Rubro: ${profile.vertical}.
 Ubicación: ${profile.location}.
 Horarios de Atención: ${hoursList}.
-Zona Horaria: ${profile.timezone}.
+Zona Horaria: ${timeZone}.
+FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
 Política de Cancelación: ${profile.cancellationPolicy}.
-Servicios del Salón:
+Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
 
-REGLAS ESTRICTAS:
-- Responde con calidez, amabilidad y concisión en español latinoamericano.
-- Si te preguntan por los horarios de atención, infórmalos claramente según "Horarios de Atención".
-- No inventes tarifas ni servicios no registrados.
-- No brindes diagnósticos médicos ni prescribas tratamientos.
-- Para verificar disponibilidad o confirmar citas utiliza SIEMPRE las herramientas disponibles.
-- Si el cliente solicita explícitamente hablar con una persona, recepcionista o dueño, o expresa un reclamo urgente: utiliza SIEMPRE la herramienta handoff_to_human y confírmale de forma amable que ya avisaste al equipo humano y que le responderán a la brevedad.`;
+REGLAS ESTRICTAS DE CONVERSACIÓN:
+1. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un servicio específico (ej. "puesta a punto", "limpieza general", etc.) en mensajes anteriores, NO le vuelvas a preguntar qué servicio necesita. Usa ese servicio directamente para cotizar o verificar disponibilidad.
+2. CÁLCULO DE FECHAS: Cuando el cliente diga "mañana", "hoy", "este viernes", calcula la fecha exacta en base a la FECHA ACTUAL (${isoDate}).
+3. NO SALUDES REPETIDAMENTE: Si la conversación ya está en curso (hay mensajes previos en el historial), NO vuelvas a decir "¡Hola!" o "Bienvenido/a". Responde de forma directa, ágil y conversacional como un humano en WhatsApp.
+4. CONSULTA DE DISPONIBILIDAD: Para verificar turnos libres, llama SIEMPRE a la herramienta 'check_availability' con la fecha calculada (YYYY-MM-DD) y el nombre del servicio.
+5. NO INVENTES: No inventes precios ni servicios que no estén en la lista.
+6. ATENCIÓN HUMANA: Si el cliente solicita explícitamente hablar con una persona, recepcionista o dueño, o expresa un reclamo urgente: utiliza SIEMPRE la herramienta handoff_to_human y confírmale de forma amable que ya avisaste al equipo humano y que le responderán a la brevedad.`;
+
+    const historyMessages: ChatMessage[] = [];
+
+    if (this.messageRepo && conversationId) {
+      try {
+        const dbMessages = await this.messageRepo.find({
+          where: { conversationId },
+          order: { createdAt: 'DESC' },
+          take: 12
+        });
+        dbMessages.reverse();
+
+        for (const m of dbMessages) {
+          if (!m.content || !m.content.trim()) continue;
+          // Si el mensaje en base de datos es exactamente el mensaje de usuario que acaba de llegar, omitirlo para no duplicarlo
+          if (
+            m.sender === MessageSender.USER &&
+            m.content.trim() === userText.trim() &&
+            m === dbMessages[dbMessages.length - 1]
+          ) {
+            continue;
+          }
+
+          historyMessages.push({
+            role: m.sender === MessageSender.USER ? 'user' : 'assistant',
+            content: m.content
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`No se pudo cargar historial de conversación: ${err.message}`);
+      }
+    }
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
+      ...historyMessages,
       { role: 'user', content: userText }
     ];
 
@@ -290,7 +351,24 @@ REGLAS ESTRICTAS:
           this.logger.warn(`Grounding violation: ${grounding.violation}`);
         }
 
-        const finalContent = response.content || '¿En qué más te puedo colaborar hoy?';
+        let finalContent = (response.content || '').trim();
+
+        // Si la IA ejecutó herramientas pero no devolvió texto final, sintetizar la respuesta
+        if (!finalContent && toolExecutions.length > 0) {
+          const lastTool = toolExecutions[toolExecutions.length - 1];
+          const toolRes = lastTool.result as any;
+          if (lastTool.toolName.includes('availability') && toolRes?.availableSlots) {
+            const slots = toolRes.availableSlots;
+            finalContent = slots.length > 0
+              ? `Para el ${toolRes.date || 'día solicitado'} tenemos turnos disponibles a las ${slots.slice(0, 6).join(', ')} hs. ¿Te gustaría reservar alguno de esos horarios?`
+              : `Para el ${toolRes.date || 'día solicitado'} no tenemos horarios disponibles. ¿Te gustaría consultar para otro día?`;
+          }
+        }
+
+        if (!finalContent) {
+          finalContent = '¿Deseas que coordinemos un turno o verifiquemos los horarios disponibles?';
+        }
+
         const textLower = finalContent.toLowerCase();
         const humanTransferPatterns = [
           'recepcionista te responderá',

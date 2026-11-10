@@ -50,14 +50,56 @@ export class GeminiProvider implements AiProviderInterface {
     const systemMessage = messages.find((m) => m.role === 'system');
     const conversationMessages = messages.filter((m) => m.role !== 'system');
 
-    // Mapear mensajes al formato Gemini: 'user' o 'model'
-    const contents = conversationMessages.map((m) => {
-      const role = m.role === 'assistant' ? 'model' : 'user';
-      return {
-        role,
-        parts: [{ text: m.content || '' }]
-      };
-    });
+    // Mapear mensajes al formato Gemini nativo con soporte para functionCall y functionResponse
+    const contents: any[] = [];
+    for (const m of conversationMessages) {
+      if (m.role === 'tool') {
+        let contentObj: any;
+        try {
+          contentObj = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+        } catch {
+          contentObj = { result: m.content };
+        }
+        contents.push({
+          role: 'function',
+          parts: [
+            {
+              functionResponse: {
+                name: m.name,
+                response: {
+                  name: m.name,
+                  content: contentObj
+                }
+              }
+            }
+          ]
+        });
+      } else if (m.role === 'assistant') {
+        const parts: any[] = [];
+        if (m.content) {
+          parts.push({ text: m.content });
+        }
+        if (m.toolCalls && m.toolCalls.length > 0) {
+          for (const tc of m.toolCalls) {
+            parts.push({
+              functionCall: {
+                name: tc.name,
+                args: tc.arguments || {}
+              }
+            });
+          }
+        }
+        if (parts.length === 0) {
+          parts.push({ text: '' });
+        }
+        contents.push({ role: 'model', parts });
+      } else {
+        contents.push({
+          role: 'user',
+          parts: [{ text: m.content || '' }]
+        });
+      }
+    }
 
     const payload: any = {
       contents,
