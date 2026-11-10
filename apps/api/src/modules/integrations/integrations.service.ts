@@ -132,6 +132,47 @@ export class IntegrationsService {
     return { success: true };
   }
 
+  async sendQRWhatsAppMessage(
+    organizationId: string,
+    to: string,
+    text: string
+  ): Promise<{ success: boolean; messageId?: string }> {
+    const evolutionUrl = process.env.EVOLUTION_API_URL;
+    const evolutionKey = process.env.EVOLUTION_API_KEY;
+
+    if (!evolutionUrl || !evolutionKey) {
+      this.logger.log(`[QR MOCK] WhatsApp QR saliente a ${to}: "${text.substring(0, 60)}..."`);
+      return { success: true, messageId: `mock-wa-qr-${Date.now()}` };
+    }
+
+    try {
+      const instanceName = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+      const cleanPhone = to.replace(/\D/g, '');
+      const baseUrl = evolutionUrl.replace(/\/$/, '');
+
+      const response = await axios.post(
+        `${baseUrl}/message/sendText/${instanceName}`,
+        {
+          number: cleanPhone,
+          text: text
+        },
+        {
+          headers: {
+            apikey: evolutionKey,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution: ${response.data?.key?.id || 'ok'}`);
+      return { success: true, messageId: response.data?.key?.id };
+    } catch (err: any) {
+      this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
+      return { success: false };
+    }
+  }
+
   async sendWhatsAppMessage(
     to: string,
     messageText: string,

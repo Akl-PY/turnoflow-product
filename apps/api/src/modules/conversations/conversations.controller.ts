@@ -120,7 +120,7 @@ export class ConversationsController {
     const senderName = data.pushName || body.pushName || 'Cliente';
     const externalMessageId = key.id || data.id;
 
-    return this.conversationsService.handleIncomingMessage({
+    const result = await this.conversationsService.handleIncomingMessage({
       channel: 'whatsapp_qr',
       senderPhone,
       senderName,
@@ -128,6 +128,17 @@ export class ConversationsController {
       externalMessageId,
       organizationId
     });
+
+    // Si la IA generó una respuesta y la conversación no pasó a atención humana, enviarla al chat de WhatsApp
+    if (result.replyMessage && !result.handoffToHuman) {
+      await this.integrationsService.sendQRWhatsAppMessage(
+        organizationId,
+        senderPhone,
+        result.replyMessage
+      );
+    }
+
+    return result;
   }
 
   @Post('whatsapp-qr-webhook')
