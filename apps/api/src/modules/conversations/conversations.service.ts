@@ -236,20 +236,60 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
   }
 
   async findAll(organizationId: string): Promise<Conversation[]> {
-    return this.conversationRepo.find({
+    const list = await this.conversationRepo.find({
       where: [
         { organizationId },
         { organizationId: 'default-org-id' }
       ],
       order: { updatedAt: 'DESC' }
     });
+
+    const seen = new Set<string>();
+    const deduplicated: Conversation[] = [];
+    for (const c of list) {
+      const cleanPhone = (c.channelConversationId || '').replace(/\D/g, '');
+      const key = cleanPhone || c.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(c);
+      }
+    }
+    return deduplicated;
   }
 
   async getMessages(conversationId: string): Promise<Message[]> {
-    return this.messageRepo.find({
+    let msgs = await this.messageRepo.find({
       where: { conversationId },
       order: { createdAt: 'ASC' }
     });
+
+    // Si no se encuentran mensajes por el UUID exacto, buscar por el número de teléfono del contacto
+    if (msgs.length === 0) {
+      const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+      if (conv?.channelConversationId) {
+        const cleanDigits = conv.channelConversationId.replace(/\D/g, '');
+        const matchingConvs = await this.conversationRepo.find({
+          where: [
+            { channelConversationId: conv.channelConversationId },
+            { channelConversationId: `+${cleanDigits}` },
+            { channelConversationId: cleanDigits }
+          ]
+        });
+        const convIds = matchingConvs.map((c) => c.id);
+        if (convIds.length > 0) {
+          msgs = await this.messageRepo.createQueryBuilder('m')
+            .where('m.conversationId IN (:...convIds)', { convIds })
+            .orderBy('m.createdAt', 'ASC')
+            .getMany();
+        }
+      }
+    }
+
+    return msgs;
+  }
+
+  async findByConversationId(conversationId: string): Promise<Conversation | null> {
+    return this.conversationRepo.findOne({ where: { id: conversationId } });
   }
 
   async findByPhone(organizationId: string, phone: string): Promise<Conversation | null> {
@@ -328,6 +368,25 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       `[PAUSA HUMANA] Operador intervino manualmente para ${cleanPhone}. Bot silenciado durante 24 horas.`
     );
     return conversation;
+  }
+
+  async saveManualMessage(conversationId: string, organizationId: string, content: string): Promise<Message> {
+    const msg = this.messageRepo.create({
+      conversationId,
+      sender: MessageSender.HUMAN_AGENT,
+      content
+    });
+    const saved = await this.messageRepo.save(msg);
+
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    if (conv) {
+      conv.lastMessagePreview = content.substring(0, 100);
+      conv.messagesCount = (conv.messagesCount || 0) + 1;
+      conv.status = ConversationStatus.HUMAN_TAKEOVER;
+      conv.updatedAt = new Date();
+      await this.conversationRepo.save(conv);
+    }
+    return saved;
   }
 
   async findRecentAiMessage(organizationId: string, phone: string): Promise<Message | null> {

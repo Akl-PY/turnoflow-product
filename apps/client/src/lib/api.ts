@@ -198,6 +198,11 @@ export async function pauseConversationAi(conversationId: string, reason?: strin
   return res.data;
 }
 
+export async function sendManualMessage(conversationId: string, message: string): Promise<any> {
+  const res = await apiClient.post(`/conversations/${conversationId}/send-message`, { message });
+  return res.data;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

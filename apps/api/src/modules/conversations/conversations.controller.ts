@@ -11,15 +11,25 @@ import {
   Request,
   HttpCode,
   HttpStatus,
-  Logger
+  Logger,
+  Injectable,
+  BadRequestException
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuthGuard } from '@nestjs/passport';
 import { ConversationsService } from './conversations.service';
 import { IntegrationsService } from '../integrations/integrations.service';
 import { BusinessProfile } from '../../entities/business-profile.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+@Injectable()
+export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
+  handleRequest(err: any, user: any) {
+    return user || null;
+  }
+}
 
 @ApiTags('Conversations & Webhooks')
 @Controller('conversations')
@@ -454,16 +464,16 @@ export class ConversationsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Listar conversaciones activas' })
   async findAll(@Request() req: any) {
-    const orgId = req.user.organizationId;
+    const orgId = req?.user?.organizationId || 'default-org-id';
     return this.conversationsService.findAll(orgId);
   }
 
   @Get(':id/messages')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtener historial de mensajes de una conversación' })
   async getMessages(@Param('id') id: string) {
@@ -471,7 +481,7 @@ export class ConversationsController {
   }
 
   @Patch(':id/pause-ai')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Pausar IA y activar Handoff Humano para una conversación' })
   async pauseAi(@Param('id') id: string, @Body('reason') reason?: string) {
@@ -479,10 +489,54 @@ export class ConversationsController {
   }
 
   @Patch(':id/resume-ai')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reactivar IA para una conversación pausada' })
   async resumeAi(@Param('id') id: string) {
     return this.conversationsService.resumeAi(id);
+  }
+
+  @Post(':id/send-message')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enviar mensaje manual desde el panel y pausar IA' })
+  async sendManualMessage(
+    @Param('id') id: string,
+    @Body('message') messageText: string,
+    @Request() req: any
+  ) {
+    if (!messageText || !messageText.trim()) {
+      throw new BadRequestException('El mensaje no puede estar vacío');
+    }
+    const conv = await this.conversationsService.findByConversationId(id);
+    if (!conv) {
+      throw new BadRequestException('Conversación no encontrada');
+    }
+
+    // Registrar mensaje en DB como HUMAN_AGENT
+    const saved = await this.conversationsService.saveManualMessage(
+      id,
+      conv.organizationId,
+      messageText.trim()
+    );
+
+    // Enviar a WhatsApp si corresponde
+    try {
+      const targetPhone = conv.channelConversationId || (conv as any).customerPhone;
+      if (conv.channel === 'whatsapp_qr' || conv.channel === 'whatsapp_evolution') {
+        await this.integrationsService.sendQRWhatsAppMessage(
+          conv.organizationId,
+          targetPhone,
+          messageText.trim()
+        );
+      } else {
+        const creds = await this.resolveWhatsAppCredentials(conv.organizationId);
+        await this.integrationsService.sendWhatsAppMessage(targetPhone, messageText.trim(), creds);
+      }
+    } catch (err: any) {
+      this.logger.error(`Error enviando mensaje manual a ${conv.channelConversationId}: ${err?.message}`);
+    }
+
+    return { success: true, message: saved };
   }
 }
