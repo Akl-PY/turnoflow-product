@@ -5,8 +5,8 @@
   "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/((?!_expo|favicon.ico).*)",
+      "destination": "/"
     }
   ],
   "headers": [

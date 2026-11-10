@@ -1,0 +1,12 @@
+{
+  "buildCommand": "cd apps/client && EXPO_PUBLIC_API_URL=https://turnoflowapi-production.up.railway.app/api npx expo export -p web",
+  "outputDirectory": "apps/client/dist",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/((?!_expo|favicon.ico).*)",
+      "destination": "/"
+    }
+  ]
+}
