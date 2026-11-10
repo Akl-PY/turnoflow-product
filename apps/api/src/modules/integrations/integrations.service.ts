@@ -36,12 +36,12 @@ export class IntegrationsService {
             webhook_by_events: false,
             events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE']
           },
-          { headers: { apikey: evolutionKey }, timeout: 8000 }
+          { headers: { apikey: evolutionKey }, timeout: 3500 }
         ).catch(() => null);
 
         const connectRes = await axios.get(
           `${baseUrl}/instance/connect/${instanceName}`,
-          { headers: { apikey: evolutionKey }, timeout: 8000 }
+          { headers: { apikey: evolutionKey }, timeout: 3500 }
         );
 
         const qrBase64 = connectRes.data?.base64 || connectRes.data?.code;
