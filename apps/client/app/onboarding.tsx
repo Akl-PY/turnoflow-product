@@ -72,6 +72,7 @@ export default function OnboardingScreen() {
   const [qrStatus, setQrStatus] = useState<'DISCONNECTED' | 'SCAN_QR' | 'CONNECTED'>('DISCONNECTED');
   const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
   const [loadingQr, setLoadingQr] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
   const [showAdvancedQr, setShowAdvancedQr] = useState(false);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -91,6 +92,7 @@ export default function OnboardingScreen() {
 
   const handleGenerateQR = async () => {
     setLoadingQr(true);
+    setQrError(null);
     try {
       const res = await apiClient.post('/integrations/whatsapp-qr/session');
       if (res.data?.qrCode) {
@@ -98,7 +100,9 @@ export default function OnboardingScreen() {
         setQrStatus('SCAN_QR');
       }
     } catch (err: any) {
-      console.warn('Error generando QR:', err?.message);
+      const msg = err.response?.data?.message || err.message || 'Error al conectar con Evolution API';
+      setQrError(msg);
+      console.warn('Error generando QR:', msg);
     } finally {
       setLoadingQr(false);
     }
@@ -345,6 +349,22 @@ export default function OnboardingScreen() {
                       <View style={styles.qrPlaceholder}>
                         <ActivityIndicator size="large" color="#38bdf8" />
                         <Text style={styles.qrLoadingText}>Generando sesión segura...</Text>
+                      </View>
+                    ) : qrError ? (
+                      <View style={[styles.qrPlaceholder, { padding: 14, minHeight: 200, justifyContent: 'center' }]}>
+                        <Text style={{ color: '#f87171', fontWeight: '700', fontSize: 13, textAlign: 'center', marginBottom: 6 }}>
+                          No se pudo generar el código QR
+                        </Text>
+                        <Text style={{ color: '#a1a1aa', fontSize: 11, textAlign: 'center', marginBottom: 14 }}>
+                          {qrError}
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.refreshQrBtn, { backgroundColor: '#3b82f6', borderColor: '#60a5fa' }]}
+                          onPress={handleGenerateQR}
+                        >
+                          <RefreshCw size={13} color="#ffffff" style={{ marginRight: 6 }} />
+                          <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600' }}>Reintentar</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : qrCodeData ? (
                       <View style={{ alignItems: 'center' }}>
