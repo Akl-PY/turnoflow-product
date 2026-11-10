@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Text
 } from 'react-native';
-import { Slot, usePathname, Redirect } from 'expo-router';
+import { Slot, usePathname, useRouter } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { Sidebar } from '../src/components/Sidebar';
@@ -26,30 +26,35 @@ function AuthenticatedShell() {
   const { user, isLoading } = useAuth();
   const { width } = useWindowDimensions();
   const pathname = usePathname();
+  const router = useRouter();
+  const [isMounted, setIsMounted] = useState(false);
   const isDesktop = width >= 768;
   const isLoginPage = pathname === '/login';
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#a855f7" />
-        <Text style={styles.loadingText}>Verificando sesión en TurnoFlow AI...</Text>
-      </View>
-    );
-  }
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
-  if (!user && !isLoginPage) {
-    return <Redirect href="/login" />;
-  }
+  useEffect(() => {
+    if (!isMounted || isLoading) return;
 
-  if (user && isLoginPage) {
-    return <Redirect href="/" />;
-  }
+    if (!user && !isLoginPage) {
+      router.replace('/login');
+    } else if (user && isLoginPage) {
+      router.replace('/');
+    }
+  }, [user, isLoading, isLoginPage, isMounted, router]);
 
   return (
     <View style={styles.container}>
       {user && isDesktop && !isLoginPage && <Sidebar />}
       <View style={styles.contentArea}>
+        {isLoading && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color="#a855f7" />
+            <Text style={styles.loadingText}>Verificando sesión en TurnoFlow AI...</Text>
+          </View>
+        )}
         <Slot />
       </View>
     </View>
@@ -79,14 +84,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#09090b',
     overflow: 'hidden',
-    height: (Platform.OS === 'web' ? '100vh' : '100%') as any
+    height: (Platform.OS === 'web' ? '100vh' : '100%') as any,
+    position: 'relative'
   },
-  loadingContainer: {
-    flex: 1,
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#09090b',
     justifyContent: 'center',
     alignItems: 'center',
-    minHeight: (Platform.OS === 'web' ? '100vh' : '100%') as any
+    zIndex: 999
   },
   loadingText: {
     color: '#a1a1aa',
