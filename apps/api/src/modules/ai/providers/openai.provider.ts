@@ -14,10 +14,17 @@ export class OpenAiProvider implements AiProviderInterface {
   private readonly logger = new Logger(OpenAiProvider.name);
   private readonly apiKey: string;
   private readonly defaultModel: string;
+  private readonly baseURL: string;
 
   constructor() {
-    this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.defaultModel = process.env.AI_MODEL || 'gpt-4o';
+    const rawKey = process.env.OPENAI_API_KEY || '';
+    this.apiKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
+
+    const rawModel = process.env.AI_MODEL || '';
+    this.defaultModel = rawModel.replace(/^['"]|['"]$/g, '').trim() || 'gpt-4o';
+
+    const rawUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+    this.baseURL = rawUrl.replace(/^['"]|['"]$/g, '').trim().replace(/\/$/, '');
   }
 
   async chatCompletion(
@@ -28,7 +35,7 @@ export class OpenAiProvider implements AiProviderInterface {
       throw new Error('OPENAI_API_KEY no está configurada.');
     }
 
-    const model = options?.model || this.defaultModel;
+    const model = (options?.model || this.defaultModel).replace(/^['"]|['"]$/g, '').trim();
     const temperature = options?.temperature ?? 0.2;
     const maxTokens = options?.maxTokens ?? 1024;
 
@@ -67,7 +74,7 @@ export class OpenAiProvider implements AiProviderInterface {
 
     try {
       const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
+        `${this.baseURL}/chat/completions`,
         {
           model,
           messages: formattedMessages,

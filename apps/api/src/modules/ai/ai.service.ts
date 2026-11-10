@@ -61,8 +61,8 @@ export class AiService {
   ) {}
 
   getProvider(providerType?: AIProviderType | string): AiProviderInterface {
-    const configured = providerType || process.env.AI_PROVIDER || 'anthropic';
-    if (configured === 'openai') {
+    const configured = (providerType || process.env.AI_PROVIDER || 'gemini').toLowerCase();
+    if (configured === 'openai' || configured === 'openrouter' || configured === 'groq') {
       if (!process.env.OPENAI_API_KEY) {
         this.logger.warn('OPENAI_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
         return this.mockAiProvider;
@@ -80,6 +80,9 @@ export class AiService {
       return this.mockAiProvider;
     }
     if (!process.env.ANTHROPIC_API_KEY) {
+      if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+        return this.geminiProvider;
+      }
       this.logger.warn('ANTHROPIC_API_KEY no configurada. Conmutando automáticamente a MockAiProvider.');
       return this.mockAiProvider;
     }
