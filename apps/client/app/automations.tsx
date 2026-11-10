@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  TouchableOpacity,
   Platform
 } from 'react-native';
 import { Header } from '../src/components/Header';
@@ -15,18 +14,16 @@ import {
   Users,
   CalendarCheck,
   BellRing,
-  RotateCcw,
-  Sparkles,
-  CheckCircle2
+  RotateCcw
 } from 'lucide-react-native';
-import { apiClient, DEMO_AUTOMATIONS } from '../src/lib/api';
+import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
 const BUSINESS_AUTOMATIONS = [
   {
     id: 'auto-1',
     name: 'Atención y Cotización Inmediata 24/7',
-    description: 'Responde preguntas sobre tratamientos, tarifas vigentes y horarios en menos de 5 segundos.',
+    description: 'Responde preguntas sobre tratamientos, tarifas vigentes y horarios de apertura en menos de 5 segundos.',
     category: 'Recepción WhatsApp',
     icon: MessageSquare,
     isActive: true,
@@ -35,9 +32,9 @@ const BUSINESS_AUTOMATIONS = [
   },
   {
     id: 'auto-2',
-    name: 'Captura y Calificación de Clientes',
-    description: 'Detecta intención de compra y extrae nombre, teléfono y servicio deseado para registrarlos.',
-    category: 'Ventas & CRM',
+    name: 'Registro Automático de Clientas',
+    description: 'Detecta el interés de cada clienta y guarda su nombre, teléfono y tratamiento consultado en el directorio.',
+    category: 'Directorio & Clientes',
     icon: Users,
     isActive: true,
     runs: 35,
@@ -46,7 +43,7 @@ const BUSINESS_AUTOMATIONS = [
   {
     id: 'auto-3',
     name: 'Coordinación y Reserva de Turnos',
-    description: 'Consulta disponibilidad en vivo en Scalinky y confirma la cita sin superposiciones.',
+    description: 'Consulta disponibilidad en la agenda del salón (o en Scalinky si está vinculado) y confirma la cita sin superposiciones.',
     category: 'Agenda & Citas',
     icon: CalendarCheck,
     isActive: true,
@@ -56,7 +53,7 @@ const BUSINESS_AUTOMATIONS = [
   {
     id: 'auto-4',
     name: 'Alerta Urgente al Administrador',
-    description: 'Te envía un mensaje a tu WhatsApp personal si un cliente necesita atención humana o tiene un reclamo.',
+    description: 'Te envía un aviso directo a tu WhatsApp personal si una clienta pide hablar con una persona o tiene una consulta especial.',
     category: 'Supervisión Humana',
     icon: BellRing,
     isActive: true,
@@ -65,8 +62,8 @@ const BUSINESS_AUTOMATIONS = [
   },
   {
     id: 'auto-5',
-    name: 'Reactivación Automática de Clientes',
-    description: 'Envía un mensaje de seguimiento empático a quienes pidieron cotización pero no agendaron.',
+    name: 'Recordatorios y Seguimiento de Turnos',
+    description: 'Envía recordatorios cordiales antes de la cita y da seguimiento a quienes consultaron precios pero aún no reservaron.',
     category: 'Fidelización',
     icon: RotateCcw,
     isActive: true,
@@ -88,7 +85,7 @@ export default function AutomationsScreen() {
             prev.map((item, idx) => {
               const matched = res.data[idx];
               return matched
-                ? { ...item, isActive: matched.isActive, runs: matched.totalRuns || item.runs }
+                ? { ...item, isActive: matched.isActive, runs: matched.totalRuns ?? item.runs }
                 : item;
             })
           );
@@ -115,25 +112,25 @@ export default function AutomationsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Automatizaciones Inteligentes"
-        subtitle="Reglas operativas del negocio ejecutadas en paralelo por la IA de TurnoFlow"
+        title="Automatizaciones del Salón"
+        subtitle="Reglas de atención que funcionan solas las 24 horas en tu WhatsApp"
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         {/* Banner Empresarial Google Material 3 */}
         <View style={styles.summaryBanner}>
           <View style={styles.bannerIconBadge}>
-            <Zap size={20} color="#1a73e8" />
+            <Zap size={20} color="#1A73E8" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.bannerTitle}>Automatización Integral del Salón</Text>
             <Text style={styles.bannerText}>
-              Todas las reglas se ejecutan de manera autónoma en tiempo real. Podés encender o pausar cualquier automatización con un solo toque.
+              Todas las funciones trabajan de forma automática en tiempo real. Puedes activar o pausar cualquiera de ellas con un solo toque cuando lo necesites.
             </Text>
           </View>
         </View>
 
-        <Text style={styles.sectionHeader}>REGLAS OPERATIVAS ACTIVAS</Text>
+        <Text style={styles.sectionHeader}>FUNCIONES AUTOMÁTICAS ACTIVAS</Text>
 
         <View style={styles.list}>
           {workflows.map((wf) => {
@@ -142,7 +139,7 @@ export default function AutomationsScreen() {
               <View key={wf.id} style={styles.wfCard}>
                 <View style={styles.wfHeader}>
                   <View style={[styles.wfIconBg, wf.isActive ? styles.iconBgActive : styles.iconBgInactive]}>
-                    <Icon size={18} color={wf.isActive ? '#1a73e8' : '#64748b'} />
+                    <Icon size={18} color={wf.isActive ? '#1A73E8' : '#64748B'} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={styles.nameRow}>
@@ -155,14 +152,14 @@ export default function AutomationsScreen() {
                   </View>
 
                   <View style={styles.switchWrapper}>
-                    <Text style={[styles.switchLabel, { color: wf.isActive ? '#4ade80' : '#64748b' }]}>
+                    <Text style={[styles.switchLabel, { color: wf.isActive ? '#16A34A' : '#64748B' }]}>
                       {wf.isActive ? 'ACTIVA' : 'PAUSADA'}
                     </Text>
                     <Switch
                       value={wf.isActive}
                       onValueChange={() => toggleWorkflow(wf.id)}
-                      trackColor={{ false: '#334155', true: '#1a73e8' }}
-                      thumbColor="#ffffff"
+                      trackColor={{ false: '#CBD5E1', true: '#BFDBFE' }}
+                      thumbColor={wf.isActive ? '#1A73E8' : '#94A3B8'}
                     />
                   </View>
                 </View>
@@ -171,15 +168,15 @@ export default function AutomationsScreen() {
                 <View style={styles.statsRow}>
                   <View style={styles.statBox}>
                     <Text style={styles.statValue}>{wf.runs}</Text>
-                    <Text style={styles.statLabel}>Ejecuciones</Text>
+                    <Text style={styles.statLabel}>Atenciones realizadas</Text>
                   </View>
                   <View style={styles.statBox}>
-                    <Text style={[styles.statValue, { color: '#4ade80' }]}>{wf.rate}</Text>
+                    <Text style={[styles.statValue, { color: '#16A34A' }]}>{wf.rate}</Text>
                     <Text style={styles.statLabel}>Efectividad</Text>
                   </View>
                   <View style={styles.statBox}>
-                    <Text style={styles.statValue}>Tiempo real</Text>
-                    <Text style={styles.statLabel}>Frecuencia</Text>
+                    <Text style={styles.statValue}>Inmediata (24/7)</Text>
+                    <Text style={styles.statLabel}>Disponibilidad</Text>
                   </View>
                 </View>
               </View>
@@ -194,7 +191,7 @@ export default function AutomationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
+    backgroundColor: '#F8FAFC'
   },
   scroll: {
     flex: 1
@@ -206,42 +203,42 @@ const styles = StyleSheet.create({
     alignSelf: 'center'
   },
   summaryBanner: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#1e293b',
-    borderRadius: 14,
-    padding: 18,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 20,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
     marginBottom: 24,
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-      }
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+      } as any
     })
   },
   bannerIconBadge: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 10,
-    backgroundColor: 'rgba(26, 115, 232, 0.12)',
+    backgroundColor: '#E8F0FE',
     alignItems: 'center',
     justifyContent: 'center'
   },
   bannerTitle: {
-    color: '#ffffff',
-    fontSize: 15,
+    color: '#0F172A',
+    fontSize: 16,
     fontWeight: '700',
     marginBottom: 4
   },
   bannerText: {
-    color: '#94a3b8',
+    color: '#475569',
     fontSize: 13,
-    lineHeight: 18
+    lineHeight: 19
   },
   sectionHeader: {
-    color: '#94a3b8',
+    color: '#64748B',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -251,11 +248,16 @@ const styles = StyleSheet.create({
     gap: 14
   },
   wfCard: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#1e293b',
-    borderRadius: 14,
-    padding: 18
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)'
+      } as any
+    })
   },
   wfHeader: {
     flexDirection: 'row',
@@ -263,17 +265,17 @@ const styles = StyleSheet.create({
     gap: 14
   },
   wfIconBg: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center'
   },
   iconBgActive: {
-    backgroundColor: 'rgba(26, 115, 232, 0.12)'
+    backgroundColor: '#E8F0FE'
   },
   iconBgInactive: {
-    backgroundColor: '#1e293b'
+    backgroundColor: '#F1F5F9'
   },
   nameRow: {
     flexDirection: 'row',
@@ -283,25 +285,27 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   wfName: {
-    color: '#ffffff',
+    color: '#0F172A',
     fontSize: 15,
-    fontWeight: '600'
+    fontWeight: '700'
   },
   categoryBadge: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     paddingVertical: 2,
     paddingHorizontal: 8,
     borderRadius: 6
   },
   categoryBadgeText: {
-    color: '#94a3b8',
-    fontSize: 10,
+    color: '#475569',
+    fontSize: 11,
     fontWeight: '600'
   },
   wfDesc: {
-    color: '#94a3b8',
-    fontSize: 12,
-    lineHeight: 17
+    color: '#475569',
+    fontSize: 13,
+    lineHeight: 18
   },
   switchWrapper: {
     alignItems: 'flex-end',
@@ -315,22 +319,22 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 24,
+    gap: 28,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    paddingTop: 12,
-    marginTop: 14
+    borderTopColor: '#F1F5F9',
+    paddingTop: 14,
+    marginTop: 16
   },
   statBox: {
     gap: 2
   },
   statValue: {
-    color: '#ffffff',
-    fontSize: 13,
+    color: '#0F172A',
+    fontSize: 14,
     fontWeight: '700'
   },
   statLabel: {
-    color: '#64748b',
+    color: '#64748B',
     fontSize: 11
   }
 });

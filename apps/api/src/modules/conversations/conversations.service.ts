@@ -12,6 +12,7 @@ import { ConversationStatus, MessageSender } from '@turnoflow/shared';
 @Injectable()
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
+  private readonly processingExternalIds = new Set<string>();
 
   constructor(
     @InjectRepository(Conversation)
@@ -35,7 +36,6 @@ export class ConversationsService {
   verifyMetaSignature(rawPayload: string, signatureHeader?: string): boolean {
     const appSecret = process.env.WHATSAPP_APP_SECRET;
     if (!appSecret || !signatureHeader) {
-      // Si no hay app secret configurado en desarrollo, se omite con aviso
       return true;
     }
 
@@ -61,17 +61,25 @@ export class ConversationsService {
     messageText: string;
     externalMessageId?: string;
     organizationId?: string;
-  }): Promise<{ replyMessage: string; handoffToHuman: boolean }> {
+  }): Promise<{ replyMessage: string; handoffToHuman: boolean; duplicate?: boolean }> {
     const orgId = params.organizationId || 'default-org-id';
 
-    // 1. Verificación de Idempotencia
+    // 1. Verificación atómica en memoria + base de datos (Idempotencia contra doble evento @lid / global webhook)
     if (params.externalMessageId) {
+      if (this.processingExternalIds.has(params.externalMessageId)) {
+        this.logger.warn(`Mensaje concurrente descartado en memoria: ${params.externalMessageId}`);
+        return { replyMessage: 'Mensaje ya procesado.', handoffToHuman: false, duplicate: true };
+      }
+      this.processingExternalIds.add(params.externalMessageId);
+      // Limpiar de memoria tras 2 minutos para no acumular RAM
+      setTimeout(() => this.processingExternalIds.delete(params.externalMessageId!), 120000).unref?.();
+
       const alreadyProcessed = await this.messageRepo.findOne({
         where: { externalMessageId: params.externalMessageId }
       });
       if (alreadyProcessed) {
-        this.logger.warn(`Mensaje duplicado descartado: ${params.externalMessageId}`);
-        return { replyMessage: 'Mensaje ya procesado.', handoffToHuman: false };
+        this.logger.warn(`Mensaje duplicado descartado en BD: ${params.externalMessageId}`);
+        return { replyMessage: 'Mensaje ya procesado.', handoffToHuman: false, duplicate: true };
       }
     }
 
@@ -92,6 +100,9 @@ export class ConversationsService {
         messagesCount: 0
       });
       conversation = await this.conversationRepo.save(conversation);
+    } else if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
+      // Reactivar atención de IA para nuevas consultas del cliente
+      conversation.status = ConversationStatus.AI_HANDLED;
     }
 
     // Guardar mensaje entrante del usuario
@@ -102,14 +113,6 @@ export class ConversationsService {
       externalMessageId: params.externalMessageId
     });
     await this.messageRepo.save(userMsg);
-
-    // Si la conversación está pausada para atención humana, no responder automáticamente
-    if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
-      return {
-        replyMessage: 'Tu consulta está siendo atendida por nuestro equipo humano. En breve te responderemos.',
-        handoffToHuman: true
-      };
-    }
 
     // 3. Procesar con motor de IA
     const aiResult = this.aiService
@@ -164,7 +167,8 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
     return {
       replyMessage: aiResult.replyText,
-      handoffToHuman: aiResult.handoffToHuman
+      handoffToHuman: aiResult.handoffToHuman,
+      duplicate: false
     };
   }
 

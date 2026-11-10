@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -24,6 +25,10 @@ async function bootstrap() {
   }
 
   const app = await NestFactory.create(AppModule);
+
+  // Aumentar límite de payload JSON para soportar webhooks de Evolution API con citas/multimedia
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
 
   // Prefijo global de API
   app.setGlobalPrefix('api');

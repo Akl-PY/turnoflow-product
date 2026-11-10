@@ -133,7 +133,7 @@ export class AiService {
         ? this.bookingAgent.getToolDefinitions()
         : this.receptionistAgent.getToolDefinitions();
 
-    const scalinkySlug = (profile as any)?.scalinkySlug;
+    const scalinkySlug = this.extractScalinkySlug(profile);
     let scalinkyInfo = '';
 
     if (scalinkySlug && this.scalinkyService) {
@@ -159,16 +159,44 @@ ${servListStr}
       }
     }
 
-    const systemPrompt = `Eres el Agente Inteligente de ${profile.businessName}.
+    const dayNames: Record<string, string> = {
+      monday: 'Lunes',
+      tuesday: 'Martes',
+      wednesday: 'Miércoles',
+      thursday: 'Jueves',
+      friday: 'Viernes',
+      saturday: 'Sábado',
+      sunday: 'Domingo'
+    };
+
+    const hoursList =
+      Array.isArray(profile.businessHours) && profile.businessHours.length > 0
+        ? profile.businessHours
+            .map((h) => `${dayNames[h.day] || h.day}: ${h.isOpen ? `${h.open} a ${h.close} hs` : 'Cerrado'}`)
+            .join(' | ')
+        : 'Lunes a Viernes de 09:00 a 20:00 hs, Sábados de 09:00 a 18:00 hs (Domingos cerrado)';
+
+    const servicesSummary =
+      Array.isArray(profile.services) && profile.services.length > 0
+        ? profile.services
+            .map((s) => `- ${s.name}: $${s.price} ${s.currency || profile.currency || 'USD'} (${s.durationMinutes || 60} min)`)
+            .join('\n')
+        : 'Consultar mediante herramienta get_services';
+
+    const systemPrompt = `Eres el Asente Inteligente de Recepción de ${profile.businessName}.
 Rubro: ${profile.vertical}.
 Ubicación: ${profile.location}.
+Horarios de Atención: ${hoursList}.
 Zona Horaria: ${profile.timezone}.
 Moneda: ${profile.currency}.
 Política de Cancelación: ${profile.cancellationPolicy}.
-Instrucciones Especiales: ${profile.specialInstructions || 'Ninguna'}.${scalinkyInfo}
+Servicios del Salón:
+${servicesSummary}
+${scalinkyInfo}
 
 REGLAS ESTRICTAS:
-- Responde con calidez y concisión en español latinoamericano.
+- Responde con calidez, amabilidad y concisión en español latinoamericano.
+- Si te preguntan por los horarios de atención, infórmalos claramente según "Horarios de Atención".
 - No inventes tarifas ni servicios no registrados.
 - No brindes diagnósticos médicos ni prescribas tratamientos.
 - Para verificar disponibilidad o confirmar citas utiliza SIEMPRE las herramientas disponibles.`;
@@ -251,6 +279,23 @@ REGLAS ESTRICTAS:
     };
   }
 
+  private extractScalinkySlug(profile: BusinessProfile): string | null {
+    if ((profile as any)?.scalinkySlug) {
+      return (profile as any).scalinkySlug;
+    }
+    if (profile?.specialInstructions) {
+      try {
+        const parsed = JSON.parse(profile.specialInstructions);
+        if (parsed?.scalinkySlug && typeof parsed.scalinkySlug === 'string' && parsed.scalinkySlug.trim()) {
+          return parsed.scalinkySlug.trim();
+        }
+      } catch {
+        // No es JSON
+      }
+    }
+    return null;
+  }
+
   private async executeTool(
     organizationId: string,
     toolCall: ToolCall,
@@ -262,7 +307,7 @@ REGLAS ESTRICTAS:
       case 'get_services': {
         const category = args.category as string;
         let list: any[] = [];
-        const scalinkySlug = (profile as any)?.scalinkySlug;
+        const scalinkySlug = this.extractScalinkySlug(profile);
 
         if (scalinkySlug && this.scalinkyService) {
           try {
@@ -295,7 +340,7 @@ REGLAS ESTRICTAS:
 
       case 'get_service_price': {
         const query = ((args.serviceName as string) || '').toLowerCase();
-        const scalinkySlug = (profile as any)?.scalinkySlug;
+        const scalinkySlug = this.extractScalinkySlug(profile);
 
         if (scalinkySlug && this.scalinkyService) {
           try {
@@ -339,7 +384,19 @@ REGLAS ESTRICTAS:
       }
 
       case 'get_business_hours': {
-        return { success: true, data: profile.businessHours || [] };
+        const hours =
+          Array.isArray(profile.businessHours) && profile.businessHours.length > 0
+            ? profile.businessHours
+            : [
+                { day: 'monday', open: '09:00', close: '20:00', isOpen: true },
+                { day: 'tuesday', open: '09:00', close: '20:00', isOpen: true },
+                { day: 'wednesday', open: '09:00', close: '20:00', isOpen: true },
+                { day: 'thursday', open: '09:00', close: '20:00', isOpen: true },
+                { day: 'friday', open: '09:00', close: '20:00', isOpen: true },
+                { day: 'saturday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'sunday', open: '00:00', close: '00:00', isOpen: false }
+              ];
+        return { success: true, data: hours };
       }
 
       case 'get_business_location': {
@@ -388,7 +445,7 @@ REGLAS ESTRICTAS:
         const date = (args.date as string) || new Date().toISOString().split('T')[0];
         let slots = await this.calculateAvailableSlots(organizationId, date);
 
-        const slug = (profile as any)?.scalinkySlug;
+        const slug = this.extractScalinkySlug(profile);
         if (slug && this.scalinkyService) {
           try {
             const staffList = await this.scalinkyService.getStaff(slug);
@@ -425,7 +482,7 @@ REGLAS ESTRICTAS:
         const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hora estándar
 
         let scalinkyBooking: any = null;
-        const slug = (profile as any)?.scalinkySlug;
+        const slug = this.extractScalinkySlug(profile);
         if (slug && this.scalinkyService) {
           try {
             const staffList = await this.scalinkyService.getStaff(slug);

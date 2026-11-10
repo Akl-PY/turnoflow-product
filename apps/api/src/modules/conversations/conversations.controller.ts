@@ -53,9 +53,33 @@ export class ConversationsController {
     return { phoneNumberId, accessToken };
   }
 
+  private async resolveOrganizationFromInstance(organizationId: string, instanceName?: string): Promise<string> {
+    if (organizationId && organizationId !== 'default-org-id') {
+      return organizationId;
+    }
+    try {
+      const profiles = await this.profileRepo.find();
+      if (instanceName && instanceName.startsWith('tf_')) {
+        const prefix = instanceName.replace(/^tf_/, '').toLowerCase();
+        const matched = profiles.find((p) =>
+          p.organizationId.replace(/-/g, '').toLowerCase().startsWith(prefix)
+        );
+        if (matched) {
+          return matched.organizationId;
+        }
+      }
+      if (profiles.length > 0) {
+        return profiles[0].organizationId;
+      }
+    } catch {
+      // Ignorar si falla consulta
+    }
+    return organizationId || 'default-org-id';
+  }
+
   @Post('incoming-message')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Recibir mensaje entrante desde n8n o canal de chat' })
+  @ApiOperation({ summary: 'Recibir mensaje entrante desde canal de chat' })
   async handleIncomingMessage(
     @Body()
     body: {
@@ -80,12 +104,15 @@ export class ConversationsController {
     @Param('organizationId') organizationId: string,
     @Body() body: any
   ) {
+    const instanceFromWebhook = typeof body?.instance === 'string' ? body.instance : undefined;
+    const resolvedOrgId = await this.resolveOrganizationFromInstance(organizationId, instanceFromWebhook);
+
     const data = body.data || body;
     const key = data.key || {};
     const message = data.message || {};
 
     // 0. Si es un evento de actualización de conexión (escaneo de QR completado):
-    if (body.event === 'connection.update' || data.state === 'open') {
+    if (body.event === 'connection.update' || body.event === 'CONNECTION_UPDATE' || data.state === 'open') {
       const rawPhone = data.phone || data.user?.id || data.owner || data.sender || body.sender;
       let cleanPhone: string | undefined;
       if (rawPhone && typeof rawPhone === 'string') {
@@ -94,36 +121,65 @@ export class ConversationsController {
           cleanPhone = `+${digits}`;
         }
       }
-      this.integrationsService.markQRConnected(organizationId, cleanPhone);
+      this.integrationsService.markQRConnected(resolvedOrgId, cleanPhone);
       return { status: 'connection_recorded', phone: cleanPhone };
     }
 
-    // 1. Si el mensaje lo envió el propio dueño desde su celular (fromMe === true):
-    if (key.fromMe) {
-      const senderPhone = (key.remoteJid || '').replace('@s.whatsapp.net', '').replace('@c.us', '');
-      if (senderPhone) {
-        const conv = await this.conversationsService.findByPhone(organizationId, senderPhone);
-        if (conv) {
-          await this.conversationsService.pauseAi(conv.id, 'Intervención manual del dueño desde WhatsApp');
-        }
-      }
-      return { status: 'human_message_acknowledged', handoffToHuman: true };
+    // 0.1 Ignorar eventos que no sean recepción de mensajes
+    if (body.event && !['messages.upsert', 'MESSAGES_UPSERT'].includes(body.event)) {
+      return { status: 'ignored_event', event: body.event };
     }
 
-    // 2. Extraer texto del cliente
+    // 1. Si el mensaje fue enviado por la propia línea (fromMe === true), ignorarlo para no hacer bucle ni pausar la IA
+    if (key.fromMe) {
+      return { status: 'ignored_from_me' };
+    }
+
+    // 2. Resolver el JID real del cliente (soportando @lid + remoteJidAlt en Evolution API v2.3.7)
+    const primaryJid = typeof key.remoteJid === 'string' ? key.remoteJid : '';
+    const altJid = typeof key.remoteJidAlt === 'string' ? key.remoteJidAlt : '';
+
+    // Ignorar grupos y estados de difusión
+    if (primaryJid.includes('@g.us') || primaryJid.includes('@broadcast') || altJid.includes('@g.us')) {
+      return { status: 'ignored_group_or_broadcast' };
+    }
+
+    const bestJid =
+      (primaryJid.includes('@s.whatsapp.net') ? primaryJid : '') ||
+      (altJid.includes('@s.whatsapp.net') ? altJid : '') ||
+      primaryJid ||
+      altJid;
+
+    // Si solo vino un @lid sin número @s.whatsapp.net alternativo, ignorar este evento preliminar
+    // porque Baileys emite inmediatamente el segundo evento con @s.whatsapp.net
+    if (!bestJid || bestJid.endsWith('@lid')) {
+      return { status: 'ignored_unresolved_lid' };
+    }
+
+    // 3. Extraer texto del cliente
     const rawText =
       message.conversation ||
       message.extendedTextMessage?.text ||
       message.imageMessage?.caption ||
+      message.videoMessage?.caption ||
       data.body ||
       body.text ||
       '';
 
-    if (!rawText || !key.remoteJid) {
+    if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
       return { status: 'ignored_non_text_or_empty' };
     }
 
-    const senderPhone = key.remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+    const senderPhone = bestJid
+      .replace('@s.whatsapp.net', '')
+      .replace('@c.us', '')
+      .split(':')[0]
+      .replace(/\D/g, '');
+
+    if (!senderPhone || senderPhone.length < 7) {
+      return { status: 'ignored_invalid_phone' };
+    }
+
     const senderName = data.pushName || body.pushName || 'Cliente';
     const externalMessageId = key.id || data.id;
 
@@ -131,17 +187,23 @@ export class ConversationsController {
       channel: 'whatsapp_qr',
       senderPhone,
       senderName,
-      messageText: rawText,
+      messageText: rawText.trim(),
       externalMessageId,
-      organizationId
+      organizationId: resolvedOrgId
     });
 
-    // Si la IA generó una respuesta y la conversación no pasó a atención humana, enviarla al chat de WhatsApp
-    if (result.replyMessage && !result.handoffToHuman) {
+    // Si es un duplicado descartado por idempotencia, NO enviar "Mensaje ya procesado." por WhatsApp
+    if (result.duplicate || result.replyMessage === 'Mensaje ya procesado.') {
+      return { status: 'duplicate_ignored' };
+    }
+
+    // Enviar la respuesta generada por la IA al WhatsApp del cliente
+    if (result.replyMessage) {
       await this.integrationsService.sendQRWhatsAppMessage(
-        organizationId,
+        resolvedOrgId,
         senderPhone,
-        result.replyMessage
+        result.replyMessage,
+        instanceFromWebhook
       );
     }
 
@@ -209,7 +271,12 @@ export class ConversationsController {
       organizationId
     });
 
-    if (result.replyMessage && !result.handoffToHuman) {
+    if (
+      result.replyMessage &&
+      !result.duplicate &&
+      result.replyMessage !== 'Mensaje ya procesado.' &&
+      !result.handoffToHuman
+    ) {
       const creds = await this.resolveWhatsAppCredentials(organizationId);
       const targetPhoneId = incomingPhoneNumberId || creds.phoneNumberId;
       await this.integrationsService.sendWhatsAppMessage(senderPhone, result.replyMessage, {
@@ -270,7 +337,12 @@ export class ConversationsController {
       externalMessageId: message.id
     });
 
-    if (result.replyMessage && !result.handoffToHuman) {
+    if (
+      result.replyMessage &&
+      !result.duplicate &&
+      result.replyMessage !== 'Mensaje ya procesado.' &&
+      !result.handoffToHuman
+    ) {
       const creds = await this.resolveWhatsAppCredentials();
       const targetPhoneId = incomingPhoneNumberId || creds.phoneNumberId;
       await this.integrationsService.sendWhatsAppMessage(senderPhone, result.replyMessage, {
@@ -300,7 +372,9 @@ export class ConversationsController {
   }
 
   @Patch(':id/pause-ai')
-  @ApiOperation({ summary: 'Pausar IA y transferir a operador humano' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Pausar IA y activar Handoff Humano para una conversación' })
   async pauseAi(@Param('id') id: string, @Body('reason') reason?: string) {
     return this.conversationsService.pauseAi(id, reason);
   }

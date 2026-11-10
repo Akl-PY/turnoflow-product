@@ -17,7 +17,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   subtext,
   trend,
   icon: Icon,
-  iconColor = '#a855f7'
+  iconColor = '#1A73E8'
 }) => {
   return (
     <View style={styles.card}>

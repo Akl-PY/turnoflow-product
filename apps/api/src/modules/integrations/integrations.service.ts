@@ -49,7 +49,7 @@ export class IntegrationsService {
             webhook: {
               url: webhookUrl,
               byEvents: false,
-              base64: true,
+              base64: false,
               events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE']
             }
           },
@@ -237,7 +237,8 @@ export class IntegrationsService {
   async sendQRWhatsAppMessage(
     organizationId: string,
     to: string,
-    text: string
+    text: string,
+    explicitInstanceName?: string
   ): Promise<{ success: boolean; messageId?: string }> {
     const rawUrl = process.env.EVOLUTION_API_URL || '';
     const rawKey = process.env.EVOLUTION_API_KEY || '';
@@ -250,8 +251,9 @@ export class IntegrationsService {
     }
 
     try {
-      const instanceName = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
-      const cleanPhone = to.replace(/\D/g, '');
+      const instanceName =
+        explicitInstanceName || `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+      const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
 
       const response = await axios.post(
         `${evolutionUrl}/message/sendText/${instanceName}`,
@@ -269,7 +271,7 @@ export class IntegrationsService {
         }
       );
 
-      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution: ${response.data?.key?.id || 'ok'}`);
+      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution (${instanceName}): ${response.data?.key?.id || 'ok'}`);
       return { success: true, messageId: response.data?.key?.id };
     } catch (err: any) {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
