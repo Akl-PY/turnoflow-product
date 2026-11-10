@@ -35,6 +35,7 @@ import {
   resumeConversationAi,
   pauseConversationAi,
   sendManualMessage,
+  resetAllConversationsAi,
   ConversationItem,
   ChatMessageItem
 } from '../src/lib/api';
@@ -131,6 +132,20 @@ export default function ChatsScreen() {
       });
       setActionNotice('IA pausada. La conversación queda en atención humana manual durante 24 horas.');
       setTimeout(() => setActionNotice(null), 5000);
+    }
+  });
+
+  // Mutación para reactivar TODAS las conversaciones a Modo IA
+  const resetAllMutation = useMutation({
+    mutationFn: () => resetAllConversationsAi(),
+    onSuccess: (res) => {
+      queryClient.setQueryData<ConversationItem[]>(['conversations'], (old) => {
+        if (!old) return [];
+        return old.map((c) => ({ ...c, status: 'AI_HANDLED' }));
+      });
+      setActionNotice(`¡Listo! Se reactivaron todas las conversaciones (${res.affected} chats) al Modo IA 24/7.`);
+      setTimeout(() => setActionNotice(null), 6000);
+      refetch();
     }
   });
 
@@ -597,24 +612,42 @@ export default function ChatsScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={() => {
-                refetch();
-                if (selectedChatId) refetchMessages();
-              }}
-              disabled={isRefetching}
-              activeOpacity={0.7}
-            >
-              <RefreshCw
-                size={16}
-                color="#1A73E8"
-                style={isRefetching ? styles.rotating : undefined}
-              />
-              <Text style={styles.refreshButtonText}>
-                {isRefetching ? 'Actualizando...' : 'Actualizar'}
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                style={styles.resetAllButton}
+                onPress={() => resetAllMutation.mutate()}
+                disabled={resetAllMutation.isPending}
+                activeOpacity={0.8}
+              >
+                {resetAllMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Sparkles size={14} color="#FFFFFF" />
+                )}
+                <Text style={styles.resetAllButtonText}>
+                  {resetAllMutation.isPending ? 'Reactivando...' : 'Reactivar Todos a Modo IA'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={() => {
+                  refetch();
+                  if (selectedChatId) refetchMessages();
+                }}
+                disabled={isRefetching}
+                activeOpacity={0.7}
+              >
+                <RefreshCw
+                  size={15}
+                  color="#1A73E8"
+                  style={isRefetching ? styles.rotating : undefined}
+                />
+                <Text style={styles.refreshButtonText}>
+                  {isRefetching ? 'Actualizando...' : 'Actualizar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Tarjetas de Métricas de Estado */}
@@ -721,6 +754,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
     marginTop: 2
+  },
+  resetAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#059669',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8
+  },
+  resetAllButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF'
   },
   refreshButton: {
     flexDirection: 'row',

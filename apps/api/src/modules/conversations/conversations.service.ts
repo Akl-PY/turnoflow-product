@@ -112,11 +112,32 @@ export class ConversationsService {
       });
       conversation = await this.conversationRepo.save(conversation);
     } else if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
-      const lastUpdate = conversation.updatedAt ? new Date(conversation.updatedAt).getTime() : 0;
-      const hoursSinceHandoff = (Date.now() - lastUpdate) / (1000 * 60 * 60);
+      // Buscar la última intervención humana real en los mensajes
+      const lastHumanMsg = await this.messageRepo.findOne({
+        where: {
+          conversationId: conversation.id,
+          sender: MessageSender.HUMAN_AGENT
+        },
+        order: { createdAt: 'DESC' }
+      });
 
-      // Si pasaron menos de 24 horas desde la intervención humana, el bot permanece en silencio absoluto
-      if (hoursSinceHandoff < 24) {
+      const lastInterventionTime = lastHumanMsg
+        ? new Date(lastHumanMsg.createdAt).getTime()
+        : 0;
+
+      const hoursSinceHandoff = lastInterventionTime > 0
+        ? (Date.now() - lastInterventionTime) / (1000 * 60 * 60)
+        : 999;
+
+      // Si no hubo intervención humana real o si pasaron 24hs o más: reactivar IA automáticamente
+      if (!lastHumanMsg || hoursSinceHandoff >= 24) {
+        this.logger.log(
+          `[AUTO-REACTIVACIÓN] ${!lastHumanMsg ? 'Sin mensaje humano previo' : `Han pasado ${hoursSinceHandoff.toFixed(1)}hs (>= 24hs)`}. Reactivando IA automáticamente para ${params.senderPhone}.`
+        );
+        conversation.status = ConversationStatus.AI_HANDLED;
+        await this.conversationRepo.save(conversation);
+      } else {
+        // Si un operador humano intervino hace menos de 24 horas, el bot permanece en silencio
         this.logger.log(
           `[SILENCIO 24HS] Chat en atención humana (${hoursSinceHandoff.toFixed(1)}hs transcurridas < 24hs). Guardando mensaje de ${params.senderPhone} sin responder con IA.`
         );
@@ -139,13 +160,6 @@ export class ConversationsService {
           handoffToHuman: true,
           duplicate: false
         };
-      } else {
-        // Pasaron 24 horas o más: reactivación automática de la IA para nuevas consultas
-        this.logger.log(
-          `[AUTO-REACTIVACIÓN 24HS] Han pasado ${hoursSinceHandoff.toFixed(1)}hs (>= 24hs). Reactivando IA automáticamente para ${params.senderPhone}.`
-        );
-        conversation.status = ConversationStatus.AI_HANDLED;
-        await this.conversationRepo.save(conversation);
       }
     }
 
@@ -325,6 +339,26 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       `[IA REACTIVADA] Operador reactivó la atención automática para ${conv.channelConversationId}`
     );
     return saved;
+  }
+
+  async resetAllToAi(organizationId?: string): Promise<{ affected: number }> {
+    const qb = this.conversationRepo
+      .createQueryBuilder()
+      .update(Conversation)
+      .set({ status: ConversationStatus.AI_HANDLED, updatedAt: new Date() })
+      .where('status = :status', { status: ConversationStatus.HUMAN_TAKEOVER });
+
+    if (organizationId && organizationId !== 'default-org-id') {
+      qb.andWhere('(organizationId = :orgId OR organizationId = :defaultOrg)', {
+        orgId: organizationId,
+        defaultOrg: 'default-org-id'
+      });
+    }
+
+    const result = await qb.execute();
+    const count = result.affected || 0;
+    this.logger.log(`[RESET ALL IA] Se reactivaron ${count} conversaciones a Modo IA.`);
+    return { affected: count };
   }
 
   async recordHumanIntervention(

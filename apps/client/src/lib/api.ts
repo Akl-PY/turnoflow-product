@@ -203,6 +203,11 @@ export async function sendManualMessage(conversationId: string, message: string)
   return res.data;
 }
 
+export async function resetAllConversationsAi(): Promise<{ affected: number }> {
+  const res = await apiClient.post('/conversations/reset-all-ai');
+  return res.data;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

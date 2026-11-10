@@ -472,6 +472,16 @@ export class ConversationsController {
     return this.conversationsService.findAll(orgId);
   }
 
+  @Post('reset-all-ai')
+  @Patch('reset-all-ai')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reactivar todas las conversaciones a Modo IA' })
+  async resetAllAi(@Request() req: any) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.resetAllToAi(orgId);
+  }
+
   @Get(':id/messages')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
