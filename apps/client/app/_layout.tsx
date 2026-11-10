@@ -51,8 +51,8 @@ function AuthenticatedShell() {
       <View style={styles.contentArea}>
         {isLoading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color="#a855f7" />
-            <Text style={styles.loadingText}>Verificando sesión en TurnoFlow AI...</Text>
+            <ActivityIndicator size="large" color="#1a73e8" />
+            <Text style={styles.loadingText}>Cargando TurnoFlow AI...</Text>
           </View>
         )}
         <Slot />
@@ -76,26 +76,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#09090b',
+    backgroundColor: '#f8fafc',
     minHeight: (Platform.OS === 'web' ? '100vh' : '100%') as any,
     height: (Platform.OS === 'web' ? '100vh' : '100%') as any
   },
   contentArea: {
     flex: 1,
-    backgroundColor: '#09090b',
+    backgroundColor: '#f8fafc',
     overflow: 'hidden',
     height: (Platform.OS === 'web' ? '100vh' : '100%') as any,
     position: 'relative'
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#09090b',
+    backgroundColor: '#f8fafc',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 999
   },
   loadingText: {
-    color: '#a1a1aa',
+    color: '#475569',
     fontSize: 13,
     marginTop: 12
   }

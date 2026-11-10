@@ -19,7 +19,7 @@ import {
   ShieldCheck,
   ArrowRight,
   AlertCircle,
-  Zap
+  CheckCircle2
 } from 'lucide-react-native';
 import { useAuth } from '../src/lib/auth';
 
@@ -43,7 +43,7 @@ export default function LoginScreen() {
     }
 
     if (mode === 'register' && (!fullName.trim() || !businessName.trim())) {
-      setError('Completa tu nombre completo y el nombre de tu salón o centro de estética.');
+      setError('Completa tu nombre y el nombre de tu salón o centro de estética.');
       return;
     }
 
@@ -64,7 +64,7 @@ export default function LoginScreen() {
       const apiMsg =
         err?.response?.data?.message ||
         err?.message ||
-        'No se pudo iniciar sesión. Verifica tus credenciales o la conexión con el servidor.';
+        'No se pudo conectar. Verifica tus credenciales o el estado del servidor.';
       setError(Array.isArray(apiMsg) ? apiMsg.join(', ') : String(apiMsg));
     } finally {
       setSubmitting(false);
@@ -84,7 +84,7 @@ export default function LoginScreen() {
       const apiMsg =
         err?.response?.data?.message ||
         err?.message ||
-        'Error al conectar con el servidor de demostración.';
+        'Error al conectar con la cuenta de demostración.';
       setError(Array.isArray(apiMsg) ? apiMsg.join(', ') : String(apiMsg));
     } finally {
       setSubmitting(false);
@@ -97,20 +97,18 @@ export default function LoginScreen() {
         {/* Brand Header */}
         <View style={styles.brandRow}>
           <View style={styles.logoBadge}>
-            <Sparkles size={22} color="#a855f7" />
+            <Sparkles size={22} color="#1A73E8" />
           </View>
           <View>
             <Text style={styles.brandTitle}>TurnoFlow AI</Text>
-            <Text style={styles.brandSubtitle}>
-              Consola SaaS Multi-Tenant • Recepción Inteligente 24/7
-            </Text>
+            <Text style={styles.brandTagline}>Gestión Inteligente de Citas & WhatsApp</Text>
           </View>
         </View>
 
-        {/* Mode Tabs */}
-        <View style={styles.tabsRow}>
+        {/* Mode Switcher */}
+        <View style={styles.tabContainer}>
           <TouchableOpacity
-            style={[styles.tabBtn, mode === 'login' && styles.tabBtnActive]}
+            style={[styles.tabButton, mode === 'login' && styles.tabButtonActive]}
             onPress={() => {
               setMode('login');
               setError(null);
@@ -121,22 +119,22 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.tabBtn, mode === 'register' && styles.tabBtnActive]}
+            style={[styles.tabButton, mode === 'register' && styles.tabButtonActive]}
             onPress={() => {
               setMode('register');
               setError(null);
             }}
           >
             <Text style={[styles.tabText, mode === 'register' && styles.tabTextActive]}>
-              Registrar Nuevo Salón (Multi-Tenant)
+              Crear Cuenta
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Error Alert */}
+        {/* Error Notification */}
         {error && (
           <View style={styles.errorBox}>
-            <AlertCircle size={16} color="#f87171" style={{ marginRight: 8 }} />
+            <AlertCircle size={16} color="#DC2626" style={{ marginRight: 8 }} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
@@ -145,29 +143,29 @@ export default function LoginScreen() {
         {mode === 'register' && (
           <>
             <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Nombre del Salón / Centro de Estética</Text>
+              <Text style={styles.label}>Tu Nombre Completo</Text>
               <View style={styles.inputWrapper}>
-                <Building2 size={16} color="#71717a" style={styles.inputIcon} />
+                <User size={16} color="#64748B" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  value={businessName}
-                  onChangeText={setBusinessName}
-                  placeholder="Ej. Lumina Beauty & Spa"
-                  placeholderTextColor="#52525b"
+                  placeholder="Ej. Valeria Gómez"
+                  placeholderTextColor="#94A3B8"
+                  value={fullName}
+                  onChangeText={setFullName}
                 />
               </View>
             </View>
 
             <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Tu Nombre Completo</Text>
+              <Text style={styles.label}>Nombre de tu Salón o Centro</Text>
               <View style={styles.inputWrapper}>
-                <User size={16} color="#71717a" style={styles.inputIcon} />
+                <Building2 size={16} color="#64748B" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="Ej. Valeria Rossi"
-                  placeholderTextColor="#52525b"
+                  placeholder="Ej. Glow Hair Studio & Spa"
+                  placeholderTextColor="#94A3B8"
+                  value={businessName}
+                  onChangeText={setBusinessName}
                 />
               </View>
             </View>
@@ -177,15 +175,15 @@ export default function LoginScreen() {
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Correo Electrónico</Text>
           <View style={styles.inputWrapper}>
-            <Mail size={16} color="#71717a" style={styles.inputIcon} />
+            <Mail size={16} color="#64748B" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
+              placeholder="admin@tunegocio.com"
+              placeholderTextColor="#94A3B8"
+              keyboardType="email-address"
+              autoCapitalize="none"
               value={email}
               onChangeText={setEmail}
-              placeholder="admin@turnoflow.com"
-              placeholderTextColor="#52525b"
-              autoCapitalize="none"
-              keyboardType="email-address"
             />
           </View>
         </View>
@@ -193,42 +191,40 @@ export default function LoginScreen() {
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Contraseña</Text>
           <View style={styles.inputWrapper}>
-            <Lock size={16} color="#71717a" style={styles.inputIcon} />
+            <Lock size={16} color="#64748B" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
+              placeholder="••••••••"
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
               value={password}
               onChangeText={setPassword}
-              placeholder="••••••••••••"
-              placeholderTextColor="#52525b"
-              secureTextEntry
-              onSubmitEditing={handleSubmit}
             />
           </View>
         </View>
 
+        {/* Submit Button */}
         <TouchableOpacity
-          style={[styles.primaryBtn, submitting && { opacity: 0.7 }]}
+          style={styles.primaryBtn}
           onPress={handleSubmit}
           disabled={submitting}
         >
           {submitting ? (
-            <ActivityIndicator size="small" color="#ffffff" />
+            <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
             <>
               <Text style={styles.primaryBtnText}>
-                {mode === 'login'
-                  ? 'Ingresar al Panel Administrativo'
-                  : 'Crear Cuenta y Aprovisionar Agentes IA'}
+                {mode === 'login' ? 'Ingresar a mi Negocio' : 'Registrar mi Salón'}
               </Text>
-              <ArrowRight size={16} color="#ffffff" style={{ marginLeft: 8 }} />
+              <ArrowRight size={16} color="#FFFFFF" style={{ marginLeft: 8 }} />
             </>
           )}
         </TouchableOpacity>
 
-        {/* Quick Demo Button */}
+        {/* Demo Fast Access */}
         <View style={styles.dividerRow}>
           <View style={styles.dividerLine} />
-          <Text style={styles.dividerLabel}>O ACCESO INMEDIATO</Text>
+          <Text style={styles.dividerLabel}>O INGRESA DIRECTAMENTE</Text>
           <View style={styles.dividerLine} />
         </View>
 
@@ -237,22 +233,22 @@ export default function LoginScreen() {
           onPress={handleQuickDemoLogin}
           disabled={submitting}
         >
-          <Zap size={15} color="#c084fc" style={{ marginRight: 8 }} />
-          <View>
-            <Text style={styles.demoBtnTitle}>
-              Acceso Rápido Demo Admin (admin@turnoflow.com)
-            </Text>
+          <View style={styles.demoIconWrapper}>
+            <CheckCircle2 size={18} color="#1A73E8" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.demoBtnTitle}>Acceso Inmediato de Demostración</Text>
             <Text style={styles.demoBtnSub}>
-              Explora TurnoFlow Beauty Studio con 5 agentes, catálogo y métricas reales
+              Explora todas las funciones con credenciales listas para probar
             </Text>
           </View>
         </TouchableOpacity>
 
-        {/* Footer Info */}
+        {/* Security Footer */}
         <View style={styles.footerInfo}>
-          <ShieldCheck size={14} color="#22c55e" style={{ marginRight: 6 }} />
+          <ShieldCheck size={14} color="#64748B" style={{ marginRight: 6 }} />
           <Text style={styles.footerText}>
-            Aislamiento Multi-Tenant con JWT • Datos persistidos en Supabase PostgreSQL
+            Conexión segura cifrada SSL • Diseñado para salones, estéticas y spas
           </Text>
         </View>
       </View>
@@ -263,100 +259,107 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    backgroundColor: '#09090b'
+    backgroundColor: '#F8FAFC'
   },
   outerContainer: {
-    flexGrow: 1,
+    minHeight: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
-    minHeight: (Platform.OS === 'web' ? '100vh' : '100%') as any
+    padding: 24
   },
   card: {
     width: '100%',
-    maxWidth: 480,
-    backgroundColor: '#0f0f12',
+    maxWidth: 460,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 14,
-    padding: 32
+    borderColor: '#E2E8F0',
+    padding: 32,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.08)'
+        } as any)
+      : {
+          elevation: 3
+        })
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 24
+    marginBottom: 24,
+    gap: 12
   },
   logoBadge: {
     width: 44,
     height: 44,
-    borderRadius: 10,
-    backgroundColor: 'rgba(168, 85, 247, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.35)',
+    borderRadius: 12,
+    backgroundColor: '#E8F0FE',
     justifyContent: 'center',
     alignItems: 'center'
   },
   brandTitle: {
-    color: '#ffffff',
     fontSize: 20,
     fontWeight: '700',
-    letterSpacing: -0.3
+    color: '#0F172A'
   },
-  brandSubtitle: {
-    color: '#a1a1aa',
+  brandTagline: {
     fontSize: 12,
+    color: '#64748B',
     marginTop: 2
   },
-  tabsRow: {
+  tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#18181b',
-    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
     padding: 4,
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: '#27272a'
+    marginBottom: 20
   },
-  tabBtn: {
+  tabButton: {
     flex: 1,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    paddingVertical: 10,
     alignItems: 'center',
-    justifyContent: 'center'
+    borderRadius: 8
   },
-  tabBtnActive: {
-    backgroundColor: '#27272a'
+  tabButtonActive: {
+    backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)'
+        } as any)
+      : {
+          elevation: 1
+        })
   },
   tabText: {
-    color: '#71717a',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
-    textAlign: 'center'
+    color: '#64748B'
   },
   tabTextActive: {
-    color: '#ffffff'
+    color: '#1A73E8',
+    fontWeight: '700'
   },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    backgroundColor: '#FEF2F2',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderColor: '#FECACA',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 18
+    marginBottom: 16
   },
   errorText: {
-    color: '#f87171',
+    color: '#DC2626',
     fontSize: 12,
-    flex: 1
+    flex: 1,
+    fontWeight: '500'
   },
   fieldGroup: {
     marginBottom: 16
   },
   label: {
-    color: '#d4d4d8',
+    color: '#334155',
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6
@@ -364,9 +367,9 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#18181b',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: '#CBD5E1',
     borderRadius: 8,
     paddingHorizontal: 12
   },
@@ -375,21 +378,21 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    color: '#ffffff',
+    color: '#0F172A',
     fontSize: 13,
-    paddingVertical: 11
+    paddingVertical: 10
   },
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#9333ea',
+    backgroundColor: '#1A73E8',
     borderRadius: 8,
-    paddingVertical: 13,
+    paddingVertical: 12,
     marginTop: 6
   },
   primaryBtnText: {
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700'
   },
@@ -402,10 +405,10 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#27272a'
+    backgroundColor: '#E2E8F0'
   },
   dividerLabel: {
-    color: '#52525b',
+    color: '#94A3B8',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.8
@@ -413,19 +416,28 @@ const styles = StyleSheet.create({
   demoBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    padding: 12,
+    gap: 12
+  },
+  demoIconWrapper: {
+    width: 36,
+    height: 36,
     borderRadius: 8,
-    padding: 12
+    backgroundColor: '#E8F0FE',
+    justifyContent: 'center',
+    alignItems: 'center'
   },
   demoBtnTitle: {
-    color: '#c084fc',
-    fontSize: 12,
+    color: '#0F172A',
+    fontSize: 13,
     fontWeight: '700'
   },
   demoBtnSub: {
-    color: '#a1a1aa',
+    color: '#64748B',
     fontSize: 11,
     marginTop: 2
   },
@@ -433,13 +445,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 22,
+    marginTop: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#18181b'
+    borderTopColor: '#F1F5F9'
   },
   footerText: {
-    color: '#71717a',
-    fontSize: 11
+    color: '#94A3B8',
+    fontSize: 11,
+    textAlign: 'center'
   }
 });

@@ -9,7 +9,7 @@ import {
   BookOpen,
   Workflow,
   Sparkles,
-  Settings,
+  HelpCircle,
   ShieldCheck,
   LogOut,
   Building2,
@@ -19,6 +19,7 @@ import { useAuth } from '../lib/auth';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
+  { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
   { path: '/knowledge-base', label: 'Servicios & Tarifas', icon: BookOpen },
@@ -38,7 +39,7 @@ export const Sidebar: React.FC = () => {
       {/* Brand Header */}
       <View style={styles.brandContainer}>
         <View style={styles.logoBadge}>
-          <Sparkles color="#a855f7" size={18} />
+          <Sparkles color="#1a73e8" size={18} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.brandTitle}>TurnoFlow AI</Text>
@@ -50,7 +51,7 @@ export const Sidebar: React.FC = () => {
 
       {/* Nav Menu */}
       <ScrollView style={styles.menuContainer} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionHeader}>PLATAFORMA</Text>
+        <Text style={styles.sectionHeader}>GESTIÓN DEL SALÓN</Text>
         {NAV_ITEMS.map((item) => {
           const isActive =
             pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path));
@@ -64,15 +65,15 @@ export const Sidebar: React.FC = () => {
             >
               <Icon
                 size={18}
-                color={isActive ? '#ffffff' : '#71717a'}
+                color={isActive ? '#1a73e8' : '#64748b'}
                 style={styles.navIcon}
               />
               <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
                 {item.label}
               </Text>
-              {item.path === '/playground' && (
-                <View style={styles.pillBadge}>
-                  <Text style={styles.pillText}>TEST</Text>
+              {item.path === '/guide' && (
+                <View style={styles.guideBadge}>
+                  <Text style={styles.guideBadgeText}>GUÍA</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -85,7 +86,7 @@ export const Sidebar: React.FC = () => {
         {user && (
           <View style={styles.userCard}>
             <View style={styles.userHeader}>
-              <Building2 size={13} color="#c084fc" style={{ marginRight: 6 }} />
+              <Building2 size={13} color="#1a73e8" style={{ marginRight: 6 }} />
               <Text style={styles.orgNameText} numberOfLines={1}>
                 {user.organizationName}
               </Text>
@@ -100,17 +101,17 @@ export const Sidebar: React.FC = () => {
                 router.replace('/login');
               }}
             >
-              <LogOut size={12} color="#f87171" style={{ marginRight: 6 }} />
+              <LogOut size={12} color="#dc2626" style={{ marginRight: 6 }} />
               <Text style={styles.logoutBtnText}>Cerrar Sesión</Text>
             </TouchableOpacity>
           </View>
         )}
 
         <View style={styles.securityRow}>
-          <ShieldCheck color="#22c55e" size={14} />
-          <Text style={styles.securityText}>Multi-Tenant Seguro</Text>
+          <ShieldCheck color="#16a34a" size={14} />
+          <Text style={styles.securityText}>Empresarial y Seguro</Text>
         </View>
-        <Text style={styles.versionText}>v1.0.0 Production Ready</Text>
+        <Text style={styles.versionText}>TurnoFlow v1.0 • Google Material</Text>
       </View>
     </View>
   );
@@ -119,9 +120,9 @@ export const Sidebar: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     width: 250,
-    backgroundColor: '#09090b',
+    backgroundColor: '#ffffff',
     borderRightWidth: 1,
-    borderRightColor: '#27272a',
+    borderRightColor: '#e2e8f0',
     paddingVertical: 18,
     paddingHorizontal: 14,
     height: '100%'
@@ -137,27 +138,27 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    backgroundColor: 'rgba(26, 115, 232, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
+    borderColor: 'rgba(26, 115, 232, 0.25)',
     justifyContent: 'center',
     alignItems: 'center'
   },
   brandTitle: {
-    color: '#ffffff',
-    fontSize: 15,
+    color: '#0f172a',
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: -0.2
   },
   brandSubtitle: {
-    color: '#a1a1aa',
+    color: '#64748b',
     fontSize: 11
   },
   menuContainer: {
     flex: 1
   },
   sectionHeader: {
-    color: '#52525b',
+    color: '#94a3b8',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -169,49 +170,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 9,
     paddingHorizontal: 10,
-    borderRadius: 7,
+    borderRadius: 8,
     marginBottom: 3
   },
   navItemActive: {
-    backgroundColor: '#18181b',
+    backgroundColor: '#eff6ff',
     borderWidth: 1,
-    borderColor: '#27272a'
+    borderColor: '#bfdbfe'
   },
   navIcon: {
     marginRight: 10
   },
   navLabel: {
-    color: '#a1a1aa',
+    color: '#475569',
     fontSize: 13,
     fontWeight: '500',
     flex: 1
   },
   navLabelActive: {
-    color: '#ffffff',
-    fontWeight: '600'
+    color: '#1a73e8',
+    fontWeight: '700'
   },
-  pillBadge: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+  guideBadge: {
+    backgroundColor: '#dbeafe',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4
   },
-  pillText: {
-    color: '#c084fc',
+  guideBadgeText: {
+    color: '#1e40af',
     fontSize: 9,
     fontWeight: '700'
   },
   footer: {
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#18181b',
-    paddingHorizontal: 8
+    borderTopColor: '#e2e8f0',
+    paddingHorizontal: 4
   },
   userCard: {
-    backgroundColor: '#18181b',
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 8,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
     padding: 10,
     marginBottom: 12
   },
@@ -221,13 +222,13 @@ const styles = StyleSheet.create({
     marginBottom: 2
   },
   orgNameText: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 12,
     fontWeight: '700',
     flex: 1
   },
   userEmailText: {
-    color: '#a1a1aa',
+    color: '#64748b',
     fontSize: 10,
     marginBottom: 8
   },
@@ -235,14 +236,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: '#fee2e2',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: '#fca5a5',
     borderRadius: 6,
-    paddingVertical: 6
+    paddingVertical: 5
   },
   logoutBtnText: {
-    color: '#f87171',
+    color: '#dc2626',
     fontSize: 11,
     fontWeight: '600'
   },
@@ -253,12 +254,12 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   securityText: {
-    color: '#22c55e',
+    color: '#16a34a',
     fontSize: 11,
-    fontWeight: '500'
+    fontWeight: '600'
   },
   versionText: {
-    color: '#52525b',
+    color: '#94a3b8',
     fontSize: 10
   }
 });

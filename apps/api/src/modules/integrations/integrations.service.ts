@@ -346,6 +346,11 @@ export class IntegrationsService {
         url: evolutionUrl ? evolutionUrl : 'No configurado',
         hasKey: !!evolutionKey
       },
+      scalinky: {
+        status: IntegrationStatus.CONFIGURING,
+        connected: false,
+        slug: null
+      },
       aiProvider: {
         provider: process.env.AI_PROVIDER || 'gemini',
         status: hasAI ? IntegrationStatus.CONNECTED : IntegrationStatus.CONFIGURING

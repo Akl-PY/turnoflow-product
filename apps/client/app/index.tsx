@@ -22,7 +22,9 @@ import {
   Smartphone,
   RefreshCw,
   Trash2,
-  Calendar
+  Calendar,
+  HelpCircle,
+  ExternalLink
 } from 'lucide-react-native';
 import { Header } from '../src/components/Header';
 import { MetricCard } from '../src/components/MetricCard';
@@ -75,6 +77,19 @@ export default function DashboardScreen() {
     }
   });
 
+  // Consulta de estado de integraciones
+  const { data: integrationsStatus } = useQuery({
+    queryKey: ['integrations-status', user?.organizationId],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get('/integrations/status');
+        return res.data;
+      } catch {
+        return null;
+      }
+    }
+  });
+
   // Consulta de estado del QR de WhatsApp
   const { data: qrStatusData } = useQuery({
     queryKey: ['qr-status', user?.organizationId],
@@ -91,6 +106,7 @@ export default function DashboardScreen() {
 
   const isWhatsAppConnected = qrStatusData?.status === 'CONNECTED';
   const connectedPhone = qrStatusData?.connectedPhone;
+  const isScalinkyConnected = Boolean(integrationsStatus?.scalinky?.connected);
 
   // Acción: Limpiar datos de prueba y empezar de cero
   const handleResetDemoData = async () => {
@@ -135,20 +151,20 @@ export default function DashboardScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Panel Ejecutivo"
-        subtitle={`Centro de control y recepción inteligente — ${user?.organizationName || 'TurnoFlow Studio'}`}
+        title="Panel de Control"
+        subtitle={`Recepción inteligente 24/7 — ${user?.organizationName || 'Mi Salón'}`}
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         {/* Banner de Confirmación al Limpiar Datos */}
         {resetSuccess && (
           <View style={styles.successBanner}>
-            <CheckCircle2 size={18} color="#22c55e" style={{ marginRight: 8 }} />
+            <CheckCircle2 size={18} color="#16a34a" style={{ marginRight: 8 }} />
             <Text style={styles.successBannerText}>{resetSuccess}</Text>
           </View>
         )}
 
-        {/* Google Material 3 Enterprise Status Hub */}
+        {/* Google Material 3 Hub Ejecutivo */}
         <View style={styles.enterpriseHubCard}>
           <View style={styles.hubHeaderRow}>
             <View style={{ flex: 1 }}>
@@ -156,22 +172,30 @@ export default function DashboardScreen() {
                 <View style={styles.googleBrandBadge}>
                   <Sparkles size={14} color="#1a73e8" />
                 </View>
-                <Text style={styles.hubTitle}>Ecosistema TurnoFlow AI</Text>
+                <Text style={styles.hubTitle}>Asistente Inteligente TurnoFlow</Text>
               </View>
               <Text style={styles.hubSubtitle}>
                 {isWhatsAppConnected
-                  ? `WhatsApp conectado (${connectedPhone || 'Dispositivo enlazado'}). Atendiendo y cotizando turnos en tiempo real.`
-                  : 'Vinculá tu WhatsApp y Scalinky para automatizar la atención de tu salón.'}
+                  ? `WhatsApp enlazado correctamente (${connectedPhone || 'Móvil vinculado'}). Respondiendo preguntas y agendando turnos.`
+                  : 'Vinculá tu WhatsApp escaneando el código QR para que la IA atienda a tus clientas de forma automática.'}
               </Text>
             </View>
 
             <View style={styles.hubActionsRow}>
               <TouchableOpacity
+                style={styles.btnGuide}
+                onPress={() => router.push('/guide')}
+              >
+                <HelpCircle size={14} color="#1e40af" style={{ marginRight: 6 }} />
+                <Text style={styles.btnGuideText}>¿Cómo utilizarlo?</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.btnSecondary}
                 onPress={() => router.push('/playground')}
               >
-                <Sparkles size={14} color="#c084fc" style={{ marginRight: 6 }} />
-                <Text style={styles.btnSecondaryText}>Probar en Simulador</Text>
+                <Sparkles size={14} color="#1a73e8" style={{ marginRight: 6 }} />
+                <Text style={styles.btnSecondaryText}>Probar Simulador</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -188,34 +212,39 @@ export default function DashboardScreen() {
 
           {/* Chips de Estado en Vivo (Material 3 Surface) */}
           <View style={styles.statusChipsContainer}>
-            {/* Chip 1: WhatsApp */}
+            {/* Chip 1: WhatsApp Móvil */}
             <View style={[styles.statusChip, isWhatsAppConnected ? styles.chipSuccess : styles.chipWarning]}>
               <View style={[styles.statusDot, isWhatsAppConnected ? styles.dotGreen : styles.dotAmber]} />
               <Text style={styles.chipLabel}>WhatsApp Móvil:</Text>
               <Text style={[styles.chipValue, isWhatsAppConnected ? styles.textGreen : styles.textAmber]}>
-                {isWhatsAppConnected ? (connectedPhone ? `Conectado (${connectedPhone})` : 'Conectado') : 'Pendiente QR'}
+                {isWhatsAppConnected ? (connectedPhone ? `Conectado (${connectedPhone})` : 'Conectado') : 'Pendiente de escanear QR'}
               </Text>
             </View>
 
             {/* Chip 2: Scalinky Turnero */}
+            <TouchableOpacity
+              style={[styles.statusChip, isScalinkyConnected ? styles.chipSuccess : styles.chipNeutral]}
+              onPress={() => router.push('/onboarding')}
+            >
+              <View style={[styles.statusDot, isScalinkyConnected ? styles.dotGreen : styles.dotGray]} />
+              <Text style={styles.chipLabel}>Turnero Scalinky:</Text>
+              <Text style={[styles.chipValue, isScalinkyConnected ? styles.textGreen : styles.textGray]}>
+                {isScalinkyConnected ? 'Sincronizado' : 'No vinculado (usando catálogo del panel)'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Chip 3: Motor de Inteligencia Artificial */}
             <View style={[styles.statusChip, styles.chipBlue]}>
               <View style={[styles.statusDot, styles.dotBlue]} />
-              <Text style={styles.chipLabel}>Turnero Scalinky:</Text>
-              <Text style={[styles.chipValue, styles.textBlue]}>Sincronizado</Text>
-            </View>
-
-            {/* Chip 3: Motor de IA */}
-            <View style={[styles.statusChip, styles.chipPurple]}>
-              <View style={[styles.statusDot, styles.dotPurple]} />
-              <Text style={styles.chipLabel}>Motor de IA:</Text>
-              <Text style={[styles.chipValue, styles.textPurple]}>Google Gemini 2.5 Flash</Text>
+              <Text style={styles.chipLabel}>Asistente IA:</Text>
+              <Text style={[styles.chipValue, styles.textBlue]}>Google Gemini 2.5 Flash</Text>
             </View>
           </View>
 
-          {/* Barra de Acciones de Administración Limpia */}
+          {/* Barra Inferior Limpia */}
           <View style={styles.hubFooterBar}>
             <Text style={styles.hubFooterNote}>
-              💡 Para recibir mensajes de clientes reales, escaneá el QR desde la pestaña Conexiones.
+              💡 Los turnos confirmados y las consultas de clientas aparecerán acá en tiempo real.
             </Text>
 
             <TouchableOpacity
@@ -224,9 +253,9 @@ export default function DashboardScreen() {
               disabled={resetting}
             >
               {resetting ? (
-                <ActivityIndicator size="small" color="#f87171" style={{ marginRight: 6 }} />
+                <ActivityIndicator size="small" color="#dc2626" style={{ marginRight: 6 }} />
               ) : (
-                <Trash2 size={13} color="#f87171" style={{ marginRight: 6 }} />
+                <Trash2 size={13} color="#dc2626" style={{ marginRight: 6 }} />
               )}
               <Text style={styles.resetDataBtnText}>
                 {resetting ? 'Limpiando...' : 'Empezar de 0 (Limpiar datos de prueba)'}
@@ -236,45 +265,45 @@ export default function DashboardScreen() {
         </View>
 
         {/* 5 Métricas Principales (Google Material 3 Cards) */}
-        <Text style={styles.sectionTitle}>MÉTRICAS DEL NEGOCIO (TIEMPO REAL)</Text>
+        <Text style={styles.sectionTitle}>MÉTRICAS DEL NEGOCIO</Text>
         <View style={styles.metricsGrid}>
           <MetricCard
-            label="Consultas Recibidas"
+            label="Consultas Atendidas"
             value={metrics.totalInquiries}
             trend={metrics.inquiriesTrend}
-            subtext="Mensajes procesados"
+            subtext="Mensajes respondidos"
             icon={MessageSquare}
-            iconColor="#3b82f6"
+            iconColor="#1a73e8"
           />
           <MetricCard
             label="Clientes Registrados"
             value={metrics.capturedLeads}
             trend={metrics.leadsTrend}
-            subtext="Prospectos calificados"
+            subtext="Nombres y teléfonos guardados"
             icon={Users}
-            iconColor="#a855f7"
+            iconColor="#0284c7"
           />
           <MetricCard
             label="Turnos Confirmados"
             value={metrics.confirmedBookings}
             trend={metrics.bookingsTrend}
-            subtext="En Scalinky / Calendar"
+            subtext="En agenda de reservas"
             icon={CalendarCheck}
-            iconColor="#22c55e"
+            iconColor="#16a34a"
           />
           <MetricCard
-            label="Seguimientos Activos"
+            label="Recordatorios Pendientes"
             value={metrics.pendingFollowUps}
-            subtext="En horario comercial"
+            subtext="Avisos automáticos"
             icon={Clock}
-            iconColor="#eab308"
+            iconColor="#d97706"
           />
           <MetricCard
-            label="Derivaciones a Humano"
+            label="Mensajes para Responder Vos"
             value={metrics.humanHandoffs}
-            subtext="Atención del dueño"
+            subtext="Consultas especiales"
             icon={UserCheck}
-            iconColor="#ec4899"
+            iconColor="#e11d48"
           />
         </View>
 
@@ -282,9 +311,9 @@ export default function DashboardScreen() {
         <View style={styles.activityCard}>
           <View style={styles.activityHeader}>
             <View>
-              <Text style={styles.activityTitle}>Actividad en Vivo de Clientes</Text>
+              <Text style={styles.activityTitle}>Historial de Citas y Consultas</Text>
               <Text style={styles.activitySubtitle}>
-                Turnos agendados y consultas atendidas por la IA en tiempo real
+                Turnos agendados y consultas atendidas en tiempo real
               </Text>
             </View>
             <TouchableOpacity
@@ -294,24 +323,24 @@ export default function DashboardScreen() {
                 refetchActivity();
               }}
             >
-              <RefreshCw size={13} color="#a1a1aa" style={{ marginRight: 6 }} />
+              <RefreshCw size={13} color="#475569" style={{ marginRight: 6 }} />
               <Text style={styles.refreshBtnText}>Actualizar</Text>
             </TouchableOpacity>
           </View>
 
           {activity.length === 0 ? (
             <View style={styles.emptyActivityBox}>
-              <Calendar size={36} color="#3f3f46" style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyTitle}>Tu panel está limpio y en 0</Text>
+              <Calendar size={36} color="#94a3b8" style={{ marginBottom: 12 }} />
+              <Text style={styles.emptyTitle}>Tu panel está limpio y listo para empezar</Text>
               <Text style={styles.emptyDesc}>
-                Cuando tus clientes te escriban al WhatsApp conectado, verás acá sus consultas, cotizaciones de tratamientos y confirmaciones de turnos al instante.
+                Cuando tus clientas te escriban al WhatsApp, verás reflejados acá sus turnos y sus consultas de precios al instante.
               </Text>
               <TouchableOpacity
                 style={styles.emptyActionBtn}
                 onPress={() => router.push('/playground')}
               >
                 <Sparkles size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.emptyActionBtnText}>Hacer una prueba en el simulador</Text>
+                <Text style={styles.emptyActionBtnText}>Probar cómo responde el Asistente</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -327,9 +356,9 @@ export default function DashboardScreen() {
                     ]}
                   >
                     {item.type === 'APPOINTMENT_CONFIRMED' ? (
-                      <CalendarCheck size={16} color="#22c55e" />
+                      <CalendarCheck size={16} color="#16a34a" />
                     ) : (
-                      <Users size={16} color="#a855f7" />
+                      <Users size={16} color="#1a73e8" />
                     )}
                   </View>
                   <View style={{ flex: 1 }}>
@@ -350,7 +379,7 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
+    backgroundColor: '#f8fafc'
   },
   scroll: {
     flex: 1
@@ -362,9 +391,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center'
   },
   successBanner: {
-    backgroundColor: '#052e16',
+    backgroundColor: '#dcfce7',
     borderWidth: 1,
-    borderColor: '#166534',
+    borderColor: '#bbf7d0',
     borderRadius: 12,
     padding: 14,
     marginBottom: 20,
@@ -372,20 +401,20 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   successBannerText: {
-    color: '#86efac',
+    color: '#15803d',
     fontSize: 13,
     fontWeight: '600'
   },
   enterpriseHubCard: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
     borderRadius: 16,
     padding: 20,
     marginBottom: 24,
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)'
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06)'
       }
     })
   },
@@ -405,22 +434,20 @@ const styles = StyleSheet.create({
   googleBrandBadge: {
     width: 26,
     height: 26,
-    borderRadius: 7,
-    backgroundColor: 'rgba(26, 115, 232, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(26, 115, 232, 0.3)',
+    borderRadius: 6,
+    backgroundColor: '#e8f0fe',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10
   },
   hubTitle: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: -0.3
   },
   hubSubtitle: {
-    color: '#94a3b8',
+    color: '#475569',
     fontSize: 13,
     lineHeight: 18
   },
@@ -428,6 +455,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10
+  },
+  btnGuide: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  btnGuideText: {
+    color: '#1d4ed8',
+    fontSize: 13,
+    fontWeight: '600'
+  },
+  btnSecondary: {
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  btnSecondaryText: {
+    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '600'
   },
   btnPrimary: {
     backgroundColor: '#1a73e8',
@@ -442,21 +499,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600'
   },
-  btnSecondary: {
-    backgroundColor: 'rgba(168, 85, 247, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  btnSecondaryText: {
-    color: '#d8b4fe',
-    fontSize: 13,
-    fontWeight: '600'
-  },
   statusChipsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -465,7 +507,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#1e293b'
+    borderColor: '#f1f5f9'
   },
   statusChip: {
     flexDirection: 'row',
@@ -476,20 +518,20 @@ const styles = StyleSheet.create({
     borderWidth: 1
   },
   chipSuccess: {
-    backgroundColor: 'rgba(34, 197, 94, 0.08)',
-    borderColor: 'rgba(34, 197, 94, 0.25)'
+    backgroundColor: '#dcfce7',
+    borderColor: '#bbf7d0'
   },
   chipWarning: {
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderColor: 'rgba(245, 158, 11, 0.25)'
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a'
   },
   chipBlue: {
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
-    borderColor: 'rgba(59, 130, 246, 0.25)'
+    backgroundColor: '#eff6ff',
+    borderColor: '#bfdbfe'
   },
-  chipPurple: {
-    backgroundColor: 'rgba(168, 85, 247, 0.08)',
-    borderColor: 'rgba(168, 85, 247, 0.25)'
+  chipNeutral: {
+    backgroundColor: '#f1f5f9',
+    borderColor: '#e2e8f0'
   },
   statusDot: {
     width: 7,
@@ -498,37 +540,38 @@ const styles = StyleSheet.create({
     marginRight: 8
   },
   dotGreen: {
-    backgroundColor: '#22c55e'
+    backgroundColor: '#16a34a'
   },
   dotAmber: {
-    backgroundColor: '#f59e0b'
+    backgroundColor: '#d97706'
   },
   dotBlue: {
-    backgroundColor: '#3b82f6'
+    backgroundColor: '#1a73e8'
   },
-  dotPurple: {
-    backgroundColor: '#a855f7'
+  dotGray: {
+    backgroundColor: '#94a3b8'
   },
   chipLabel: {
-    color: '#94a3b8',
+    color: '#475569',
     fontSize: 12,
-    marginRight: 6
+    marginRight: 6,
+    fontWeight: '500'
   },
   chipValue: {
     fontSize: 12,
-    fontWeight: '600'
+    fontWeight: '700'
   },
   textGreen: {
-    color: '#4ade80'
+    color: '#15803d'
   },
   textAmber: {
-    color: '#fbbf24'
+    color: '#b45309'
   },
   textBlue: {
-    color: '#60a5fa'
+    color: '#1d4ed8'
   },
-  textPurple: {
-    color: '#c084fc'
+  textGray: {
+    color: '#64748b'
   },
   hubFooterBar: {
     flexDirection: 'row',
@@ -545,20 +588,20 @@ const styles = StyleSheet.create({
   resetDataBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    backgroundColor: '#fee2e2',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: '#fca5a5',
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 6
   },
   resetDataBtnText: {
-    color: '#f87171',
+    color: '#dc2626',
     fontSize: 11,
     fontWeight: '600'
   },
   sectionTitle: {
-    color: '#94a3b8',
+    color: '#475569',
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -571,11 +614,16 @@ const styles = StyleSheet.create({
     marginBottom: 24
   },
   activityCard: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
     borderRadius: 16,
-    padding: 20
+    padding: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+      }
+    })
   },
   activityHeader: {
     flexDirection: 'row',
@@ -584,7 +632,7 @@ const styles = StyleSheet.create({
     marginBottom: 16
   },
   activityTitle: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 16,
     fontWeight: '700'
   },
@@ -596,13 +644,15 @@ const styles = StyleSheet.create({
   refreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 6
   },
   refreshBtnText: {
-    color: '#a1a1aa',
+    color: '#475569',
     fontSize: 11,
     fontWeight: '600'
   },
@@ -613,13 +663,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20
   },
   emptyTitle: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 6
   },
   emptyDesc: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 13,
     textAlign: 'center',
     maxWidth: 500,
@@ -646,9 +696,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#0b1120',
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
     borderRadius: 10
   },
   activityIcon: {
@@ -660,18 +710,18 @@ const styles = StyleSheet.create({
     marginRight: 12
   },
   iconApt: {
-    backgroundColor: 'rgba(34, 197, 94, 0.12)'
+    backgroundColor: '#dcfce7'
   },
   iconLead: {
-    backgroundColor: 'rgba(168, 85, 247, 0.12)'
+    backgroundColor: '#e0f2fe'
   },
   itemTitle: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 13,
     fontWeight: '600'
   },
   itemSubtitle: {
-    color: '#94a3b8',
+    color: '#475569',
     fontSize: 11,
     marginTop: 2
   },

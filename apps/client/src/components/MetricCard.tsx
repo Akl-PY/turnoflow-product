@@ -46,36 +46,41 @@ const styles = StyleSheet.create({
   card: {
     flex: 1,
     minWidth: 180,
-    backgroundColor: '#0f0f12',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 10,
-    padding: 18
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    padding: 18,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12
+    marginBottom: 10
   },
   label: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    fontWeight: '500'
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '600'
   },
   iconWrapper: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center'
   },
   value: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 26,
     fontWeight: '700',
     letterSpacing: -0.5,
-    marginBottom: 8
+    marginBottom: 6
   },
   footerRow: {
     flexDirection: 'row',
@@ -83,18 +88,18 @@ const styles = StyleSheet.create({
     gap: 8
   },
   trendBadge: {
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    backgroundColor: '#dcfce7',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4
   },
   trendText: {
-    color: '#4ade80',
-    fontSize: 10,
+    color: '#15803d',
+    fontSize: 11,
     fontWeight: '700'
   },
   subtext: {
-    color: '#71717a',
+    color: '#64748b',
     fontSize: 11
   }
 });

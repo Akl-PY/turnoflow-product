@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   Platform,
-  Linking,
   Image,
   ActivityIndicator
 } from 'react-native';
@@ -17,38 +16,38 @@ import {
   Building2,
   Save,
   CheckCircle,
-  FileText,
   Smartphone,
-  Copy,
-  Check,
-  ExternalLink,
-  Sparkles,
-  ArrowRight,
-  ShieldCheck,
-  HelpCircle,
-  BookOpen,
-  QrCode,
+  Calendar,
   RefreshCw,
-  PowerOff
+  PowerOff,
+  AlertCircle,
+  ExternalLink,
+  ShieldCheck,
+  Check,
+  Sparkles,
+  Layers
 } from 'lucide-react-native';
-import {
-  apiClient,
-  getTenantWebhookUrl,
-  getTenantQRWebhookUrl,
-  getTenantVerifyToken
-} from '../src/lib/api';
+import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const tenantWebhookUrl = getTenantWebhookUrl(user?.organizationId);
-  const tenantQRWebhookUrl = getTenantQRWebhookUrl(user?.organizationId);
-  const tenantVerifyToken = getTenantVerifyToken(user?.organizationId);
+  const [activeTab, setActiveTab] = useState<'qr' | 'scalinky' | 'business'>('qr');
 
-  const [activeTab, setActiveTab] = useState<'qr' | 'whatsapp' | 'business'>('qr');
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // WhatsApp Móvil (Evolution API / Baileys)
+  const [qrCodeData, setQrCodeData] = useState<string | null>(null);
+  const [qrStatus, setQrStatus] = useState<'DISCONNECTED' | 'SCAN_QR' | 'CONNECTED'>('DISCONNECTED');
+  const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
+  const [loadingQr, setLoadingQr] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  // Scalinky Turnero Opcional
+  const [scalinkySlug, setScalinkySlug] = useState('');
+  const [isScalinkyLinked, setIsScalinkyLinked] = useState(false);
+  const [savingScalinky, setSavingScalinky] = useState(false);
+  const [scalinkyFeedback, setScalinkyFeedback] = useState<string | null>(null);
 
   // Datos Comerciales
   const [businessName, setBusinessName] = useState(
@@ -62,31 +61,21 @@ export default function OnboardingScreen() {
     'Cancelaciones con al menos 24 horas de antelación sin cargo.'
   );
 
-  // WhatsApp Meta Cloud API
-  const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [wabaId, setWabaId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
+  const [savingBusiness, setSavingBusiness] = useState(false);
+  const [businessSuccess, setBusinessSuccess] = useState(false);
 
-  // Autoservicio QR (Opción B)
-  const [qrCodeData, setQrCodeData] = useState<string | null>(null);
-  const [qrStatus, setQrStatus] = useState<'DISCONNECTED' | 'SCAN_QR' | 'CONNECTED'>('DISCONNECTED');
-  const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
-  const [loadingQr, setLoadingQr] = useState(false);
-  const [qrError, setQrError] = useState<string | null>(null);
-  const [showAdvancedQr, setShowAdvancedQr] = useState(false);
-
-  const [savedSuccess, setSavedSuccess] = useState(false);
-  const [saving, setSaving] = useState(false);
-
+  // Consultar estado de WhatsApp
   const fetchQRStatus = async () => {
     try {
       const res = await apiClient.get('/integrations/whatsapp-qr/status');
       if (res.data?.status) {
         setQrStatus(res.data.status);
-        if (res.data.connectedPhone) setConnectedPhone(res.data.connectedPhone);
+        if (res.data.connectedPhone) {
+          setConnectedPhone(res.data.connectedPhone);
+        }
       }
     } catch {
-      // Ignorar si el endpoint aún está levantando
+      // Ignorar reintentos periódicos
     }
   };
 
@@ -100,9 +89,11 @@ export default function OnboardingScreen() {
         setQrStatus('SCAN_QR');
       }
     } catch (err: any) {
-      const msg = err.response?.data?.message || err.message || 'Error al conectar con Evolution API';
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        'No se pudo conectar con el servidor de WhatsApp. Reintenta en unos instantes.';
       setQrError(msg);
-      console.warn('Error generando QR:', msg);
     } finally {
       setLoadingQr(false);
     }
@@ -120,16 +111,14 @@ export default function OnboardingScreen() {
   };
 
   useEffect(() => {
+    fetchQRStatus();
     if (activeTab === 'qr') {
-      fetchQRStatus();
-      handleGenerateQR();
-      const interval = setInterval(() => {
-        fetchQRStatus();
-      }, 3500);
+      const interval = setInterval(fetchQRStatus, 4000);
       return () => clearInterval(interval);
     }
   }, [activeTab]);
 
+  // Cargar datos comerciales
   useEffect(() => {
     const fetchBusiness = async () => {
       try {
@@ -142,688 +131,441 @@ export default function OnboardingScreen() {
           if (res.data.contactPhone) setPhone(res.data.contactPhone);
           if (res.data.cancellationPolicy) setCancellationPolicy(res.data.cancellationPolicy);
 
+          // Revisar si existe configuración de Scalinky en specialInstructions
           if (res.data.specialInstructions) {
             try {
               const parsed = JSON.parse(res.data.specialInstructions);
-              if (parsed.whatsapp) {
-                if (parsed.whatsapp.phoneNumberId) setPhoneNumberId(parsed.whatsapp.phoneNumberId);
-                if (parsed.whatsapp.wabaId) setWabaId(parsed.whatsapp.wabaId);
-                if (parsed.whatsapp.accessToken) setAccessToken(parsed.whatsapp.accessToken);
+              if (parsed?.scalinkySlug) {
+                setScalinkySlug(parsed.scalinkySlug);
+                setIsScalinkyLinked(true);
               }
             } catch {
-              // no json in instructions
+              // no es JSON
             }
           }
         }
       } catch {
-        // mantener valores iniciales
+        // Mantener defaults
       }
     };
     fetchBusiness();
   }, [user?.organizationId]);
 
-  const handleCopy = (text: string, key: string) => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2500);
+  // Guardar vinculación de Scalinky
+  const handleSaveScalinky = async () => {
+    setSavingScalinky(true);
+    setScalinkyFeedback(null);
+    try {
+      const trimmed = scalinkySlug.trim().toLowerCase();
+      const payload: any = {
+        specialInstructions: trimmed
+          ? JSON.stringify({ scalinkySlug: trimmed, updatedAt: new Date().toISOString() })
+          : ''
+      };
+
+      await apiClient.put('/business', payload);
+      setIsScalinkyLinked(Boolean(trimmed));
+      setScalinkyFeedback(
+        trimmed
+          ? `¡Scalinky sincronizado correctamente con la cuenta "${trimmed}"!`
+          : 'Scalinky desvinculado. El asistente usará el catálogo propio de TurnoFlow.'
+      );
+      setTimeout(() => setScalinkyFeedback(null), 4000);
+    } catch {
+      setScalinkyFeedback('Error al actualizar la configuración de Scalinky.');
+    } finally {
+      setSavingScalinky(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
+  // Guardar datos comerciales
+  const handleSaveBusiness = async () => {
+    setSavingBusiness(true);
+    setBusinessSuccess(false);
     try {
-      const waConfig = JSON.stringify({
-        whatsapp: {
-          phoneNumberId: phoneNumberId.trim(),
-          wabaId: wabaId.trim(),
-          accessToken: accessToken.trim(),
-          updatedAt: new Date().toISOString()
-        }
-      });
-
       await apiClient.put('/business', {
         businessName,
         description,
         location,
         timezone,
         contactPhone: phone,
-        cancellationPolicy,
-        specialInstructions: waConfig
+        cancellationPolicy
       });
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+      setBusinessSuccess(true);
+      setTimeout(() => setBusinessSuccess(false), 3000);
     } catch {
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+      alert('Error al guardar los datos del negocio.');
     } finally {
-      setSaving(false);
-    }
-  };
-
-  const cleanPhone = phone.replace(/[^\d+]/g, '');
-  const testChatUrl = `https://wa.me/${cleanPhone.replace('+', '')}?text=${encodeURIComponent(
-    'Hola, quiero consultar por los servicios y turnos disponibles'
-  )}`;
-
-  const handleOpenTestChat = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(testChatUrl, '_blank', 'noopener,noreferrer');
-    } else {
-      Linking.openURL(testChatUrl);
+      setSavingBusiness(false);
     }
   };
 
   return (
     <View style={styles.container}>
       <Header
-        title="Conexión de WhatsApp & Configuración"
-        subtitle="Asistente de puesta en marcha para conectar tu salón con los 5 agentes de IA"
+        title="Configuración & Canales"
+        subtitle="Conecta tu WhatsApp, sincroniza tu turnero o ajusta los datos de tu salón"
       />
 
-      {/* Tabs */}
+      {/* Tabs Superiores */}
       <View style={styles.tabBar}>
         <TouchableOpacity
-          style={[styles.tabItem, activeTab === 'qr' && { borderBottomColor: '#38bdf8' }]}
+          style={[styles.tabButton, activeTab === 'qr' && styles.tabButtonActive]}
           onPress={() => setActiveTab('qr')}
         >
-          <QrCode
-            size={16}
-            color={activeTab === 'qr' ? '#38bdf8' : '#71717a'}
-            style={{ marginRight: 8 }}
-          />
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === 'qr' && { color: '#38bdf8', fontWeight: '700' }
-            ]}
-          >
-            1. Conexión QR (Tu Celular)
+          <Smartphone size={16} color={activeTab === 'qr' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>
+            1. WhatsApp Móvil (QR)
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tabItem, activeTab === 'whatsapp' && styles.tabItemActive]}
-          onPress={() => setActiveTab('whatsapp')}
+          style={[styles.tabButton, activeTab === 'scalinky' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('scalinky')}
         >
-          <Smartphone
-            size={16}
-            color={activeTab === 'whatsapp' ? '#4ade80' : '#71717a'}
-            style={{ marginRight: 8 }}
-          />
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === 'whatsapp' && { color: '#4ade80', fontWeight: '700' }
-            ]}
-          >
-            2. Meta Cloud API (Multiusuario)
+          <Calendar size={16} color={activeTab === 'scalinky' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'scalinky' && styles.tabTextActive]}>
+            2. Turnero Scalinky (Opcional)
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tabItem, activeTab === 'business' && styles.tabItemActive]}
+          style={[styles.tabButton, activeTab === 'business' && styles.tabButtonActive]}
           onPress={() => setActiveTab('business')}
         >
-          <Building2
-            size={16}
-            color={activeTab === 'business' ? '#a855f7' : '#71717a'}
-            style={{ marginRight: 8 }}
-          />
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === 'business' && { color: '#c084fc', fontWeight: '700' }
-            ]}
-          >
-            3. Perfil Comercial y Políticas
+          <Building2 size={16} color={activeTab === 'business' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'business' && styles.tabTextActive]}>
+            3. Datos de tu Salón
           </Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        {savedSuccess && (
-          <View style={styles.successBanner}>
-            <CheckCircle size={16} color="#22c55e" style={{ marginRight: 8 }} />
-            <Text style={styles.successText}>
-              ¡Configuración guardada y sincronizada exitosamente con la nube de TurnoFlow AI!
-            </Text>
-          </View>
-        )}
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* ======================================================== */}
+        {/* PESTAÑA 1: WHATSAPP MÓVIL (QR) */}
+        {/* ======================================================== */}
+        {activeTab === 'qr' && (
+          <View style={styles.sectionCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.headerIcon}>
+                <Smartphone size={20} color="#1A73E8" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Vincular WhatsApp Móvil</Text>
+                <Text style={styles.cardSubtitle}>
+                  Escanea el código QR desde tu teléfono para que el asistente responda consultas 24/7 en tu línea comercial.
+                </Text>
+              </View>
+            </View>
 
-        {activeTab === 'qr' ? (
-          <View style={styles.sectionContainer}>
-            {/* Status Hero QR */}
+            {/* Estado de Conexión */}
             {qrStatus === 'CONNECTED' ? (
-              <View style={[styles.statusHero, { borderColor: '#22c55e', backgroundColor: '#071f12' }]}>
-                <View style={[styles.statusDot, { backgroundColor: '#22c55e' }]} />
+              <View style={styles.connectedBox}>
+                <View style={styles.connectedBadge}>
+                  <CheckCircle size={24} color="#16A34A" />
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.statusHeroTitle, { color: '#4ade80' }]}>
-                    ¡WhatsApp Vinculado y Activo 24/7!
-                  </Text>
-                  <Text style={styles.statusHeroDesc}>
-                    {connectedPhone
-                      ? `Tu WhatsApp (${connectedPhone}) está conectado exitosamente. La IA de TurnoFlow está respondiendo consultas y coordinando turnos en tiempo real.`
-                      : 'Tu WhatsApp está conectado exitosamente. La IA de TurnoFlow está respondiendo consultas y coordinando turnos en tiempo real.'}
+                  <Text style={styles.connectedTitle}>WhatsApp Conectado con Éxito</Text>
+                  <Text style={styles.connectedText}>
+                    Línea vinculada:{' '}
+                    <Text style={{ fontWeight: '700', color: '#0F172A' }}>
+                      {connectedPhone || 'Teléfono verificado'}
+                    </Text>
+                    . Los mensajes entrantes son atendidos automáticamente por tu asistente de IA.
                   </Text>
                 </View>
                 <TouchableOpacity
-                  style={[styles.heroChatBtn, { backgroundColor: '#dc2626' }]}
+                  style={styles.disconnectBtn}
                   onPress={handleDisconnectQR}
                 >
-                  <PowerOff size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                  <Text style={styles.heroChatBtnText}>Desvincular WhatsApp</Text>
+                  <PowerOff size={14} color="#DC2626" style={{ marginRight: 6 }} />
+                  <Text style={styles.disconnectBtnText}>Desconectar</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <View style={[styles.statusHero, { borderColor: 'rgba(56, 189, 248, 0.4)', backgroundColor: '#081726' }]}>
-                <View style={[styles.statusDot, { backgroundColor: '#38bdf8' }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.statusHeroTitle}>
-                    Autoservicio: Vinculá tu WhatsApp escaneando el QR
-                  </Text>
-                  <Text style={styles.statusHeroDesc}>
-                    Seguí usando la app de WhatsApp en tu celular exactamente como hoy. La IA de TurnoFlow responde en paralelo y se silencia automáticamente si respondés vos.
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Tarjeta de Escaneo Directo de QR */}
-            {qrStatus !== 'CONNECTED' && (
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={[styles.stepCircle, { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}>
-                    <Text style={[styles.stepCircleText, { color: '#38bdf8' }]}>1</Text>
+              <View style={styles.qrContainer}>
+                {qrError && (
+                  <View style={styles.errorBox}>
+                    <AlertCircle size={16} color="#DC2626" style={{ marginRight: 8 }} />
+                    <Text style={styles.errorText}>{qrError}</Text>
                   </View>
-                  <View>
-                    <Text style={styles.cardTitle}>Escanear Código QR con WhatsApp</Text>
-                    <Text style={styles.cardSubtitle}>
-                      Sin configurar servidores, APIs ni Docker: escaneá directamente desde tu pantalla
-                    </Text>
-                  </View>
-                </View>
+                )}
 
-                <View style={styles.qrContentRow}>
-                  {/* Caja de Imagen QR */}
-                  <View style={styles.qrImageBox}>
-                    {loadingQr ? (
-                      <View style={styles.qrPlaceholder}>
-                        <ActivityIndicator size="large" color="#38bdf8" />
-                        <Text style={styles.qrLoadingText}>Generando sesión segura...</Text>
-                      </View>
-                    ) : qrError ? (
-                      <View style={[styles.qrPlaceholder, { padding: 14, minHeight: 200, justifyContent: 'center' }]}>
-                        <Text style={{ color: '#f87171', fontWeight: '700', fontSize: 13, textAlign: 'center', marginBottom: 6 }}>
-                          No se pudo generar el código QR
-                        </Text>
-                        <Text style={{ color: '#a1a1aa', fontSize: 11, textAlign: 'center', marginBottom: 14 }}>
-                          {qrError}
-                        </Text>
-                        <TouchableOpacity
-                          style={[styles.refreshQrBtn, { backgroundColor: '#3b82f6', borderColor: '#60a5fa' }]}
-                          onPress={handleGenerateQR}
-                        >
-                          <RefreshCw size={13} color="#ffffff" style={{ marginRight: 6 }} />
-                          <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600' }}>Reintentar</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : qrCodeData ? (
-                      <View style={{ alignItems: 'center' }}>
-                        <Image
-                          source={{ uri: qrCodeData }}
-                          style={styles.qrImage}
-                          resizeMode="contain"
-                        />
-                        <TouchableOpacity
-                          style={styles.refreshQrBtn}
-                          onPress={handleGenerateQR}
-                        >
-                          <RefreshCw size={13} color="#a1a1aa" style={{ marginRight: 6 }} />
-                          <Text style={styles.refreshQrBtnText}>Refrescar Código</Text>
-                        </TouchableOpacity>
-                      </View>
+                <View style={styles.qrGrid}>
+                  {/* Visual QR Card */}
+                  <View style={styles.qrBox}>
+                    {qrCodeData ? (
+                      <Image
+                        source={{ uri: qrCodeData }}
+                        style={styles.qrImage}
+                        resizeMode="contain"
+                      />
                     ) : (
                       <View style={styles.qrPlaceholder}>
-                        <TouchableOpacity
-                          style={styles.generateQrPrimaryBtn}
-                          onPress={handleGenerateQR}
-                        >
-                          <QrCode size={18} color="#ffffff" style={{ marginRight: 8 }} />
-                          <Text style={styles.generateQrPrimaryBtnText}>Generar Código QR</Text>
-                        </TouchableOpacity>
+                        <Smartphone size={44} color="#94A3B8" />
+                        <Text style={styles.qrPlaceholderText}>
+                          Haz clic abajo para generar el código QR de vinculación
+                        </Text>
                       </View>
                     )}
-                  </View>
 
-                  {/* Instrucciones Paso a Paso para el Usuario */}
-                  <View style={styles.qrInstructionsBox}>
-                    <Text style={styles.instructionsTitle}>Pasos para conectar tu teléfono:</Text>
-
-                    <View style={styles.qrStepRow}>
-                      <View style={styles.stepBadge}>
-                        <Text style={styles.stepBadgeText}>1</Text>
-                      </View>
-                      <Text style={styles.stepDesc}>
-                        Abrí <Text style={{ color: '#ffffff', fontWeight: '700' }}>WhatsApp</Text> en tu teléfono celular.
-                      </Text>
-                    </View>
-
-                    <View style={styles.qrStepRow}>
-                      <View style={styles.stepBadge}>
-                        <Text style={styles.stepBadgeText}>2</Text>
-                      </View>
-                      <Text style={styles.stepDesc}>
-                        Tocá Menú (<Text style={{ color: '#ffffff' }}>Android ⋮</Text>) o Ajustes (<Text style={{ color: '#ffffff' }}>iPhone ⚙️</Text>) y seleccioná <Text style={{ color: '#38bdf8', fontWeight: '700' }}>Dispositivos vinculados</Text>.
-                      </Text>
-                    </View>
-
-                    <View style={styles.qrStepRow}>
-                      <View style={styles.stepBadge}>
-                        <Text style={styles.stepBadgeText}>3</Text>
-                      </View>
-                      <Text style={styles.stepDesc}>
-                        Tocá <Text style={{ color: '#38bdf8', fontWeight: '700' }}>Vincular un dispositivo</Text> y apuntá la cámara a este código QR.
-                      </Text>
-                    </View>
-
-                    <View style={styles.autoDetectBanner}>
-                      <CheckCircle size={15} color="#22c55e" style={{ marginRight: 8 }} />
-                      <Text style={styles.autoDetectText}>
-                        Detección en tiempo real: al escanear, la pantalla se conectará sola en 3 segundos.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Sección avanzada para Webhook QR */}
-            <View style={styles.card}>
-              <TouchableOpacity
-                style={styles.advancedToggleHeader}
-                onPress={() => setShowAdvancedQr(!showAdvancedQr)}
-              >
-                <HelpCircle size={16} color="#71717a" style={{ marginRight: 8 }} />
-                <Text style={styles.advancedToggleTitle}>
-                  ¿Tenés tu propio servidor Evolution API o n8n? (Configuración avanzada)
-                </Text>
-                <ArrowRight
-                  size={14}
-                  color="#71717a"
-                  style={{
-                    marginLeft: 'auto',
-                    transform: [{ rotate: showAdvancedQr ? '90deg' : '0deg' }]
-                  }}
-                />
-              </TouchableOpacity>
-
-              {showAdvancedQr && (
-                <View style={{ marginTop: 14 }}>
-                  <Text style={styles.label}>URL DEL WEBHOOK QR EXCLUSIVO DE TU SALÓN</Text>
-                  <View style={styles.copyRow}>
-                    <TextInput
-                      style={[styles.input, styles.monoInput, { flex: 1 }]}
-                      value={tenantQRWebhookUrl}
-                      editable={false}
-                    />
                     <TouchableOpacity
-                      style={[
-                        styles.actionCopyBtn,
-                        copiedKey === 'qr_url' && styles.actionCopyBtnSuccess
-                      ]}
-                      onPress={() => handleCopy(tenantQRWebhookUrl, 'qr_url')}
+                      style={styles.generateBtn}
+                      onPress={handleGenerateQR}
+                      disabled={loadingQr}
                     >
-                      {copiedKey === 'qr_url' ? (
-                        <>
-                          <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                          <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
-                        </>
+                      {loadingQr ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
                       ) : (
                         <>
-                          <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
-                          <Text style={styles.actionCopyBtnText}>Copiar URL QR</Text>
+                          <RefreshCw size={15} color="#FFFFFF" style={{ marginRight: 8 }} />
+                          <Text style={styles.generateBtnText}>
+                            {qrCodeData ? 'Actualizar Código QR' : 'Generar Código QR'}
+                          </Text>
                         </>
                       )}
                     </TouchableOpacity>
                   </View>
-                  <Text style={styles.hint}>
-                    💡 Si contás con tu propia pasarela externa de Baileys / Evolution API, pegá esta URL con el evento <Text style={{ color: '#38bdf8', fontWeight: 'bold' }}>messages.upsert</Text>.
+
+                  {/* Pasos a Seguir */}
+                  <View style={styles.instructionsBox}>
+                    <Text style={styles.instructionsTitle}>Cómo vincular tu WhatsApp:</Text>
+                    <View style={styles.stepRow}>
+                      <View style={styles.stepNum}>
+                        <Text style={styles.stepNumText}>1</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Abre WhatsApp en tu teléfono celular de trabajo.
+                      </Text>
+                    </View>
+                    <View style={styles.stepRow}>
+                      <View style={styles.stepNum}>
+                        <Text style={styles.stepNumText}>2</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Toca los <Text style={styles.bold}>3 puntos</Text> (Android) o ve a{' '}
+                        <Text style={styles.bold}>Configuración</Text> (iPhone) y selecciona{' '}
+                        <Text style={styles.bold}>Dispositivos vinculados</Text>.
+                      </Text>
+                    </View>
+                    <View style={styles.stepRow}>
+                      <View style={styles.stepNum}>
+                        <Text style={styles.stepNumText}>3</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Toca <Text style={styles.bold}>Vincular un dispositivo</Text> y apunta la cámara a la pantalla para escanear el QR.
+                      </Text>
+                    </View>
+
+                    <View style={styles.infoTip}>
+                      <ShieldCheck size={16} color="#1A73E8" style={{ marginRight: 8 }} />
+                      <Text style={styles.infoTipText}>
+                        La conexión se mantiene activa las 24 horas. Si el teléfono se apaga o pierde señal, el sistema te avisará acá.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 2: SCALINKY TURNERO (OPCIONAL) */}
+        {/* ======================================================== */}
+        {activeTab === 'scalinky' && (
+          <View style={styles.sectionCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.headerIcon}>
+                <Calendar size={20} color="#1A73E8" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Sincronización con Scalinky (Opcional)</Text>
+                <Text style={styles.cardSubtitle}>
+                  Si utilizas Scalinky como tu sistema de reservas online, conecta tu cuenta para sincronizar turnos y disponibilidad en vivo.
+                </Text>
+              </View>
+            </View>
+
+            {/* Estado actual de Scalinky */}
+            <View style={styles.scalinkyStatusBanner}>
+              <View style={[styles.statusIndicator, isScalinkyLinked ? styles.bgGreen : styles.bgSlate]}>
+                <Layers size={18} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.scalinkyStatusTitle}>
+                  Estado de Scalinky:{' '}
+                  <Text style={{ color: isScalinkyLinked ? '#16A34A' : '#64748B', fontWeight: '700' }}>
+                    {isScalinkyLinked ? `Sincronizado con "${scalinkySlug}"` : 'No vinculado'}
+                  </Text>
+                </Text>
+                <Text style={styles.scalinkyStatusSub}>
+                  {isScalinkyLinked
+                    ? 'El Asistente de IA está consultando tu agenda y profesionales directamente desde Scalinky.'
+                    : 'Actualmente el asistente responde precios y gestiona turnos usando el catálogo interno de TurnoFlow (Servicios & Tarifas).'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Formulario de Configuración de Scalinky */}
+            <View style={styles.formContainer}>
+              <Text style={styles.inputLabel}>Identificador o Slug de tu salón en Scalinky</Text>
+              <Text style={styles.inputHelper}>
+                Es el nombre que figura en el link de tu agenda pública (por ejemplo: si tu link es scalinky.com/esteticaglow, tu identificador es "esteticaglow").
+              </Text>
+              <View style={styles.scalinkyInputRow}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ej. esteticaglow (deja vacío si no usas Scalinky)"
+                  placeholderTextColor="#94A3B8"
+                  value={scalinkySlug}
+                  onChangeText={setScalinkySlug}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={handleSaveScalinky}
+                  disabled={savingScalinky}
+                >
+                  {savingScalinky ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <>
+                      <Save size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.primaryBtnText}>Guardar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {scalinkyFeedback && (
+                <View style={styles.feedbackBox}>
+                  <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
+                  <Text style={styles.feedbackText}>{scalinkyFeedback}</Text>
+                </View>
+              )}
+
+              {/* Aclaración importante para el usuario */}
+              <View style={styles.dualModeExplanation}>
+                <Text style={styles.dualTitle}>¿Cómo funciona el catálogo de turnos?</Text>
+                <View style={styles.dualCard}>
+                  <Text style={styles.dualCardTitle}>Opción A: Sin Scalinky (Recomendada si comienzas)</Text>
+                  <Text style={styles.dualCardText}>
+                    Dirígete a <Text style={styles.bold}>"Servicios & Tarifas"</Text> en el menú lateral. Allí puedes dar de alta tus tratamientos (corte, alisado, limpieza facial, etc.), definir la duración y el precio. La IA usará esa lista automáticamente para responder y coordinar turnos.
+                  </Text>
+                </View>
+                <View style={styles.dualCard}>
+                  <Text style={styles.dualCardTitle}>Opción B: Con Scalinky</Text>
+                  <Text style={styles.dualCardText}>
+                    Al escribir tu identificador arriba y guardar, TurnoFlow consultará en tiempo real la disponibilidad de tus profesionales y los servicios cargados en tu cuenta de Scalinky.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 3: DATOS DEL NEGOCIO */}
+        {/* ======================================================== */}
+        {activeTab === 'business' && (
+          <View style={styles.sectionCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.headerIcon}>
+                <Building2 size={20} color="#1A73E8" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Información de tu Salón o Centro</Text>
+                <Text style={styles.cardSubtitle}>
+                  Estos datos los utiliza el asistente de IA para indicar la dirección exacta, horarios y normas de atención a los clientes que pregunten por WhatsApp.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.formContainer}>
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Nombre del Salón o Estudio</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={businessName}
+                  onChangeText={setBusinessName}
+                  placeholder="Ej. Glow Hair & Beauty Studio"
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Descripción breve de tu propuesta</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Ej. Estudio especializado en colorimetría, balayage y estética facial"
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Dirección / Ubicación Física</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={location}
+                  onChangeText={setLocation}
+                  placeholder="Ej. Av. Santa Fe 2450, Piso 2, Recoleta, CABA"
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Teléfono de Contacto del Administrador (Dueño)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="Ej. +5491122334455"
+                  placeholderTextColor="#94A3B8"
+                />
+                <Text style={styles.inputHelper}>
+                  A este número se enviarán las alertas urgentes de WhatsApp cuando una clienta solicite atención humana o surja un caso especial.
+                </Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Política de Cancelación y Reprogramación</Text>
+                <TextInput
+                  style={[styles.textInput, { height: 70 }]}
+                  multiline
+                  value={cancellationPolicy}
+                  onChangeText={setCancellationPolicy}
+                  placeholder="Ej. Cancelaciones o cambios de turno con al menos 24 hs de anticipación sin costo."
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={handleSaveBusiness}
+                disabled={savingBusiness}
+              >
+                {savingBusiness ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Save size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.primaryBtnText}>Guardar Datos del Salón</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {businessSuccess && (
+                <View style={styles.feedbackBox}>
+                  <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
+                  <Text style={styles.feedbackText}>
+                    ¡Datos guardados con éxito! El Asistente de IA ya cuenta con la información actualizada.
                   </Text>
                 </View>
               )}
             </View>
-          </View>
-        ) : activeTab === 'whatsapp' ? (
-          <View style={styles.sectionContainer}>
-            {/* Status Card */}
-            <View style={styles.statusHero}>
-              <View style={styles.statusDot} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.statusHeroTitle}>
-                  Recepción Inteligente Oficial de WhatsApp Cloud API
-                </Text>
-                <Text style={styles.statusHeroDesc}>
-                  Tu backend en Railway está listo para recibir mensajes 24/7 y procesarlos mediante IA.
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.heroChatBtn}
-                onPress={handleOpenTestChat}
-              >
-                <Smartphone size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.heroChatBtnText}>Abrir Chat de Prueba</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Paso 1: Webhook & Verify Token */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.stepCircle}>
-                  <Text style={styles.stepCircleText}>1</Text>
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>Datos del Webhook para Meta Developers</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Copiá estos datos y pegalos en la configuración de Webhook de tu App en Meta
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>URL DEL WEBHOOK EXCLUSIVO DE TU SALÓN</Text>
-                <View style={styles.copyRow}>
-                  <TextInput
-                    style={[styles.input, styles.monoInput, { flex: 1 }]}
-                    value={tenantWebhookUrl}
-                    editable={false}
-                  />
-                  <TouchableOpacity
-                    style={[
-                      styles.actionCopyBtn,
-                      copiedKey === 'wh_url' && styles.actionCopyBtnSuccess
-                    ]}
-                    onPress={() => handleCopy(tenantWebhookUrl, 'wh_url')}
-                  >
-                    {copiedKey === 'wh_url' ? (
-                      <>
-                        <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnText}>Copiar URL</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>TOKEN DE VERIFICACIÓN ÚNICO (MULTI-TENANT)</Text>
-                <View style={styles.copyRow}>
-                  <TextInput
-                    style={[styles.input, styles.monoInput, { flex: 1 }]}
-                    value={tenantVerifyToken}
-                    editable={false}
-                  />
-                  <TouchableOpacity
-                    style={[
-                      styles.actionCopyBtn,
-                      copiedKey === 'wh_token' && styles.actionCopyBtnSuccess
-                    ]}
-                    onPress={() => handleCopy(tenantVerifyToken, 'wh_token')}
-                  >
-                    {copiedKey === 'wh_token' ? (
-                      <>
-                        <Check size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnTextSuccess}>¡Copiado!</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={14} color="#a1a1aa" style={{ marginRight: 6 }} />
-                        <Text style={styles.actionCopyBtnText}>Copiar Token</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.hint}>
-                  🔑 Este es el token criptográfico exclusivo generado para tu salón. Garantiza aislamiento total para que los mensajes de tus clientes y la agenda de turnos solo pertenezcan a tu cuenta.
-                </Text>
-              </View>
-            </View>
-
-            {/* Paso 2: Guía Rápida de Configuración en Meta */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.stepCircle}>
-                  <Text style={styles.stepCircleText}>2</Text>
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>Guía Rápida en Meta for Developers (5 min)</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Pasos exactos para vincular tu número en developers.facebook.com
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.stepsList}>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>A.</Text>
-                  <Text style={styles.stepText}>
-                    Entrá en{' '}
-                    <Text
-                      style={styles.linkInline}
-                      onPress={() => Linking.openURL('https://developers.facebook.com/apps')}
-                    >
-                      developers.facebook.com/apps
-                    </Text>{' '}
-                    y creá una aplicación seleccionando el tipo <Text style={styles.boldText}>"Otro" → "Negocios"</Text>.
-                  </Text>
-                </View>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>B.</Text>
-                  <Text style={styles.stepText}>
-                    En el panel lateral hacé clic en <Text style={styles.boldText}>"WhatsApp" → "Configuración rápida"</Text>. Meta te dará un número de prueba con 1.000 conversaciones gratis al mes.
-                  </Text>
-                </View>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>C.</Text>
-                  <Text style={styles.stepText}>
-                    En la pestaña <Text style={styles.boldText}>"Configuración" → "Webhook"</Text>, pegá la URL y el Token del Paso 1, y hacé clic en <Text style={styles.boldText}>"Verificar y Guardar"</Text>.
-                  </Text>
-                </View>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNum}>D.</Text>
-                  <Text style={styles.stepText}>
-                    Hacé clic en <Text style={styles.boldText}>"Administrar campos"</Text> y seleccioná <Text style={styles.boldText}>"messages"</Text>. ¡Listo! Cada mensaje entrante será atendido por la IA.
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Paso 3: Guardar Credenciales Opcionales */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.stepCircle}>
-                  <Text style={styles.stepCircleText}>3</Text>
-                </View>
-                <View>
-                  <Text style={styles.cardTitle}>Credenciales de tu Número de WhatsApp</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Opcional: para que la IA responda directamente usando tu línea oficial
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>TELÉFONO DE WHATSAPP DEL SALÓN (CON CÓDIGO DE PAÍS)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={phone}
-                  onChangeText={setPhone}
-                  placeholder="+5491133445566"
-                  placeholderTextColor="#52525b"
-                />
-                <Text style={styles.hint}>
-                  Ejemplo para Argentina: +54 9 11 xxxx-xxxx | Para México: +52 1 xxxxxxxxxx
-                </Text>
-              </View>
-
-              <View style={styles.row}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>PHONE NUMBER ID (META)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={phoneNumberId}
-                    onChangeText={setPhoneNumberId}
-                    placeholder="Ej. 104938291029384"
-                    placeholderTextColor="#52525b"
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>WHATSAPP BUSINESS ACCOUNT ID (WABA)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={wabaId}
-                    onChangeText={setWabaId}
-                    placeholder="Ej. 948201948203948"
-                    placeholderTextColor="#52525b"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>META ACCESS TOKEN (TOKEN PERMANENTE)</Text>
-                <TextInput
-                  style={[styles.input, { fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }]}
-                  value={accessToken}
-                  onChangeText={setAccessToken}
-                  placeholder="EAAB..."
-                  placeholderTextColor="#52525b"
-                  secureTextEntry
-                />
-              </View>
-
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                <Save size={16} color="#ffffff" style={{ marginRight: 8 }} />
-                <Text style={styles.saveButtonText}>
-                  {saving ? 'Guardando en la nube...' : 'Guardar Credenciales de WhatsApp'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Accesos Rápidos */}
-            <View style={styles.quickBar}>
-              <TouchableOpacity
-                style={styles.quickBarBtn}
-                onPress={() => router.push('/playground')}
-              >
-                <Sparkles size={16} color="#c084fc" style={{ marginRight: 8 }} />
-                <Text style={styles.quickBarBtnText}>Probar en Playground de IA</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.quickBarBtn}
-                onPress={() => router.push('/knowledge-base')}
-              >
-                <BookOpen size={16} color="#60a5fa" style={{ marginRight: 8 }} />
-                <Text style={styles.quickBarBtnText}>Cargar Servicios y Precios</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.sectionContainer}>
-            {/* Tab 2: Perfil Comercial */}
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Building2 size={18} color="#a855f7" style={{ marginRight: 8 }} />
-                <Text style={styles.cardTitle}>Identidad Comercial</Text>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Nombre Comercial del Negocio</Text>
-                <TextInput
-                  style={styles.input}
-                  value={businessName}
-                  onChangeText={setBusinessName}
-                  placeholder="Ej. Spa Esencia"
-                  placeholderTextColor="#52525b"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Descripción y Especialidad</Text>
-                <TextInput
-                  style={[styles.input, { height: 70 }]}
-                  value={description}
-                  onChangeText={setDescription}
-                  multiline
-                  placeholder="Describe los tratamientos destacados y propuesta de valor..."
-                  placeholderTextColor="#52525b"
-                />
-              </View>
-
-              <View style={styles.row}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Ubicación Física</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={location}
-                    onChangeText={setLocation}
-                    placeholder="Dirección, piso, ciudad"
-                    placeholderTextColor="#52525b"
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Zona Horaria (IANA)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={timezone}
-                    onChangeText={setTimezone}
-                    placeholder="America/Argentina/Buenos_Aires"
-                    placeholderTextColor="#52525b"
-                  />
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <FileText size={18} color="#3b82f6" style={{ marginRight: 8 }} />
-                <Text style={styles.cardTitle}>Políticas de Turnos y Cancelaciones</Text>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Política Informada por los Agentes</Text>
-                <TextInput
-                  style={[styles.input, { height: 70 }]}
-                  value={cancellationPolicy}
-                  onChangeText={setCancellationPolicy}
-                  multiline
-                  placeholder="Ej. Cancelaciones con 24hs de antelación..."
-                  placeholderTextColor="#52525b"
-                />
-                <Text style={styles.hint}>
-                  Esta política será explicada a los clientes que soliciten cancelar o reprogramar citas por WhatsApp.
-                </Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSave}
-              disabled={saving}
-            >
-              <Save size={16} color="#ffffff" style={{ marginRight: 8 }} />
-              <Text style={styles.saveButtonText}>
-                {saving ? 'Guardando...' : 'Guardar Perfil Comercial'}
-              </Text>
-            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -834,379 +576,385 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
+    backgroundColor: '#F8FAFC'
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#121215',
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-    paddingHorizontal: 28
+    borderBottomColor: '#E2E8F0',
+    paddingHorizontal: 24,
+    gap: 12
   },
-  tabItem: {
+  tabButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     borderBottomWidth: 2,
-    borderBottomColor: 'transparent'
+    borderBottomColor: 'transparent',
+    gap: 8
   },
-  tabItemActive: {
-    borderBottomColor: '#4ade80'
+  tabButtonActive: {
+    borderBottomColor: '#1A73E8'
   },
   tabText: {
-    color: '#71717a',
     fontSize: 13,
-    fontWeight: '600'
+    fontWeight: '600',
+    color: '#64748B'
   },
-  scroll: {
-    flex: 1
+  tabTextActive: {
+    color: '#1A73E8',
+    fontWeight: '700'
   },
   content: {
-    padding: 28,
-    maxWidth: 960
+    flex: 1
   },
-  sectionContainer: {
-    gap: 20
+  contentContainer: {
+    padding: 24,
+    maxWidth: 1000,
+    width: '100%',
+    alignSelf: 'center'
   },
-  statusHero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0c1a14',
-    borderWidth: 1.5,
-    borderColor: 'rgba(34, 197, 94, 0.35)',
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 18,
-    gap: 14,
-    flexWrap: 'wrap'
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#22c55e'
-  },
-  statusHeroTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2
-  },
-  statusHeroDesc: {
-    color: '#a1a1aa',
-    fontSize: 12
-  },
-  heroChatBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#16a34a',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 8
-  },
-  heroChatBtnText: {
-    color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 12
-  },
-  card: {
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 10,
-    padding: 20
+    borderColor: '#E2E8F0',
+    padding: 24,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+        } as any)
+      : { elevation: 2 })
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 18,
-    gap: 10
+    marginBottom: 24,
+    gap: 12
   },
-  stepCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(74, 222, 128, 0.2)',
-    borderWidth: 1,
-    borderColor: '#4ade80',
+  headerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#E8F0FE',
     justifyContent: 'center',
     alignItems: 'center'
   },
-  stepCircleText: {
-    color: '#4ade80',
-    fontSize: 12,
-    fontWeight: '800'
-  },
   cardTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700'
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A'
   },
   cardSubtitle: {
-    color: '#71717a',
-    fontSize: 12,
-    marginTop: 2
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 18
   },
-  inputGroup: {
-    marginBottom: 16
-  },
-  label: {
-    color: '#a1a1aa',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 8
-  },
-  input: {
-    backgroundColor: '#09090b',
+  connectedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 8,
-    color: '#ffffff',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 13
+    borderColor: '#BBF7D0',
+    borderRadius: 12,
+    padding: 20,
+    gap: 16
   },
-  monoInput: {
-    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
-    color: '#86efac'
+  connectedBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DCFCE7',
+    justifyContent: 'center',
+    alignItems: 'center'
   },
-  copyRow: {
+  connectedTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#166534'
+  },
+  connectedText: {
+    fontSize: 13,
+    color: '#15803D',
+    marginTop: 3,
+    lineHeight: 18
+  },
+  disconnectBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10
-  },
-  actionCopyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#27272a',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8
   },
-  actionCopyBtnSuccess: {
-    backgroundColor: '#16a34a'
-  },
-  actionCopyBtnText: {
-    color: '#e4e4e7',
+  disconnectBtnText: {
+    color: '#DC2626',
     fontSize: 12,
     fontWeight: '600'
   },
-  actionCopyBtnTextSuccess: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700'
-  },
-  stepsList: {
-    gap: 10
-  },
-  stepItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8
-  },
-  stepNum: {
-    color: '#4ade80',
-    fontSize: 12,
-    fontWeight: '700'
-  },
-  stepText: {
-    color: '#d4d4d8',
-    fontSize: 12,
-    lineHeight: 18,
-    flex: 1
-  },
-  boldText: {
-    fontWeight: '700',
-    color: '#ffffff'
-  },
-  linkInline: {
-    color: '#60a5fa',
-    textDecorationLine: 'underline'
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 14,
-    flexWrap: 'wrap'
-  },
-  hint: {
-    color: '#52525b',
-    fontSize: 11,
+  qrContainer: {
     marginTop: 6
   },
-  saveButton: {
+  errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#a855f7',
-    paddingVertical: 13,
-    borderRadius: 8,
-    marginTop: 8
-  },
-  saveButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700'
-  },
-  quickBar: {
-    flexDirection: 'row',
-    gap: 14,
-    flexWrap: 'wrap'
-  },
-  quickBarBtn: {
-    flex: 1,
-    minWidth: 200,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#18181b',
+    backgroundColor: '#FEF2F2',
     borderWidth: 1,
-    borderColor: '#27272a',
-    paddingVertical: 12,
-    borderRadius: 8
-  },
-  quickBarBtnText: {
-    color: '#d4d4d8',
-    fontSize: 13,
-    fontWeight: '600'
-  },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.3)',
+    borderColor: '#FECACA',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16
   },
-  successText: {
-    color: '#4ade80',
-    fontSize: 12,
-    fontWeight: '600'
+  errorText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1
   },
-  qrContentRow: {
+  qrGrid: {
     flexDirection: 'row',
     gap: 24,
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 10
+    flexWrap: 'wrap'
   },
-  qrImageBox: {
-    backgroundColor: '#0c0c0e',
+  qrBox: {
+    width: 280,
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: '#E2E8F0',
     borderRadius: 12,
     padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 260,
-    minHeight: 280
+    alignItems: 'center'
   },
   qrImage: {
-    width: 220,
-    height: 220,
+    width: 240,
+    height: 240,
     borderRadius: 8,
-    backgroundColor: '#ffffff'
+    backgroundColor: '#FFFFFF',
+    marginBottom: 14
   },
   qrPlaceholder: {
-    width: 220,
-    height: 220,
-    alignItems: 'center',
+    width: 240,
+    height: 240,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
     justifyContent: 'center',
-    gap: 12
+    alignItems: 'center',
+    padding: 20,
+    marginBottom: 14
   },
-  qrLoadingText: {
-    color: '#94a3b8',
+  qrPlaceholderText: {
     fontSize: 12,
-    marginTop: 8
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 16
   },
-  generateQrPrimaryBtn: {
+  generateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0284c7',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
+    backgroundColor: '#1A73E8',
+    borderRadius: 8,
     paddingVertical: 10,
-    borderRadius: 8
+    paddingHorizontal: 16,
+    width: '100%'
   },
-  generateQrPrimaryBtnText: {
-    color: '#ffffff',
+  generateBtnText: {
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700'
   },
-  refreshQrBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#18181b',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginTop: 10
-  },
-  refreshQrBtnText: {
-    color: '#a1a1aa',
-    fontSize: 11,
-    fontWeight: '600'
-  },
-  qrInstructionsBox: {
+  instructionsBox: {
     flex: 1,
     minWidth: 280,
-    gap: 12
+    justifyContent: 'center'
   },
   instructionsTitle: {
-    color: '#ffffff',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4
+    color: '#0F172A',
+    marginBottom: 14
   },
-  qrStepRow: {
+  stepRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    marginBottom: 12,
     gap: 12
   },
-  stepBadge: {
+  stepNum: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center'
+    backgroundColor: '#E8F0FE',
+    justifyContent: 'center',
+    alignItems: 'center'
   },
-  stepBadgeText: {
-    color: '#38bdf8',
+  stepNumText: {
     fontSize: 12,
-    fontWeight: '700'
+    fontWeight: '700',
+    color: '#1A73E8'
   },
-  stepDesc: {
-    color: '#a1a1aa',
+  stepText: {
     fontSize: 13,
+    color: '#334155',
     flex: 1,
-    lineHeight: 18
+    lineHeight: 19
   },
-  autoDetectBanner: {
+  bold: {
+    fontWeight: '700',
+    color: '#0F172A'
+  },
+  infoTip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.25)',
+    borderColor: '#E2E8F0',
     borderRadius: 8,
-    padding: 10,
-    marginTop: 6
+    padding: 12,
+    marginTop: 14
   },
-  autoDetectText: {
-    color: '#86efac',
+  infoTipText: {
     fontSize: 12,
+    color: '#475569',
     flex: 1,
     lineHeight: 16
   },
-  advancedToggleHeader: {
+  scalinkyStatusBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 20,
+    gap: 14
   },
-  advancedToggleTitle: {
-    color: '#a1a1aa',
+  statusIndicator: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  bgGreen: {
+    backgroundColor: '#16A34A'
+  },
+  bgSlate: {
+    backgroundColor: '#64748B'
+  },
+  scalinkyStatusTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A'
+  },
+  scalinkyStatusSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 16
+  },
+  formContainer: {
+    marginTop: 8
+  },
+  inputLabel: {
     fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginBottom: 4
+  },
+  inputHelper: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 10,
+    lineHeight: 16
+  },
+  scalinkyInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center'
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: '#0F172A'
+  },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A73E8',
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 11
+  },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  feedbackBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 14
+  },
+  feedbackText: {
+    fontSize: 12,
+    color: '#15803D',
     fontWeight: '600'
+  },
+  dualModeExplanation: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9'
+  },
+  dualTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12
+  },
+  dualCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+    marginBottom: 10
+  },
+  dualCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1A73E8',
+    marginBottom: 4
+  },
+  dualCardText: {
+    fontSize: 12,
+    color: '#475569',
+    lineHeight: 18
+  },
+  formGroup: {
+    marginBottom: 16
   }
 });

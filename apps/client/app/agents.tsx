@@ -6,20 +6,21 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Switch
+  Switch,
+  Platform,
+  ActivityIndicator
 } from 'react-native';
 import { Header } from '../src/components/Header';
-import { Bot, Cpu, Sparkles, Check, Save, CheckCircle } from 'lucide-react-native';
+import { Bot, Cpu, Sparkles, Check, Save, CheckCircle, ShieldCheck } from 'lucide-react-native';
 import { apiClient, DEMO_AGENTS } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
-import { useRouter } from 'expo-router';
 
 export default function AgentsScreen() {
-  const router = useRouter();
   const { user } = useAuth();
   const [agents, setAgents] = useState<any[]>(DEMO_AGENTS);
   const [selectedAgentId, setSelectedAgentId] = useState<string>(DEMO_AGENTS[0].id);
   const [savedBanner, setSavedBanner] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -39,6 +40,7 @@ export default function AgentsScreen() {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
 
   const persistAgentChange = async (updatedAgent: any) => {
+    setSaving(true);
     try {
       await apiClient.put(`/agents/${updatedAgent.id}`, {
         name: updatedAgent.name,
@@ -49,10 +51,12 @@ export default function AgentsScreen() {
         systemPrompt: updatedAgent.systemPrompt
       });
     } catch {
-      // Mantiene estado local si falla la red
+      // offline fallback
+    } finally {
+      setSaving(false);
+      setSavedBanner(true);
+      setTimeout(() => setSavedBanner(false), 2500);
     }
-    setSavedBanner(true);
-    setTimeout(() => setSavedBanner(false), 2500);
   };
 
   const toggleAgent = (id: string) => {
@@ -96,225 +100,116 @@ export default function AgentsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Administración de Agentes de IA"
-        subtitle="Configuración de personalidad, proveedor (Gemini / Claude / OpenAI), herramientas y límites"
+        title="Módulos del Asistente Virtual"
+        subtitle="Especializaciones de la IA para recepcionar, cotizar, agendar turnos y avisar al dueño"
       />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {savedBanner && (
-          <View style={styles.savedNotice}>
-            <CheckCircle size={15} color="#4ade80" style={{ marginRight: 8 }} />
-            <Text style={styles.savedNoticeText}>
-              Configuración del agente guardada en la base de datos.
+          <View style={styles.savedBanner}>
+            <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
+            <Text style={styles.savedBannerText}>
+              ¡Configuración guardada! El asistente responderá aplicando estos ajustes.
             </Text>
           </View>
         )}
 
-        <View style={styles.layout}>
-          {/* Lista Izquierda de Agentes */}
-          <View style={styles.listCol}>
-            <Text style={styles.colTitle}>AGENTES ESPECIALIZADOS</Text>
-            {agents.map((agent) => {
-              const isSelected = agent.id === selectedAgentId;
+        <View style={styles.layoutGrid}>
+          {/* Columna Izquierda: Lista de Módulos */}
+          <View style={styles.agentsListCard}>
+            <Text style={styles.listHeaderTitle}>Especialidades Activas</Text>
+            {agents.map((ag) => {
+              const isSelected = ag.id === selectedAgentId;
               return (
                 <TouchableOpacity
-                  key={agent.id}
+                  key={ag.id}
                   style={[styles.agentItem, isSelected && styles.agentItemActive]}
-                  onPress={() => setSelectedAgentId(agent.id)}
-                  activeOpacity={0.8}
+                  onPress={() => setSelectedAgentId(ag.id)}
                 >
-                  <View style={styles.agentItemHeader}>
-                    <View style={styles.agentBadge}>
-                      <Bot size={16} color={isSelected ? '#c084fc' : '#a1a1aa'} />
+                  <View style={styles.agentItemTop}>
+                    <View style={styles.agentItemIcon}>
+                      <Bot size={16} color={isSelected ? '#1A73E8' : '#64748B'} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.agentTitle, isSelected && styles.agentTitleActive]}>
-                        {agent.name}
+                      <Text style={[styles.agentItemName, isSelected && styles.agentItemNameActive]}>
+                        {ag.name}
                       </Text>
-                      <Text style={styles.agentProvider}>
-                        {String(agent.provider).toUpperCase()} • {agent.model}
-                      </Text>
+                      <Text style={styles.agentItemRole}>{ag.role}</Text>
                     </View>
                     <Switch
-                      value={agent.isActive}
-                      onValueChange={() => toggleAgent(agent.id)}
-                      trackColor={{ false: '#27272a', true: '#9333ea' }}
-                      thumbColor="#ffffff"
+                      value={ag.isActive}
+                      onValueChange={() => toggleAgent(ag.id)}
+                      trackColor={{ false: '#CBD5E1', true: '#BFDBFE' }}
+                      thumbColor={ag.isActive ? '#1A73E8' : '#94A3B8'}
                     />
                   </View>
                 </TouchableOpacity>
               );
             })}
-
-            <TouchableOpacity
-              style={styles.testBtn}
-              onPress={() => router.push('/playground')}
-            >
-              <Sparkles size={14} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.testBtnText}>Abrir en Playground de Pruebas</Text>
-            </TouchableOpacity>
           </View>
 
-          {/* Panel Derecho: Configuración del Agente Seleccionado */}
-          <View style={styles.detailCol}>
-            <View style={styles.detailCard}>
-              <View style={styles.detailHeader}>
-                <View>
-                  <Text style={styles.detailName}>{selectedAgent.name}</Text>
-                  <Text style={styles.detailRole}>Rol del Sistema: {selectedAgent.role}</Text>
-                </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    {
-                      backgroundColor: selectedAgent.isActive
-                        ? 'rgba(34,197,94,0.1)'
-                        : 'rgba(239,68,68,0.1)'
-                    }
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusText,
-                      { color: selectedAgent.isActive ? '#4ade80' : '#f87171' }
-                    ]}
-                  >
-                    {selectedAgent.isActive ? 'ACTIVO' : 'PAUSADO'}
-                  </Text>
-                </View>
+          {/* Columna Derecha: Detalles del Módulo Seleccionado */}
+          <View style={styles.agentDetailCard}>
+            <View style={styles.detailHeader}>
+              <View>
+                <Text style={styles.detailTitle}>{selectedAgent.name}</Text>
+                <Text style={styles.detailRole}>Rol operativo: {selectedAgent.role}</Text>
               </View>
-
-              {/* Selector de Proveedor */}
-              <Text style={styles.fieldLabel}>Proveedor de Modelo de Lenguaje</Text>
-              <View style={styles.providerRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.providerCard,
-                    selectedAgent.provider === 'gemini' && styles.providerCardActive
-                  ]}
-                  onPress={() => updateProvider('gemini')}
-                >
-                  <Cpu
-                    size={16}
-                    color={selectedAgent.provider === 'gemini' ? '#c084fc' : '#71717a'}
-                  />
-                  <View style={{ marginLeft: 8 }}>
-                    <Text
-                      style={[
-                        styles.providerName,
-                        selectedAgent.provider === 'gemini' && styles.providerNameActive
-                      ]}
-                    >
-                      Google Gemini
-                    </Text>
-                    <Text style={styles.providerDesc}>Gemini 2.5 Flash (Activo)</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.providerCard,
-                    selectedAgent.provider === 'anthropic' && styles.providerCardActive
-                  ]}
-                  onPress={() => updateProvider('anthropic')}
-                >
-                  <Cpu
-                    size={16}
-                    color={selectedAgent.provider === 'anthropic' ? '#c084fc' : '#71717a'}
-                  />
-                  <View style={{ marginLeft: 8 }}>
-                    <Text
-                      style={[
-                        styles.providerName,
-                        selectedAgent.provider === 'anthropic' && styles.providerNameActive
-                      ]}
-                    >
-                      Anthropic Claude
-                    </Text>
-                    <Text style={styles.providerDesc}>Claude 3.5 Sonnet</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.providerCard,
-                    selectedAgent.provider === 'openai' && styles.providerCardActive
-                  ]}
-                  onPress={() => updateProvider('openai')}
-                >
-                  <Cpu
-                    size={16}
-                    color={selectedAgent.provider === 'openai' ? '#c084fc' : '#71717a'}
-                  />
-                  <View style={{ marginLeft: 8 }}>
-                    <Text
-                      style={[
-                        styles.providerName,
-                        selectedAgent.provider === 'openai' && styles.providerNameActive
-                      ]}
-                    >
-                      OpenAI
-                    </Text>
-                    <Text style={styles.providerDesc}>GPT-4o / GPT-4o-mini</Text>
-                  </View>
-                </TouchableOpacity>
+              <View style={[styles.statusBadge, selectedAgent.isActive ? styles.bgSuccess : styles.bgMuted]}>
+                <Text style={[styles.statusText, selectedAgent.isActive ? styles.textSuccess : styles.textMuted]}>
+                  {selectedAgent.isActive ? 'Módulo Activo' : 'En Pausa'}
+                </Text>
               </View>
-
-              {/* Parámetros de Inferencia */}
-              <View style={styles.paramsRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Modelo</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={selectedAgent.model}
-                    onChangeText={(val) => updateSelectedField('model', val)}
-                  />
-                </View>
-                <View style={{ width: 140 }}>
-                  <Text style={styles.fieldLabel}>Temperatura</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={String(selectedAgent.temperature)}
-                    onChangeText={(val) => updateSelectedField('temperature', val)}
-                  />
-                </View>
-              </View>
-
-              {/* Instrucciones del Sistema */}
-              <Text style={styles.fieldLabel}>Instrucciones del Sistema (System Prompt)</Text>
-              <TextInput
-                style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
-                value={selectedAgent.systemPrompt}
-                onChangeText={(val) => updateSelectedField('systemPrompt', val)}
-                multiline
-                placeholderTextColor="#52525b"
-              />
-
-              {/* Herramientas Permitidas */}
-              <Text style={styles.fieldLabel}>Herramientas Permitidas (Tool Calling)</Text>
-              <View style={styles.toolsList}>
-                {selectedAgent.allowedTools && selectedAgent.allowedTools.length > 0 ? (
-                  selectedAgent.allowedTools.map((tool: string) => (
-                    <View key={tool} style={styles.toolTag}>
-                      <Check size={12} color="#4ade80" style={{ marginRight: 4 }} />
-                      <Text style={styles.toolTagText}>{tool}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.emptyToolsText}>
-                    No requiere herramientas externas (Salida estructurada directa).
-                  </Text>
-                )}
-              </View>
-
-              <TouchableOpacity
-                style={styles.saveAgentBtn}
-                onPress={() => persistAgentChange(selectedAgent)}
-              >
-                <Save size={15} color="#ffffff" style={{ marginRight: 8 }} />
-                <Text style={styles.saveAgentBtnText}>Guardar Cambios del Agente</Text>
-              </TouchableOpacity>
             </View>
+
+            {/* Selector de Motor de IA */}
+            <Text style={styles.fieldLabel}>Motor de Inteligencia Artificial</Text>
+            <View style={styles.providerRow}>
+              {[
+                { id: 'gemini', name: 'Google Gemini 2.5 Flash', desc: 'Rápido y optimizado (Recomendado)' },
+                { id: 'anthropic', name: 'Claude 3.5 Sonnet', desc: 'Máxima empatía y lenguaje natural' },
+                { id: 'openai', name: 'OpenAI GPT-4o', desc: 'Versátil para consultas complejas' }
+              ].map((p) => {
+                const isActive = selectedAgent.provider === p.id;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[styles.providerCard, isActive && styles.providerCardActive]}
+                    onPress={() => updateProvider(p.id as any)}
+                  >
+                    <Text style={[styles.providerName, isActive && styles.providerNameActive]}>
+                      {p.name}
+                    </Text>
+                    <Text style={styles.providerDesc}>{p.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Prompt de Instrucciones */}
+            <Text style={styles.fieldLabel}>Instrucciones de Personalidad y Protocolo</Text>
+            <TextInput
+              style={[styles.input, styles.promptInput]}
+              multiline
+              value={selectedAgent.systemPrompt}
+              onChangeText={(txt) => updateSelectedField('systemPrompt', txt)}
+            />
+
+            {/* Botón Guardar */}
+            <TouchableOpacity
+              style={styles.saveAgentBtn}
+              onPress={() => persistAgentChange(selectedAgent)}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Save size={15} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.saveAgentBtnText}>Guardar Ajustes de este Módulo</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -325,227 +220,215 @@ export default function AgentsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
-  },
-  scroll: {
-    flex: 1
+    backgroundColor: '#F8FAFC'
   },
   content: {
-    padding: 28
+    flex: 1
   },
-  savedNotice: {
+  contentContainer: {
+    padding: 24,
+    maxWidth: 1100,
+    width: '100%',
+    alignSelf: 'center'
+  },
+  savedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    backgroundColor: '#F0FDF4',
     borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.3)',
+    borderColor: '#BBF7D0',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 18
+    marginBottom: 20
   },
-  savedNoticeText: {
-    color: '#4ade80',
-    fontSize: 12,
+  savedBannerText: {
+    fontSize: 13,
+    color: '#15803D',
     fontWeight: '600'
   },
-  layout: {
+  layoutGrid: {
     flexDirection: 'row',
-    gap: 24,
+    gap: 20,
     flexWrap: 'wrap'
   },
-  listCol: {
-    width: 320
+  agentsListCard: {
+    flex: 1,
+    minWidth: 280,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+        } as any)
+      : { elevation: 2 })
   },
-  colTitle: {
-    color: '#71717a',
-    fontSize: 11,
+  listHeaderTitle: {
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 12
+    color: '#64748B',
+    marginBottom: 12,
+    letterSpacing: 0.5
   },
   agentItem: {
-    backgroundColor: '#0f0f12',
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: '#E2E8F0',
     borderRadius: 8,
-    padding: 14,
-    marginBottom: 10
+    padding: 12,
+    marginBottom: 8
   },
   agentItemActive: {
-    backgroundColor: '#18181b',
-    borderColor: '#a855f7'
+    backgroundColor: '#E8F0FE',
+    borderColor: '#1A73E8'
   },
-  agentItemHeader: {
+  agentItemTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10
   },
-  agentBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+  agentItemIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0'
   },
-  agentTitle: {
-    color: '#ffffff',
+  agentItemName: {
     fontSize: 13,
-    fontWeight: '600'
+    fontWeight: '700',
+    color: '#0F172A'
   },
-  agentTitleActive: {
-    color: '#c084fc'
+  agentItemNameActive: {
+    color: '#1A73E8'
   },
-  agentProvider: {
-    color: '#71717a',
-    fontSize: 10,
+  agentItemRole: {
+    fontSize: 11,
+    color: '#64748B',
     marginTop: 2
   },
-  testBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    paddingVertical: 12,
-    marginTop: 10
-  },
-  testBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  detailCol: {
-    flex: 1,
-    minWidth: 360
-  },
-  detailCard: {
-    backgroundColor: '#0f0f12',
+  agentDetailCard: {
+    flex: 1.8,
+    minWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 10,
-    padding: 24
+    borderColor: '#E2E8F0',
+    padding: 24,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+        } as any)
+      : { elevation: 2 })
   },
   detailHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#18181b',
-    paddingBottom: 16
+    borderBottomColor: '#F1F5F9',
+    marginBottom: 20
   },
-  detailName: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700'
+  detailTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A'
   },
   detailRole: {
-    color: '#71717a',
     fontSize: 12,
+    color: '#64748B',
     marginTop: 2
   },
   statusBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 4
+    borderRadius: 6
+  },
+  bgSuccess: {
+    backgroundColor: '#DCFCE7'
+  },
+  bgMuted: {
+    backgroundColor: '#F1F5F9'
   },
   statusText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700'
   },
+  textSuccess: {
+    color: '#16A34A'
+  },
+  textMuted: {
+    color: '#64748B'
+  },
   fieldLabel: {
-    color: '#d4d4d8',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
+    color: '#334155',
     marginBottom: 8,
-    marginTop: 14
+    marginTop: 16
   },
   providerRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 8,
+    gap: 10,
     flexWrap: 'wrap'
   },
   providerCard: {
     flex: 1,
     minWidth: 160,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#18181b',
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: '#E2E8F0',
     borderRadius: 8,
     padding: 12
   },
   providerCardActive: {
-    borderColor: '#a855f7',
-    backgroundColor: 'rgba(168, 85, 247, 0.08)'
+    backgroundColor: '#E8F0FE',
+    borderColor: '#1A73E8'
   },
   providerName: {
-    color: '#a1a1aa',
     fontSize: 12,
-    fontWeight: '600'
+    fontWeight: '700',
+    color: '#334155'
   },
   providerNameActive: {
-    color: '#ffffff'
+    color: '#1A73E8'
   },
   providerDesc: {
-    color: '#71717a',
     fontSize: 10,
-    marginTop: 2
-  },
-  paramsRow: {
-    flexDirection: 'row',
-    gap: 14
+    color: '#64748B',
+    marginTop: 3
   },
   input: {
-    backgroundColor: '#18181b',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 6,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#ffffff',
-    fontSize: 13
-  },
-  toolsList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 4
-  },
-  toolTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6
-  },
-  toolTagText: {
-    color: '#d4d4d8',
-    fontSize: 11,
-    fontFamily: 'monospace'
-  },
-  emptyToolsText: {
-    color: '#71717a',
     fontSize: 12,
-    fontStyle: 'italic'
+    color: '#0F172A'
+  },
+  promptInput: {
+    height: 160,
+    textAlignVertical: 'top'
   },
   saveAgentBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#9333ea',
+    backgroundColor: '#1A73E8',
     borderRadius: 8,
     paddingVertical: 12,
-    marginTop: 22
+    marginTop: 20
   },
   saveAgentBtnText: {
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700'
   }

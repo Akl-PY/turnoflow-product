@@ -133,10 +133,10 @@ export class AiService {
         ? this.bookingAgent.getToolDefinitions()
         : this.receptionistAgent.getToolDefinitions();
 
-    const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+    const scalinkySlug = (profile as any)?.scalinkySlug;
     let scalinkyInfo = '';
 
-    if (this.scalinkyService) {
+    if (scalinkySlug && this.scalinkyService) {
       try {
         const isHealthy = await this.scalinkyService.isHealthy();
         if (isHealthy) {
@@ -262,9 +262,9 @@ REGLAS ESTRICTAS:
       case 'get_services': {
         const category = args.category as string;
         let list: any[] = [];
-        const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+        const scalinkySlug = (profile as any)?.scalinkySlug;
 
-        if (this.scalinkyService) {
+        if (scalinkySlug && this.scalinkyService) {
           try {
             const scServices = await this.scalinkyService.getServices(scalinkySlug);
             if (scServices.length > 0) {
@@ -295,9 +295,9 @@ REGLAS ESTRICTAS:
 
       case 'get_service_price': {
         const query = ((args.serviceName as string) || '').toLowerCase();
-        const scalinkySlug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+        const scalinkySlug = (profile as any)?.scalinkySlug;
 
-        if (this.scalinkyService) {
+        if (scalinkySlug && this.scalinkyService) {
           try {
             const scServices = await this.scalinkyService.getServices(scalinkySlug);
             const scFound = scServices.find((s) => s.name.toLowerCase().includes(query));
@@ -388,8 +388,8 @@ REGLAS ESTRICTAS:
         const date = (args.date as string) || new Date().toISOString().split('T')[0];
         let slots = await this.calculateAvailableSlots(organizationId, date);
 
-        if (this.scalinkyService) {
-          const slug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+        const slug = (profile as any)?.scalinkySlug;
+        if (slug && this.scalinkyService) {
           try {
             const staffList = await this.scalinkyService.getStaff(slug);
             const serviceList = await this.scalinkyService.getServices(slug);
@@ -425,8 +425,8 @@ REGLAS ESTRICTAS:
         const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hora estándar
 
         let scalinkyBooking: any = null;
-        if (this.scalinkyService) {
-          const slug = (profile as any)?.scalinkySlug || process.env.SCALINKY_DEFAULT_SLUG || 'hes194';
+        const slug = (profile as any)?.scalinkySlug;
+        if (slug && this.scalinkyService) {
           try {
             const staffList = await this.scalinkyService.getStaff(slug);
             const serviceList = await this.scalinkyService.getServices(slug);

@@ -5,17 +5,22 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  TextInput
+  TextInput,
+  Platform,
+  ActivityIndicator
 } from 'react-native';
 import { Header } from '../src/components/Header';
 import {
   Clock,
   CheckCircle2,
   CalendarDays,
-  Sparkles,
+  Calendar,
   Plus,
   XCircle,
-  Check
+  Check,
+  Phone,
+  Sparkles,
+  AlertCircle
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
@@ -47,7 +52,6 @@ function formatAppointmentItem(raw: any) {
     date: dateStr.charAt(0).toUpperCase() + dateStr.slice(1),
     time: timeStr,
     status: raw.status || 'CONFIRMED',
-    calendarSynced: true,
     notes: raw.notes
   };
 }
@@ -55,20 +59,21 @@ function formatAppointmentItem(raw: any) {
 export default function AppointmentsScreen() {
   const { user } = useAuth();
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [testSlotDate, setTestSlotDate] = useState('2026-11-13');
-  const [slotCheckResult, setSlotCheckResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Formulario de Nuevo Turno
   const [showAddForm, setShowAddForm] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [serviceName, setServiceName] = useState('Limpieza Facial Profunda');
-  const [bookingDate, setBookingDate] = useState('2026-11-14');
-  const [bookingTime, setBookingTime] = useState('15:00');
+  const [serviceName, setServiceName] = useState('Tratamiento Capilar');
+  const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bookingTime, setBookingTime] = useState('16:00');
   const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const fetchAppointments = async () => {
+      setLoading(true);
       try {
         const res = await apiClient.get('/appointments');
         if (Array.isArray(res.data)) {
@@ -76,247 +81,248 @@ export default function AppointmentsScreen() {
         }
       } catch {
         setAppointments([]);
+      } finally {
+        setLoading(false);
       }
     };
     fetchAppointments();
   }, [user?.organizationId]);
 
-  const checkSlotAvailability = async () => {
-    try {
-      const startIso = `${testSlotDate}T15:00:00.000Z`;
-      const res = await apiClient.post('/appointments/check-slot', {
-        serviceId: 'srv-001',
-        startTime: startIso,
-        organizationId: user?.organizationId
-      });
-      if (res.data?.isAvailable) {
-        setSlotCheckResult(
-          `✅ Google Calendar Verificado (${testSlotDate}): Disponibilidad libre encontrada en 10:00, 14:00, 15:00 y 17:30 hs.`
-        );
-      } else {
-        setSlotCheckResult(
-          `⚠️ Franja 15:00 ocupada. Alternativas libres: ${(res.data?.alternativeSlots || []).join(', ')}`
-        );
-      }
-    } catch {
-      setSlotCheckResult(
-        '✅ Google Calendar Verificado: Disponibilidad libre encontrada en 10:00, 14:00 y 17:30 hs.'
-      );
-    }
-  };
-
-  const handleConfirmBooking = async () => {
+  const handleCreateAppointment = async () => {
     if (!customerName.trim() || !customerPhone.trim()) return;
+    setSubmitting(true);
     const startIso = `${bookingDate}T${bookingTime}:00.000Z`;
+    const payload = {
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.trim(),
+      serviceName: serviceName.trim(),
+      startTime: startIso,
+      organizationId: user?.organizationId,
+      notes: notes.trim() || 'Cita agendada manualmente'
+    };
 
     try {
-      const res = await apiClient.post('/appointments/confirm-booking', {
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        serviceId: serviceName.trim(),
-        serviceName: serviceName.trim(),
-        startTime: startIso,
-        notes: notes.trim(),
-        organizationId: user?.organizationId
-      });
+      const res = await apiClient.post('/appointments', payload);
       setAppointments((prev) => [formatAppointmentItem(res.data), ...prev]);
     } catch {
-      const fallback = formatAppointmentItem({
+      const fallbackItem = {
         id: `apt-${Date.now()}`,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
         serviceName: serviceName.trim(),
-        startTime: startIso,
+        date: bookingDate,
+        time: `${bookingTime} hs`,
         status: 'CONFIRMED',
-        notes: notes.trim()
-      });
-      setAppointments((prev) => [fallback, ...prev]);
+        notes: notes.trim() || 'Cita registrada en el panel'
+      };
+      setAppointments((prev) => [fallbackItem, ...prev]);
+    } finally {
+      setSubmitting(false);
+      setCustomerName('');
+      setCustomerPhone('');
+      setNotes('');
+      setShowAddForm(false);
     }
-
-    setCustomerName('');
-    setCustomerPhone('');
-    setNotes('');
-    setShowAddForm(false);
   };
 
   const handleCancelAppointment = async (id: string) => {
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: 'CANCELLED' } : a))
-    );
-    try {
-      await apiClient.patch(`/appointments/${id}/cancel`, {
-        reason: 'Cancelado desde el panel administrativo'
-      });
-    } catch {
-      // Mantiene estado local si la red falla
+    const confirmCancel = () => {
+      setAppointments((prev) =>
+        prev.map((apt) => (apt.id === id ? { ...apt, status: 'CANCELLED' } : apt))
+      );
+      apiClient.delete(`/appointments/${id}`).catch(() => {});
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Seguro que deseas cancelar este turno?')) {
+        confirmCancel();
+      }
+    } else {
+      confirmCancel();
     }
   };
 
   return (
     <View style={styles.container}>
       <Header
-        title="Agenda y Citas Confirmadas"
-        subtitle="Sincronización bidireccional en tiempo real con Google Calendar"
+        title="Agenda & Citas del Salón"
+        subtitle="Visualiza los turnos confirmados por el asistente de WhatsApp y agenda nuevas visitas"
       />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        {/* Banner de Sincronización Google Calendar */}
-        <View style={styles.calendarBanner}>
-          <View style={styles.calendarIcon}>
-            <CalendarDays size={20} color="#22c55e" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>
-              Google Calendar Vinculado: "TurnoFlow - Citas Confirmadas"
-            </Text>
-            <Text style={styles.bannerText}>
-              Los turnos confirmados por el Booking Agent se reservan de forma inmediata impidiendo solapamientos.
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Barra Superior */}
+        <View style={styles.topToolbar}>
+          <View style={styles.statsSummary}>
+            <CalendarDays size={20} color="#1A73E8" style={{ marginRight: 8 }} />
+            <Text style={styles.summaryText}>
+              Turnos confirmados:{' '}
+              <Text style={{ fontWeight: '700', color: '#0F172A' }}>
+                {appointments.filter((a) => a.status === 'CONFIRMED').length}
+              </Text>
             </Text>
           </View>
+
           <TouchableOpacity
-            style={styles.newBookingBtn}
+            style={styles.newAptBtn}
             onPress={() => setShowAddForm(!showAddForm)}
           >
-            <Plus size={14} color="#ffffff" style={{ marginRight: 4 }} />
-            <Text style={styles.newBookingBtnText}>Agendar Turno</Text>
+            <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+            <Text style={styles.newAptBtnText}>Agendar Turno Manualmente</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Formulario de Cita Manual */}
         {showAddForm && (
-          <View style={styles.addCard}>
-            <Text style={styles.cardTitle}>Agendar Nuevo Turno Manual</Text>
-            <View style={styles.addRow}>
-              <TextInput
-                style={[styles.input, { flex: 1.5 }]}
-                placeholder="Nombre del cliente"
-                placeholderTextColor="#52525b"
-                value={customerName}
-                onChangeText={setCustomerName}
-              />
-              <TextInput
-                style={[styles.input, { flex: 1.2 }]}
-                placeholder="Teléfono (+54911...)"
-                placeholderTextColor="#52525b"
-                value={customerPhone}
-                onChangeText={setCustomerPhone}
-              />
-              <TextInput
-                style={[styles.input, { flex: 1.5 }]}
-                placeholder="Servicio"
-                placeholderTextColor="#52525b"
-                value={serviceName}
-                onChangeText={setServiceName}
-              />
-              <TextInput
-                style={[styles.input, { width: 120 }]}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#52525b"
-                value={bookingDate}
-                onChangeText={setBookingDate}
-              />
-              <TextInput
-                style={[styles.input, { width: 90 }]}
-                placeholder="HH:MM"
-                placeholderTextColor="#52525b"
-                value={bookingTime}
-                onChangeText={setBookingTime}
-              />
-              <TouchableOpacity style={styles.saveBtn} onPress={handleConfirmBooking}>
-                <Check size={14} color="#ffffff" style={{ marginRight: 4 }} />
-                <Text style={styles.saveBtnText}>Confirmar</Text>
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>Nuevo Turno en Agenda</Text>
+            <View style={styles.formGrid}>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Nombre de la Clienta</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Camila Benítez"
+                  placeholderTextColor="#94A3B8"
+                  value={customerName}
+                  onChangeText={setCustomerName}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Teléfono de WhatsApp</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. +5491122334455"
+                  placeholderTextColor="#94A3B8"
+                  value={customerPhone}
+                  onChangeText={setCustomerPhone}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Tratamiento / Servicio</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Balayage & Brushing"
+                  placeholderTextColor="#94A3B8"
+                  value={serviceName}
+                  onChangeText={setServiceName}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Fecha (AAAA-MM-DD)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="2026-11-15"
+                  placeholderTextColor="#94A3B8"
+                  value={bookingDate}
+                  onChangeText={setBookingDate}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Hora de Inicio (HH:MM)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="15:30"
+                  placeholderTextColor="#94A3B8"
+                  value={bookingTime}
+                  onChangeText={setBookingTime}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Notas adicionales</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Recordatorio de traer pelo lavado"
+                  placeholderTextColor="#94A3B8"
+                  value={notes}
+                  onChangeText={setNotes}
+                />
+              </View>
+            </View>
+
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setShowAddForm(false)}
+              >
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleCreateAppointment}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.saveBtnText}>Confirmar Turno</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Verificador de Disponibilidad Manual */}
-        <View style={styles.slotCheckCard}>
-          <Text style={styles.cardTitle}>Verificador Rápido de Disponibilidad Real</Text>
-          <Text style={styles.cardSubtitle}>
-            Comprueba slots libres exactamente como lo hace el Booking Agent antes de confirmar.
-          </Text>
-
-          <View style={styles.slotRow}>
-            <TextInput
-              style={styles.input}
-              value={testSlotDate}
-              onChangeText={setTestSlotDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#52525b"
-            />
-            <TouchableOpacity style={styles.checkBtn} onPress={checkSlotAvailability}>
-              <Sparkles size={14} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.checkBtnText}>Verificar Slots en Google Calendar</Text>
-            </TouchableOpacity>
-          </View>
-
-          {slotCheckResult && (
-            <View style={styles.resultBox}>
-              <Text style={styles.resultText}>{slotCheckResult}</Text>
+        {/* Lista de Turnos */}
+        <View style={styles.scheduleCard}>
+          {loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color="#1A73E8" size="large" />
+              <Text style={styles.loadingText}>Cargando agenda de turnos...</Text>
             </View>
-          )}
-        </View>
-
-        {/* Lista de Turnos Confirmados */}
-        <Text style={styles.sectionTitle}>PRÓXIMOS TURNOS REGISTRADOS</Text>
-        <View style={styles.list}>
-          {appointments.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <CalendarDays size={32} color="#71717a" style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyTitle}>No hay turnos agendados todavía</Text>
-              <Text style={styles.emptyText}>
-                Los turnos confirmados por tu Asistente de WhatsApp o agendados manualmente con "+ Agendar Turno" se sincronizarán aquí y en Google Calendar en tiempo real.
+          ) : appointments.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Calendar size={44} color="#94A3B8" />
+              <Text style={styles.emptyTitle}>No hay citas agendadas aún</Text>
+              <Text style={styles.emptySub}>
+                Cuando tus clientas coordinen un turno por WhatsApp, el Asistente de IA lo confirmará y aparecerá inmediatamente en esta lista.
               </Text>
-              <TouchableOpacity
-                style={styles.emptyActionBtn}
-                onPress={() => setShowAddForm(true)}
-              >
-                <Plus size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.emptyActionBtnText}>Agendar Primer Turno</Text>
-              </TouchableOpacity>
             </View>
           ) : (
             appointments.map((apt) => {
-              const isCancelled = apt.status === 'CANCELLED';
+              const isConfirmed = apt.status === 'CONFIRMED';
               return (
-                <View
-                  key={apt.id}
-                  style={[styles.aptCard, isCancelled && { opacity: 0.6 }]}
-                >
-                  <View style={styles.aptLeft}>
-                    <View style={styles.timeBadge}>
-                      <Clock size={14} color="#a855f7" style={{ marginRight: 6 }} />
-                      <Text style={styles.timeText}>{apt.time}</Text>
-                    </View>
+                <View key={apt.id} style={styles.aptRow}>
+                  {/* Fecha y Hora */}
+                  <View style={styles.timeBlock}>
+                    <Text style={styles.timeText}>{apt.time}</Text>
                     <Text style={styles.dateText}>{apt.date}</Text>
                   </View>
 
-                  <View style={styles.aptCenter}>
+                  {/* Detalle Clienta y Servicio */}
+                  <View style={styles.detailBlock}>
                     <Text style={styles.customerName}>{apt.customerName}</Text>
-                    <Text style={styles.customerPhone}>{apt.customerPhone}</Text>
-                    <Text style={styles.serviceName}>{apt.serviceName}</Text>
-                    {apt.notes ? <Text style={styles.notesText}>Nota: {apt.notes}</Text> : null}
+                    <View style={styles.phoneRow}>
+                      <Phone size={12} color="#64748B" style={{ marginRight: 4 }} />
+                      <Text style={styles.customerPhone}>{apt.customerPhone}</Text>
+                    </View>
+                    <Text style={styles.serviceTag}>{apt.serviceName}</Text>
+                    {apt.notes ? (
+                      <Text style={styles.notesText}>{apt.notes}</Text>
+                    ) : null}
                   </View>
 
-                  <View style={styles.aptRight}>
-                    {isCancelled ? (
-                      <View style={styles.badgeCancelled}>
-                        <XCircle size={12} color="#f87171" style={{ marginRight: 4 }} />
-                        <Text style={styles.badgeCancelledText}>CANCELADO</Text>
+                  {/* Estado y Acciones */}
+                  <View style={styles.actionBlock}>
+                    {isConfirmed ? (
+                      <View style={styles.badgeConfirmed}>
+                        <CheckCircle2 size={13} color="#16A34A" style={{ marginRight: 5 }} />
+                        <Text style={styles.badgeConfirmedText}>Confirmado</Text>
                       </View>
                     ) : (
-                      <>
-                        <View style={styles.badgeConfirmed}>
-                          <CheckCircle2 size={12} color="#4ade80" style={{ marginRight: 4 }} />
-                          <Text style={styles.badgeConfirmedText}>CONFIRMADO</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.cancelBtn}
-                          onPress={() => handleCancelAppointment(apt.id)}
-                        >
-                          <Text style={styles.cancelBtnText}>Cancelar Turno</Text>
-                        </TouchableOpacity>
-                      </>
+                      <View style={styles.badgeCancelled}>
+                        <XCircle size={13} color="#DC2626" style={{ marginRight: 5 }} />
+                        <Text style={styles.badgeCancelledText}>Cancelado</Text>
+                      </View>
+                    )}
+
+                    {isConfirmed && (
+                      <TouchableOpacity
+                        style={styles.cancelAptBtn}
+                        onPress={() => handleCancelAppointment(apt.id)}
+                      >
+                        <Text style={styles.cancelAptBtnText}>Cancelar turno</Text>
+                      </TouchableOpacity>
                     )}
                   </View>
                 </View>
@@ -332,282 +338,255 @@ export default function AppointmentsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
-  },
-  scroll: {
-    flex: 1
+    backgroundColor: '#F8FAFC'
   },
   content: {
-    padding: 28,
-    maxWidth: 960
+    flex: 1
   },
-  calendarBanner: {
+  contentContainer: {
+    padding: 24,
+    maxWidth: 1100,
+    width: '100%',
+    alignSelf: 'center'
+  },
+  topToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 20,
+    flexWrap: 'wrap'
+  },
+  statsSummary: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.25)',
-    padding: 16,
-    borderRadius: 10,
-    marginBottom: 20,
-    gap: 14
-  },
-  calendarIcon: {
-    width: 36,
-    height: 36,
+    borderColor: '#E2E8F0',
     borderRadius: 8,
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center'
+    paddingHorizontal: 16,
+    paddingVertical: 10
   },
-  bannerTitle: {
-    color: '#ffffff',
+  summaryText: {
+    fontSize: 13,
+    color: '#475569'
+  },
+  newAptBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A73E8',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  newAptBtnText: {
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700'
   },
-  bannerText: {
-    color: '#a1a1aa',
-    fontSize: 11,
-    marginTop: 2
-  },
-  newBookingBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#9333ea',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6
-  },
-  newBookingBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  addCard: {
-    backgroundColor: '#0f0f12',
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#a855f7',
-    borderRadius: 10,
-    padding: 18,
+    borderColor: '#CBD5E1',
+    padding: 20,
     marginBottom: 20
   },
-  addRow: {
+  formTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 14
+  },
+  formGrid: {
     flexDirection: 'row',
-    gap: 10,
     flexWrap: 'wrap',
-    marginTop: 10,
-    alignItems: 'center'
+    gap: 14
+  },
+  formField: {
+    flex: 1,
+    minWidth: 220,
+    marginBottom: 10
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 4
+  },
+  formInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0F172A'
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 10
+  },
+  cancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1'
+  },
+  cancelBtnText: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '600'
   },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    backgroundColor: '#1A73E8',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 6
   },
   saveBtnText: {
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700'
   },
-  slotCheckCard: {
-    backgroundColor: '#0f0f12',
+  scheduleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 10,
-    padding: 20,
-    marginBottom: 24
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+        } as any)
+      : { elevation: 2 })
   },
-  cardTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2
+  loadingBox: {
+    padding: 40,
+    alignItems: 'center'
   },
-  cardSubtitle: {
-    color: '#71717a',
-    fontSize: 12,
-    marginBottom: 14
-  },
-  slotRow: {
-    flexDirection: 'row',
-    gap: 12
-  },
-  input: {
-    width: 180,
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: '#ffffff',
-    fontSize: 13
-  },
-  checkBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#9333ea',
-    borderRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8
-  },
-  checkBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  resultBox: {
+  loadingText: {
     marginTop: 12,
-    padding: 10,
-    borderRadius: 6,
-    backgroundColor: 'rgba(168, 85, 247, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.25)'
+    fontSize: 13,
+    color: '#64748B'
   },
-  resultText: {
-    color: '#c084fc',
-    fontSize: 12
+  emptyBox: {
+    padding: 48,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  sectionTitle: {
-    color: '#71717a',
-    fontSize: 11,
+  emptyTitle: {
+    fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 12
+    color: '#0F172A',
+    marginTop: 12,
+    marginBottom: 6
   },
-  list: {
-    gap: 12
+  emptySub: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 440,
+    lineHeight: 18
   },
-  aptCard: {
-    flexDirection: 'row',
-    backgroundColor: '#0f0f12',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    gap: 16
-  },
-  aptLeft: {
-    width: 200
-  },
-  timeBadge: {
+  aptRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 16,
+    flexWrap: 'wrap'
+  },
+  timeBlock: {
+    minWidth: 140
   },
   timeText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700'
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A'
   },
   dateText: {
-    color: '#71717a',
-    fontSize: 11
-  },
-  aptCenter: {
-    flex: 1
-  },
-  customerName: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  customerPhone: {
-    color: '#71717a',
-    fontSize: 11,
-    marginBottom: 4
-  },
-  serviceName: {
-    color: '#c084fc',
     fontSize: 12,
-    fontWeight: '500'
-  },
-  notesText: {
-    color: '#52525b',
-    fontSize: 11,
+    color: '#64748B',
     marginTop: 2
   },
-  aptRight: {
-    alignItems: 'flex-end'
+  detailBlock: {
+    flex: 1,
+    minWidth: 200
+  },
+  customerName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A'
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2
+  },
+  customerPhone: {
+    fontSize: 12,
+    color: '#64748B'
+  },
+  serviceTag: {
+    fontSize: 12,
+    color: '#1A73E8',
+    fontWeight: '600',
+    marginTop: 4
+  },
+  notesText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2
+  },
+  actionBlock: {
+    alignItems: 'flex-end',
+    minWidth: 130
   },
   badgeConfirmed: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-    paddingHorizontal: 8,
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 4,
-    marginBottom: 6
+    borderRadius: 6
   },
   badgeConfirmedText: {
-    color: '#4ade80',
-    fontSize: 10,
-    fontWeight: '700'
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#16A34A'
   },
   badgeCancelled: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    paddingHorizontal: 8,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 4
+    borderRadius: 6
   },
   badgeCancelledText: {
-    color: '#f87171',
-    fontSize: 10,
-    fontWeight: '700'
-  },
-  cancelBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)'
-  },
-  cancelBtnText: {
-    color: '#f87171',
-    fontSize: 10,
-    fontWeight: '600'
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#18181b',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    marginVertical: 12
-  },
-  emptyTitle: {
-    color: '#ffffff',
-    fontSize: 15,
+    fontSize: 11,
     fontWeight: '700',
-    marginBottom: 6
+    color: '#DC2626'
   },
-  emptyText: {
-    color: '#a1a1aa',
-    fontSize: 13,
-    textAlign: 'center',
-    maxWidth: 480,
-    lineHeight: 18,
-    marginBottom: 16
+  cancelAptBtn: {
+    marginTop: 8
   },
-  emptyActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a855f7',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8
-  },
-  emptyActionBtnText: {
-    color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 13
+  cancelAptBtnText: {
+    fontSize: 11,
+    color: '#DC2626',
+    fontWeight: '500'
   }
 });

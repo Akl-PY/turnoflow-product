@@ -31,8 +31,8 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
           style={styles.actionBtnSecondary}
           onPress={() => router.push('/playground')}
         >
-          <Sparkles size={14} color="#c084fc" style={{ marginRight: 6 }} />
-          <Text style={styles.actionBtnSecondaryText}>Probar Agentes</Text>
+          <Sparkles size={14} color="#1a73e8" style={{ marginRight: 6 }} />
+          <Text style={styles.actionBtnSecondaryText}>Probar Simulador</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -43,21 +43,21 @@ const styles = StyleSheet.create({
   container: {
     height: 64,
     borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-    backgroundColor: '#09090b',
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 28
   },
   title: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: -0.3
   },
   subtitle: {
-    color: '#71717a',
+    color: '#64748b',
     fontSize: 12
   },
   actions: {
@@ -68,9 +68,9 @@ const styles = StyleSheet.create({
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    backgroundColor: '#dcfce7',
     borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.25)',
+    borderColor: '#bbf7d0',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 20
@@ -79,27 +79,27 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#22c55e',
+    backgroundColor: '#16a34a',
     marginRight: 6
   },
   statusText: {
-    color: '#4ade80',
+    color: '#15803d',
     fontSize: 11,
-    fontWeight: '500'
+    fontWeight: '600'
   },
   actionBtnSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#18181b',
+    backgroundColor: '#eff6ff',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: '#bfdbfe',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 7
+    borderRadius: 8
   },
   actionBtnSecondaryText: {
-    color: '#ffffff',
+    color: '#1d4ed8',
     fontSize: 12,
-    fontWeight: '500'
+    fontWeight: '600'
   }
 });

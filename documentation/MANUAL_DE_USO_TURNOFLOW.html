@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TurnoFlow AI — Manual de Uso & Guía Visual para Salones de Belleza</title>
+  <style>
+    :root {
+      --primary: #1A73E8;
+      --primary-dark: #1557B0;
+      --primary-light: #E8F0FE;
+      --bg: #F8FAFC;
+      --surface: #FFFFFF;
+      --border: #E2E8F0;
+      --text: #0F172A;
+      --text-muted: #64748B;
+      --success: #16A34A;
+      --success-light: #DCFCE7;
+      --warning: #D97706;
+      --warning-light: #FEF3C7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding-bottom: 60px;
+    }
+
+    .top-bar {
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--primary-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .brand-tag {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .btn-print {
+      background: var(--primary);
+      color: #FFFFFF;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+
+    .btn-print:hover {
+      background: var(--primary-dark);
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 36px auto;
+      padding: 0 20px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #1A73E8, #1557B0);
+      color: #FFFFFF;
+      border-radius: 16px;
+      padding: 40px;
+      margin-bottom: 32px;
+      box-shadow: 0 4px 20px rgba(26, 115, 232, 0.15);
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      letter-spacing: 0.5px;
+    }
+
+    .hero h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      line-height: 1.3;
+    }
+
+    .hero p {
+      font-size: 15px;
+      opacity: 0.92;
+      max-width: 650px;
+    }
+
+    .guide-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px;
+      margin-bottom: 28px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+
+    .step-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .step-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 20px;
+      background: var(--primary-light);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .step-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .step-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .step-desc {
+      font-size: 14px;
+      color: #334155;
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+
+    /* Mockups */
+    .mockup-window {
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 16px;
+    }
+
+    .mockup-bar {
+      background: #F1F5F9;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .mockup-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 4px;
+      background: #CBD5E1;
+    }
+
+    .mockup-body {
+      padding: 24px;
+    }
+
+    /* WhatsApp UI Mockup */
+    .wa-container {
+      max-width: 420px;
+      margin: 0 auto;
+      background: #EFEAE2;
+      border-radius: 12px;
+      border: 1px solid #CBD5E1;
+      overflow: hidden;
+    }
+
+    .wa-header {
+      background: #075E54;
+      color: #FFFFFF;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .wa-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 17px;
+      background: #FFFFFF;
+      color: #075E54;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .wa-header-info h4 {
+      font-size: 14px;
+      margin: 0;
+    }
+
+    .wa-header-info span {
+      font-size: 11px;
+      opacity: 0.85;
+    }
+
+    .wa-chat {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .wa-bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    .wa-client {
+      align-self: flex-start;
+      background: #FFFFFF;
+      border-bottom-left-radius: 2px;
+    }
+
+    .wa-bot {
+      align-self: flex-end;
+      background: #E7FFDB;
+      border-bottom-right-radius: 2px;
+    }
+
+    .wa-time {
+      font-size: 10px;
+      color: #6B7280;
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    /* Alert Card Mockup */
+    .alert-box {
+      background: #FFFBEB;
+      border: 1px solid #FDE68A;
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .alert-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #92400E;
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .alert-content {
+      background: #FFFFFF;
+      border: 1px solid #FDE68A;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 13px;
+      color: #374151;
+      line-height: 1.6;
+    }
+
+    /* Services Table Mockup */
+    .services-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .services-table th {
+      background: #F1F5F9;
+      color: #475569;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .services-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #F1F5F9;
+      color: var(--text);
+    }
+
+    .pill-active {
+      display: inline-block;
+      background: var(--success-light);
+      color: var(--success);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    /* Checklist */
+    .checklist {
+      list-style: none;
+      margin: 16px 0;
+    }
+
+    .checklist li {
+      padding: 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: #334155;
+    }
+
+    .checklist li::before {
+      content: "✓";
+      color: var(--success);
+      font-weight: bold;
+      background: var(--success-light);
+      width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+
+    @media print {
+      body {
+        background: #FFFFFF;
+      }
+      .top-bar {
+        display: none;
+      }
+      .hero {
+        background: #1A73E8 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .guide-card {
+        page-break-inside: avoid;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Sticky Navigation -->
+  <header class="top-bar">
+    <div class="brand">
+      <div class="brand-icon">TF</div>
+      <div>
+        <div class="brand-name">TurnoFlow AI</div>
+        <div class="brand-tag">Manual Oficial de Uso para Negocios</div>
+      </div>
+    </div>
+    <button class="btn-print" onclick="window.print()">
+      🖨️ Imprimir / Guardar en PDF
+    </button>
+  </header>
+
+  <main class="container">
+    <!-- Hero Banner -->
+    <section class="hero">
+      <div class="hero-badge">GUÍA OFICIAL PARA DUEÑOS & ADMINISTRADORES</div>
+      <h1>Manual Visual de TurnoFlow AI</h1>
+      <p>
+        Aprende paso a paso cómo conectar tu línea de WhatsApp, cargar tus tratamientos o vincular Scalinky, cómo atiende el asistente a tus clientas y cómo recibir avisos en tu teléfono celular.
+      </p>
+    </section>
+
+    <!-- PASO 1 -->
+    <section class="guide-card">
+      <div class="step-header">
+        <div class="step-badge">1</div>
+        <div>
+          <h2 class="step-title">Conectar tu WhatsApp con Código QR</h2>
+          <div class="step-subtitle">Vinculación rápida en 30 segundos sin números nuevos</div>
+        </div>
+      </div>
+      <p class="step-desc">
+        Tu asistente de inteligencia artificial responde directamente a través del número de WhatsApp comercial de tu salón. La vinculación se hace escaneando un código QR desde la aplicación oficial de WhatsApp, exactamente igual que cuando abres WhatsApp Web en tu computadora.
+      </p>
+
+      <ul class="checklist">
+        <li>Abre WhatsApp en tu teléfono celular de trabajo.</li>
+        <li>Toca los tres puntos ⋮ (Android) o ve a Configuración ⚙️ (iPhone).</li>
+        <li>Selecciona <strong>Dispositivos vinculados</strong> y toca <strong>Vincular un dispositivo</strong>.</li>
+        <li>Apunta la cámara de tu teléfono a la pantalla de TurnoFlow y escanea el código QR.</li>
+      </ul>
+
+      <div class="mockup-window">
+        <div class="mockup-bar">
+          <div class="mockup-dot"></div>
+          <div class="mockup-dot"></div>
+          <div class="mockup-dot"></div>
+          <span>Panel TurnoFlow — Pantalla de Vinculación de WhatsApp</span>
+        </div>
+        <div class="mockup-body" style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;">
+          <div style="background: #FFFFFF; border: 2px dashed #CBD5E1; padding: 20px; border-radius: 8px; text-align: center; width: 160px;">
+            <div style="font-size: 32px; margin-bottom: 6px;">📱</div>
+            <div style="font-size: 11px; font-weight: 700; color: #1A73E8;">Código QR Listo</div>
+            <div style="font-size: 10px; color: #64748B; margin-top: 4px;">Escanear desde WhatsApp</div>
+          </div>
+          <div style="flex: 1; min-width: 240px;">
+            <div style="background: #F0FDF4; border: 1px solid #BBF7D0; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
+              <span style="color: #166534; font-weight: 700; font-size: 13px;">✅ Estado: Conectado</span>
+              <p style="font-size: 12px; color: #15803D; margin-top: 2px;">
+                Tu teléfono está vinculado. El asistente está respondiendo consultas en tiempo real.
+              </p>
+            </div>
+            <p style="font-size: 12px; color: #64748B;">
+              💡 <strong>Nota de tranquilidad:</strong> Puedes desconectar la sesión en cualquier momento tocando el botón rojo "Desconectar" o directamente desde tu celular.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PASO 2 -->
+    <section class="guide-card">
+      <div class="step-header">
+        <div class="step-badge">2</div>
+        <div>
+          <h2 class="step-title">Servicios, Tarifas y Sincronización</h2>
+          <div class="step-subtitle">Elige entre el catálogo integrado o la sincronización con Scalinky</div>
+        </div>
+      </div>
+      <p class="step-desc">
+        El asistente necesita conocer tus precios y tiempos para responder con exactitud. TurnoFlow ofrece dos alternativas:
+      </p>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px;">
+        <div style="background: #F8FAFC; border: 1px solid var(--border); border-radius: 10px; padding: 18px;">
+          <h4 style="color: var(--primary); font-size: 15px; margin-bottom: 6px;">Opción A: Catálogo Propio (Recomendado)</h4>
+          <p style="font-size: 13px; color: #475569; line-height: 1.6;">
+            En la sección <strong>"Servicios & Tarifas"</strong> del menú lateral puedes cargar todos tus tratamientos con precio y duración. El bot usará esta lista automáticamente.
+          </p>
+        </div>
+        <div style="background: #F8FAFC; border: 1px solid var(--border); border-radius: 10px; padding: 18px;">
+          <h4 style="color: var(--success); font-size: 15px; margin-bottom: 6px;">Opción B: Conectar Scalinky (Opcional)</h4>
+          <p style="font-size: 13px; color: #475569; line-height: 1.6;">
+            Si ya utilizas la plataforma Scalinky, solo coloca tu identificador (ej: "esteticaglow") en <strong>Configuración → Scalinky</strong> y el bot sincronizará tus profesionales y agenda.
+          </p>
+        </div>
+      </div>
+
+      <div class="mockup-window">
+        <div class="mockup-bar">
+          <span>Vista de Servicios & Tarifas</span>
+        </div>
+        <div class="mockup-body">
+          <table class="services-table">
+            <thead>
+              <tr>
+                <th>Tratamiento</th>
+                <th>Duración</th>
+                <th>Precio</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Alisado de Keratina & Brushing</strong></td>
+                <td>90 min</td>
+                <td style="color: var(--primary); font-weight: 700;">$80 USD</td>
+                <td><span class="pill-active">Activo en WhatsApp</span></td>
+              </tr>
+              <tr>
+                <td><strong>Limpieza Facial Profunda & Mascarilla</strong></td>
+                <td>60 min</td>
+                <td style="color: var(--primary); font-weight: 700;">$45 USD</td>
+                <td><span class="pill-active">Activo en WhatsApp</span></td>
+              </tr>
+              <tr>
+                <td><strong>Corte & Nutrición Capilar</strong></td>
+                <td>45 min</td>
+                <td style="color: var(--primary); font-weight: 700;">$35 USD</td>
+                <td><span class="pill-active">Activo en WhatsApp</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- PASO 3 -->
+    <section class="guide-card">
+      <div class="step-header">
+        <div class="step-badge">3</div>
+        <div>
+          <h2 class="step-title">Cómo Atiende la IA a tus Clientas</h2>
+          <div class="step-subtitle">Respuestas en menos de 5 segundos, cotización y confirmación de turno</div>
+        </div>
+      </div>
+      <p class="step-desc">
+        A continuación puedes ver un caso real de atención: la clienta pregunta por un tratamiento, el asistente informa el precio, ofrece horarios disponibles según tu agenda y confirma la cita:
+      </p>
+
+      <div class="wa-container">
+        <div class="wa-header">
+          <div class="wa-avatar">TF</div>
+          <div class="wa-header-info">
+            <h4>Glow Studio & Spa</h4>
+            <span>En línea las 24 hs</span>
+          </div>
+        </div>
+        <div class="wa-chat">
+          <div class="wa-bubble wa-client">
+            ¡Hola! ¿Cuánto sale el alisado de keratina y qué días tienen turnos libres?
+            <div class="wa-time">14:15</div>
+          </div>
+          <div class="wa-bubble wa-bot">
+            ¡Hola Mariana! ✨ El Alisado de Keratina cuesta $80 y la sesión dura unos 90 minutos.
+            <br><br>
+            Tenemos disponibilidad este <strong>Viernes a las 16:00 hs</strong> o el <strong>Sábado a las 11:30 hs</strong>. ¿Cuál te queda más cómodo?
+            <div class="wa-time">14:15</div>
+          </div>
+          <div class="wa-bubble wa-client">
+            El sábado a las 11:30 hs por favor!
+            <div class="wa-time">14:16</div>
+          </div>
+          <div class="wa-bubble wa-bot">
+            ¡Listo Mariana! Te agendé para el <strong>Sábado 15/11 a las 11:30 hs</strong>.
+            <br><br>
+            Te esperamos en Av. Santa Fe 2450. Te enviaremos un recordatorio 24 hs antes. ¡Que tengas un hermoso día! 💖
+            <div class="wa-time">14:16</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PASO 4 -->
+    <section class="guide-card">
+      <div class="step-header">
+        <div class="step-badge">4</div>
+        <div>
+          <h2 class="step-title">Alertas Urgentes al Administrador</h2>
+          <div class="step-subtitle">Notificación inmediata al WhatsApp del dueño en casos prioritarios</div>
+        </div>
+      </div>
+      <p class="step-desc">
+        Si una clienta pide hablar con una persona, tiene una duda médica o un reclamo especial, el asistente le avisa amablemente que la dueña se contactará y <strong>te envía un WhatsApp urgente a tu teléfono personal</strong> con el detalle completo:
+      </p>
+
+      <div class="alert-box">
+        <div class="alert-header">
+          🔔 Notificación Recibida en el WhatsApp del Dueño
+        </div>
+        <div class="alert-content">
+          <strong style="color: #B45309;">⚠️ AVISO DE CLIENTA REQUIERE ATENCIÓN HUMANA</strong><br><br>
+          • <strong>Clienta:</strong> Laura Gómez (+5491144556677)<br>
+          • <strong>Motivo:</strong> Solicitó hablar con la encargada por un tratamiento previo.<br>
+          • <strong>Último mensaje recibido:</strong> <em>"Hola, me hice una coloración hace dos días y quiero consultar si me pueden ver hoy"</em>.<br><br>
+          <span style="color: #1A73E8; font-weight: 700;">👉 Por favor responde a su conversación cuando tengas disponibilidad.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PASO 5 -->
+    <section class="guide-card">
+      <div class="step-header">
+        <div class="step-badge">5</div>
+        <div>
+          <h2 class="step-title">Control Total en tu Agenda de Citas</h2>
+          <div class="step-subtitle">Visualización en vivo de turnos, clientas y estado de confirmación</div>
+        </div>
+      </div>
+      <p class="step-desc">
+        En la pestaña <strong>"Agenda & Citas"</strong> encontrarás la lista ordenada de todas las visitas confirmadas por el asistente o agendadas manualmente. Puedes ver el horario exacto, el tratamiento y cancelar o reprogramar con un clic.
+      </p>
+
+      <div class="mockup-window">
+        <div class="mockup-bar">
+          <span>Vista de Agenda del Salón</span>
+        </div>
+        <div class="mockup-body">
+          <div style="background: #FFFFFF; border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="font-size: 15px; font-weight: 700; color: var(--text);">Mariana Costa</div>
+              <div style="font-size: 12px; color: var(--text-muted);">+54 9 11 3344-5566 • Alisado de Keratina</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 13px; font-weight: 700; color: var(--primary);">Sábado 15/11 — 11:30 hs</div>
+              <span class="pill-active">Confirmado por WhatsApp</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Preguntas Frecuentes -->
+    <section class="guide-card">
+      <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Preguntas Frecuentes de Salones</h3>
+
+      <div style="margin-bottom: 14px;">
+        <h4 style="font-size: 14px; font-weight: 700; color: var(--text);">¿Qué pasa si mi teléfono se apaga o se queda sin batería?</h4>
+        <p style="font-size: 13px; color: #475569; margin-top: 4px;">
+          Al igual que con WhatsApp Web, la sesión se pausará temporalmente. Cuando tu celular vuelva a encenderse y tenga internet, el sistema reanudará la atención automáticamente sin perder ninguna conversación.
+        </p>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <h4 style="font-size: 14px; font-weight: 700; color: var(--text);">¿Puedo responder yo misma desde mi celular si quiero intervenir?</h4>
+        <p style="font-size: 13px; color: #475569; margin-top: 4px;">
+          ¡Sí, totalmente! Si tú abres el chat en tu teléfono y escribes, el asistente detectará la intervención humana y no se interpondrá en tu conversación.
+        </p>
+      </div>
+
+      <div>
+        <h4 style="font-size: 14px; font-weight: 700; color: var(--text);">¿Cómo cambio un precio de mi lista?</h4>
+        <p style="font-size: 13px; color: #475569; margin-top: 4px;">
+          Simplemente ve a <strong>"Servicios & Tarifas"</strong> en el panel de control, edita el valor y guarda. El asistente comenzará a cotizar el nuevo precio inmediatamente.
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

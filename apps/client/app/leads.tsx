@@ -5,27 +5,56 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
-  TouchableOpacity
+  TouchableOpacity,
+  Platform,
+  ActivityIndicator
 } from 'react-native';
 import { Header } from '../src/components/Header';
 import {
   Search,
-  Flame,
+  Users,
   Plus,
   Check,
-  ArrowRight
+  ArrowRight,
+  Phone,
+  Calendar,
+  Sparkles,
+  MessageSquare
 } from 'lucide-react-native';
-import { apiClient, DEMO_LEADS } from '../src/lib/api';
+import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
-const STATUS_FILTERS = ['TODOS', 'NEW', 'CONTACTED', 'INTERESTED', 'PENDING', 'BOOKED', 'LOST'];
+const STATUS_FILTERS = [
+  { key: 'TODOS', label: 'Todas las Clientas' },
+  { key: 'NEW', label: 'Nuevas Consultas' },
+  { key: 'CONTACTED', label: 'Contactadas' },
+  { key: 'INTERESTED', label: 'Interesadas' },
+  { key: 'BOOKED', label: 'Turno Agendado' }
+];
+
 const STATUS_CYCLE = ['NEW', 'CONTACTED', 'INTERESTED', 'BOOKED'];
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'NEW':
+      return { label: 'Nueva Consulta', bg: '#E8F0FE', text: '#1A73E8', border: '#BFDBFE' };
+    case 'CONTACTED':
+      return { label: 'En Conversación', bg: '#FEF3C7', text: '#D97706', border: '#FDE68A' };
+    case 'INTERESTED':
+      return { label: 'Interesada', bg: '#EDE9FE', text: '#4F46E5', border: '#DDD6FE' };
+    case 'BOOKED':
+      return { label: 'Turno Confirmado', bg: '#DCFCE7', text: '#16A34A', border: '#BBF7D0' };
+    default:
+      return { label: status, bg: '#F1F5F9', text: '#475569', border: '#E2E8F0' };
+  }
+}
 
 export default function LeadsScreen() {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('TODOS');
   const [leads, setLeads] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Formulario para crear nuevo lead
   const [showAddForm, setShowAddForm] = useState(false);
@@ -33,9 +62,11 @@ export default function LeadsScreen() {
   const [newPhone, setNewPhone] = useState('');
   const [newService, setNewService] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const fetchLeads = async () => {
+      setLoading(true);
       try {
         const res = await apiClient.get('/leads');
         if (Array.isArray(res.data)) {
@@ -51,8 +82,9 @@ export default function LeadsScreen() {
           );
         }
       } catch {
-        // En caso de error, mantener lista limpia
         setLeads([]);
+      } finally {
+        setLoading(false);
       }
     };
     fetchLeads();
@@ -60,11 +92,12 @@ export default function LeadsScreen() {
 
   const handleCreateLead = async () => {
     if (!newName.trim() || !newPhone.trim()) return;
+    setSubmitting(true);
     const payload = {
       name: newName.trim(),
       phone: newPhone.trim(),
-      requestedService: newService.trim() || 'Limpieza Facial Profunda',
-      notes: newNotes.trim() || 'Registrado manualmente desde CRM',
+      requestedService: newService.trim() || 'Servicio General',
+      notes: newNotes.trim() || 'Registrada manualmente desde el panel',
       priority: 'HOT',
       intent: 'HIGH',
       status: 'NEW',
@@ -75,30 +108,30 @@ export default function LeadsScreen() {
       const res = await apiClient.post('/leads', payload);
       const saved = {
         ...res.data,
-        lastInteractionAt: 'Hace un instante'
+        lastInteractionAt: 'Hace un momento'
       };
       setLeads((prev) => [saved, ...prev]);
     } catch {
       const fallbackItem = {
         id: `lead-${Date.now()}`,
         ...payload,
-        lastInteractionAt: 'Hace un instante'
+        lastInteractionAt: 'Hace un momento'
       };
       setLeads((prev) => [fallbackItem, ...prev]);
+    } finally {
+      setSubmitting(false);
+      setNewName('');
+      setNewPhone('');
+      setNewService('');
+      setNewNotes('');
+      setShowAddForm(false);
     }
-
-    setNewName('');
-    setNewPhone('');
-    setNewService('');
-    setNewNotes('');
-    setShowAddForm(false);
   };
 
   const handleAdvanceStatus = async (lead: any) => {
     const idx = STATUS_CYCLE.indexOf(lead.status);
     const nextStatus = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
 
-    // Optimistic update
     setLeads((prev) =>
       prev.map((l) => (l.id === lead.id ? { ...l, status: nextStatus } : l))
     );
@@ -106,197 +139,199 @@ export default function LeadsScreen() {
     try {
       await apiClient.patch(`/leads/${lead.id}`, { status: nextStatus });
     } catch {
-      // Mantiene cambio local si falla la red
+      // Ignorar para UI offline
     }
   };
 
   const filteredLeads = leads.filter((l) => {
     const matchesSearch =
-      l.name.toLowerCase().includes(search.toLowerCase()) ||
-      l.phone.includes(search) ||
+      (l.name && l.name.toLowerCase().includes(search.toLowerCase())) ||
+      (l.phone && l.phone.toLowerCase().includes(search.toLowerCase())) ||
       (l.requestedService && l.requestedService.toLowerCase().includes(search.toLowerCase()));
 
     const matchesStatus = selectedStatus === 'TODOS' || l.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
 
-  const getPriorityBadge = (priority: string) => {
-    if (priority === 'HOT') {
-      return (
-        <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-          <Flame size={12} color="#f87171" style={{ marginRight: 3 }} />
-          <Text style={[styles.priorityText, { color: '#f87171' }]}>HOT</Text>
-        </View>
-      );
-    }
-    return (
-      <View style={[styles.priorityBadge, { backgroundColor: 'rgba(234, 179, 8, 0.15)' }]}>
-        <Text style={[styles.priorityText, { color: '#facc15' }]}>WARM</Text>
-      </View>
-    );
-  };
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, { label: string; color: string; bg: string }> = {
-      NEW: { label: 'Nuevo', color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.15)' },
-      CONTACTED: { label: 'Contactado', color: '#c084fc', bg: 'rgba(168, 85, 247, 0.15)' },
-      INTERESTED: { label: 'Interesado', color: '#facc15', bg: 'rgba(234, 179, 8, 0.15)' },
-      PENDING: { label: 'Pendiente', color: '#fb923c', bg: 'rgba(249, 115, 22, 0.15)' },
-      BOOKED: { label: 'Reservado', color: '#4ade80', bg: 'rgba(34, 197, 94, 0.15)' },
-      LOST: { label: 'Perdido', color: '#9ca3af', bg: 'rgba(156, 163, 175, 0.15)' }
-    };
-    const s = map[status] || { label: status, color: '#ffffff', bg: '#27272a' };
-    return (
-      <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
-        <Text style={[styles.statusText, { color: s.color }]}>{s.label}</Text>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.container}>
       <Header
-        title="CRM de Leads y Prospectos"
-        subtitle="Registro y seguimiento de oportunidades comerciales captadas por la IA"
+        title="Directorio de Clientas"
+        subtitle="Registro de consultas, historial de turnos y estado de atención en WhatsApp"
       />
 
-      <View style={styles.filterBar}>
-        {/* Search */}
-        <View style={styles.searchWrapper}>
-          <Search size={16} color="#71717a" style={{ marginRight: 8 }} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar por nombre, teléfono o servicio..."
-            placeholderTextColor="#71717a"
-            value={search}
-            onChangeText={setSearch}
-          />
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Barra Superior con Buscador y Filtros */}
+        <View style={styles.topToolbar}>
+          <View style={styles.searchBox}>
+            <Search size={16} color="#64748B" style={{ marginRight: 8 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar por nombre, teléfono o tratamiento..."
+              placeholderTextColor="#94A3B8"
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={styles.newLeadBtn}
+            onPress={() => setShowAddForm(!showAddForm)}
+          >
+            <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+            <Text style={styles.newLeadBtnText}>Registrar Clienta</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Filter Chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-          {STATUS_FILTERS.map((s) => (
+        {/* Filtros de Estado */}
+        <View style={styles.filtersRow}>
+          {STATUS_FILTERS.map((f) => (
             <TouchableOpacity
-              key={s}
-              style={[styles.chip, selectedStatus === s && styles.chipActive]}
-              onPress={() => setSelectedStatus(s)}
+              key={f.key}
+              style={[
+                styles.filterChip,
+                selectedStatus === f.key && styles.filterChipActive
+              ]}
+              onPress={() => setSelectedStatus(f.key)}
             >
-              <Text style={[styles.chipText, selectedStatus === s && styles.chipTextActive]}>
-                {s}
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedStatus === f.key && styles.filterChipTextActive
+                ]}
+              >
+                {f.label}
               </Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
 
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => setShowAddForm(!showAddForm)}
-        >
-          <Plus size={14} color="#ffffff" style={{ marginRight: 4 }} />
-          <Text style={styles.addBtnText}>Nuevo Lead</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {/* Formulario de Alta Rápida */}
         {showAddForm && (
-          <View style={styles.addBox}>
-            <Text style={styles.addBoxTitle}>Registrar Nuevo Prospecto</Text>
-            <View style={styles.addFieldsRow}>
-              <TextInput
-                style={[styles.input, { flex: 1.5 }]}
-                placeholder="Nombre completo"
-                placeholderTextColor="#52525b"
-                value={newName}
-                onChangeText={setNewName}
-              />
-              <TextInput
-                style={[styles.input, { flex: 1.2 }]}
-                placeholder="Teléfono (+54911...)"
-                placeholderTextColor="#52525b"
-                value={newPhone}
-                onChangeText={setNewPhone}
-              />
-              <TextInput
-                style={[styles.input, { flex: 1.5 }]}
-                placeholder="Servicio de interés"
-                placeholderTextColor="#52525b"
-                value={newService}
-                onChangeText={setNewService}
-              />
-              <TextInput
-                style={[styles.input, { flex: 2 }]}
-                placeholder="Notas u observaciones"
-                placeholderTextColor="#52525b"
-                value={newNotes}
-                onChangeText={setNewNotes}
-              />
-              <TouchableOpacity style={styles.saveBtn} onPress={handleCreateLead}>
-                <Check size={14} color="#ffffff" style={{ marginRight: 4 }} />
-                <Text style={styles.saveBtnText}>Guardar</Text>
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>Registrar Nueva Clienta</Text>
+            <View style={styles.formGrid}>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Nombre y Apellido</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Sofía Martínez"
+                  placeholderTextColor="#94A3B8"
+                  value={newName}
+                  onChangeText={setNewName}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Teléfono (con WhatsApp)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. +5491133445566"
+                  placeholderTextColor="#94A3B8"
+                  value={newPhone}
+                  onChangeText={setNewPhone}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Tratamiento Solicitado</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Alisado de Keratina"
+                  placeholderTextColor="#94A3B8"
+                  value={newService}
+                  onChangeText={setNewService}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Notas o Preferencias</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Prefiere turno por la tarde"
+                  placeholderTextColor="#94A3B8"
+                  value={newNotes}
+                  onChangeText={setNewNotes}
+                />
+              </View>
+            </View>
+
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setShowAddForm(false)}
+              >
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleCreateLead}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.saveBtnText}>Guardar Clienta</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        <View style={styles.table}>
-          {/* Header */}
-          <View style={styles.tableHeaderRow}>
-            <Text style={[styles.th, { flex: 2 }]}>PROSPECTO</Text>
-            <Text style={[styles.th, { flex: 2 }]}>SERVICIO DE INTERÉS</Text>
-            <Text style={[styles.th, { flex: 1.4 }]}>ESTADO</Text>
-            <Text style={[styles.th, { flex: 1 }]}>PRIORIDAD</Text>
-            <Text style={[styles.th, { flex: 1.3 }]}>ÚLTIMA INTERACCIÓN</Text>
-            <Text style={[styles.th, { flex: 2.3 }]}>NOTAS / ACCIÓN</Text>
-          </View>
-
-          {/* Rows */}
-          {filteredLeads.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No hay prospectos registrados</Text>
-              <Text style={styles.emptyText}>
-                Cuando un cliente te escriba a tu número de WhatsApp o registres uno manualmente con "+ Nuevo Prospecto", aparecerá aquí clasificado automáticamente por la IA.
+        {/* Tabla / Lista de Leads */}
+        <View style={styles.tableCard}>
+          {loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color="#1A73E8" size="large" />
+              <Text style={styles.loadingText}>Cargando directorio de clientas...</Text>
+            </View>
+          ) : filteredLeads.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Users size={40} color="#94A3B8" />
+              <Text style={styles.emptyTitle}>No hay clientas registradas aún</Text>
+              <Text style={styles.emptySub}>
+                Cuando las clientas te escriban a tu número de WhatsApp conectado, aparecerán automáticamente en esta lista junto con su tratamiento de interés.
               </Text>
-              <TouchableOpacity style={styles.emptyActionBtn} onPress={() => setShowAddForm(true)}>
-                <Plus size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.emptyActionBtnText}>Crear Primer Prospecto</Text>
-              </TouchableOpacity>
             </View>
           ) : (
-            filteredLeads.map((lead) => (
-              <View key={lead.id} style={styles.tableRow}>
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.leadName}>{lead.name}</Text>
-                  <Text style={styles.leadPhone}>{lead.phone}</Text>
-                </View>
+            filteredLeads.map((item) => {
+              const badge = getStatusBadge(item.status);
+              return (
+                <View key={item.id} style={styles.leadRow}>
+                  <View style={styles.clientInfo}>
+                    <Text style={styles.clientName}>{item.name}</Text>
+                    <View style={styles.phoneRow}>
+                      <Phone size={12} color="#64748B" style={{ marginRight: 4 }} />
+                      <Text style={styles.clientPhone}>{item.phone}</Text>
+                    </View>
+                  </View>
 
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.leadService}>{lead.requestedService || 'Sin especificar'}</Text>
-                  <Text style={styles.leadSource}>Fuente: {lead.source}</Text>
-                </View>
+                  <View style={styles.serviceInfo}>
+                    <Text style={styles.serviceName}>
+                      {item.requestedService || 'Consulta General'}
+                    </Text>
+                    <Text style={styles.notesText} numberOfLines={1}>
+                      {item.notes || 'Atendida por el Asistente de IA'}
+                    </Text>
+                  </View>
 
-                <View style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  {getStatusBadge(lead.status)}
-                  <TouchableOpacity
-                    style={styles.advanceBtn}
-                    onPress={() => handleAdvanceStatus(lead)}
-                  >
-                    <ArrowRight size={11} color="#c084fc" />
-                  </TouchableOpacity>
+                  <View style={styles.statusBox}>
+                    <TouchableOpacity
+                      style={[
+                        styles.badge,
+                        { backgroundColor: badge.bg, borderColor: badge.border }
+                      ]}
+                      onPress={() => handleAdvanceStatus(item)}
+                    >
+                      <Text style={[styles.badgeText, { color: badge.text }]}>
+                        {badge.label}
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={styles.lastSeen}>Último contacto: {item.lastInteractionAt}</Text>
+                  </View>
                 </View>
-
-                <View style={{ flex: 1 }}>{getPriorityBadge(lead.priority)}</View>
-
-                <View style={{ flex: 1.3 }}>
-                  <Text style={styles.timeText}>{lead.lastInteractionAt}</Text>
-                </View>
-
-                <View style={{ flex: 2.3 }}>
-                  <Text style={styles.notesText} numberOfLines={2}>
-                    {lead.notes}
-                  </Text>
-                </View>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -307,243 +342,252 @@ export default function LeadsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b'
+    backgroundColor: '#F8FAFC'
   },
-  filterBar: {
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-    backgroundColor: '#09090b',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16
-  },
-  searchWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    width: 300,
-    height: 38
-  },
-  searchInput: {
-    color: '#ffffff',
-    fontSize: 13,
+  content: {
     flex: 1
   },
-  chipsScroll: {
-    flex: 1
+  contentContainer: {
+    padding: 24,
+    maxWidth: 1100,
+    width: '100%',
+    alignSelf: 'center'
   },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    marginRight: 8
-  },
-  chipActive: {
-    borderColor: '#a855f7',
-    backgroundColor: 'rgba(168, 85, 247, 0.15)'
-  },
-  chipText: {
-    color: '#71717a',
-    fontSize: 11,
-    fontWeight: '600'
-  },
-  chipTextActive: {
-    color: '#ffffff'
-  },
-  addBtn: {
+  topToolbar: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#9333ea',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6
-  },
-  addBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  addBox: {
-    backgroundColor: '#0f0f12',
-    borderWidth: 1,
-    borderColor: '#a855f7',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 20
-  },
-  addBoxTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 10
-  },
-  addFieldsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
+    gap: 16,
+    marginBottom: 16,
     flexWrap: 'wrap'
   },
-  input: {
-    backgroundColor: '#18181b',
+  searchBox: {
+    flex: 1,
+    minWidth: 260,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    color: '#ffffff',
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0F172A'
+  },
+  newLeadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A73E8',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  newLeadBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  filtersRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+    flexWrap: 'wrap'
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0'
+  },
+  filterChipActive: {
+    backgroundColor: '#1A73E8',
+    borderColor: '#1A73E8'
+  },
+  filterChipText: {
     fontSize: 12,
-    minWidth: 140
+    fontWeight: '600',
+    color: '#64748B'
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    padding: 20,
+    marginBottom: 20
+  },
+  formTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 14
+  },
+  formGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14
+  },
+  formField: {
+    flex: 1,
+    minWidth: 220,
+    marginBottom: 10
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 4
+  },
+  formInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0F172A'
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 10
+  },
+  cancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1'
+  },
+  cancelBtnText: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '600'
   },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 12,
+    backgroundColor: '#1A73E8',
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6
   },
   saveBtnText: {
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700'
   },
-  scroll: {
-    flex: 1
-  },
-  content: {
-    padding: 28
-  },
-  table: {
-    backgroundColor: '#0f0f12',
+  tableCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 10,
-    overflow: 'hidden'
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)'
+        } as any)
+      : { elevation: 2 })
   },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#18181b',
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a'
+  loadingBox: {
+    padding: 40,
+    alignItems: 'center'
   },
-  th: {
-    color: '#71717a',
-    fontSize: 10,
+  loadingText: {
+    marginTop: 12,
+    fontSize: 13,
+    color: '#64748B'
+  },
+  emptyBox: {
+    padding: 48,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  emptyTitle: {
+    fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.6
+    color: '#0F172A',
+    marginTop: 12,
+    marginBottom: 6
   },
-  tableRow: {
+  emptySub: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 440,
+    lineHeight: 18
+  },
+  leadRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#18181b'
+    borderBottomColor: '#F1F5F9',
+    gap: 16,
+    flexWrap: 'wrap'
   },
-  leadName: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '600'
+  clientInfo: {
+    flex: 1,
+    minWidth: 180
   },
-  leadPhone: {
-    color: '#71717a',
-    fontSize: 11,
-    marginTop: 2
+  clientName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A'
   },
-  leadService: {
-    color: '#d4d4d8',
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  leadSource: {
-    color: '#52525b',
-    fontSize: 10,
-    marginTop: 2
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '700'
-  },
-  advanceBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: 'rgba(168, 85, 247, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  priorityBadge: {
+  phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4
+    marginTop: 3
   },
-  priorityText: {
-    fontSize: 10,
-    fontWeight: '700'
+  clientPhone: {
+    fontSize: 12,
+    color: '#64748B'
   },
-  timeText: {
-    color: '#a1a1aa',
-    fontSize: 12
+  serviceInfo: {
+    flex: 1,
+    minWidth: 200
+  },
+  serviceName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155'
   },
   notesText: {
-    color: '#71717a',
-    fontSize: 11
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2
   },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#18181b',
-    borderRadius: 8,
-    margin: 16
+  statusBox: {
+    alignItems: 'flex-end',
+    minWidth: 140
   },
-  emptyTitle: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 6
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1
   },
-  emptyText: {
-    color: '#a1a1aa',
-    fontSize: 13,
-    textAlign: 'center',
-    maxWidth: 480,
-    lineHeight: 18,
-    marginBottom: 16
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700'
   },
-  emptyActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a855f7',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8
-  },
-  emptyActionBtnText: {
-    color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 13
+  lastSeen: {
+    fontSize: 10,
+    color: '#94A3B8',
+    marginTop: 4
   }
 });
