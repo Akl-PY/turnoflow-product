@@ -268,6 +268,44 @@ export class IntegrationsService {
     return { success: true };
   }
 
+  async getEvolutionMediaBase64(
+    instanceName: string,
+    messageId: string
+  ): Promise<string | null> {
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    if (!evolutionUrl || !evolutionKey) return null;
+
+    try {
+      const response = await axios.post(
+        `${evolutionUrl}/chat/getBase64FromMediaMessage/${instanceName}`,
+        {
+          message: {
+            key: {
+              id: messageId
+            }
+          },
+          convertToMp4: false
+        },
+        {
+          headers: {
+            apikey: evolutionKey,
+            Authorization: `Bearer ${evolutionKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
+      return response.data?.base64 || null;
+    } catch (err: any) {
+      this.logger.warn(`No se pudo obtener base64 de media desde Evolution (${messageId}): ${err.message}`);
+      return null;
+    }
+  }
+
   async sendQRWhatsAppMessage(
     organizationId: string,
     to: string,

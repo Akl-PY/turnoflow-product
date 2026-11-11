@@ -13,7 +13,8 @@ import {
   HttpStatus,
   Logger,
   Injectable,
-  BadRequestException
+  BadRequestException,
+  Optional
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -21,6 +22,7 @@ import { Repository } from 'typeorm';
 import { AuthGuard } from '@nestjs/passport';
 import { ConversationsService } from './conversations.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { AiService } from '../ai/ai.service';
 import { BusinessProfile } from '../../entities/business-profile.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -40,7 +42,9 @@ export class ConversationsController {
     private readonly conversationsService: ConversationsService,
     private readonly integrationsService: IntegrationsService,
     @InjectRepository(BusinessProfile)
-    private readonly profileRepo: Repository<BusinessProfile>
+    private readonly profileRepo: Repository<BusinessProfile>,
+    @Optional()
+    private readonly aiService?: AiService
   ) {}
 
   private async resolveWhatsAppCredentials(organizationId?: string): Promise<{ phoneNumberId?: string; accessToken?: string }> {
@@ -183,6 +187,12 @@ export class ConversationsController {
 
     // 2. Extraer texto del mensaje y detectar notas de voz
     const messageType = message.messageType || data?.messageType || body?.messageType || '';
+    const audioSeconds =
+      message.audioMessage?.seconds ||
+      data?.message?.audioMessage?.seconds ||
+      message.audio?.duration ||
+      0;
+
     const isAudio =
       !!message.audioMessage ||
       messageType === 'audioMessage' ||
@@ -211,6 +221,63 @@ export class ConversationsController {
     const digitsOnly = senderPhone.replace(/\D/g, '');
     if (!senderPhone || digitsOnly.startsWith('120363') || digitsOnly.length > 15 || digitsOnly.length < 8) {
       return { status: 'ignored_group_or_invalid_phone', senderPhone };
+    }
+
+    // Regla de Audios: < 15 segundos se transcriben y se responden; >= 15 segundos se delegan a atención humana
+    if (isAudio && !key.fromMe) {
+      if (audioSeconds >= 15) {
+        this.logger.log(
+          `[AUDIO LARGO >= 15s] Nota de voz de ${audioSeconds}s recibida de ${senderPhone}. Delegando a atención humana...`
+        );
+
+        const replyText =
+          '¡Hola! He recibido tu mensaje de audio 🎙️. Como es una consulta detallada de más de 15 segundos, la derivé directamente a nuestro equipo para que un asesor la escuche con atención y te responda en breve.';
+
+        await this.conversationsService.recordHumanIntervention(
+          resolvedOrgId,
+          senderPhone,
+          `[Nota de voz recibida - ${audioSeconds}s]`
+        );
+
+        await this.integrationsService.sendQRWhatsAppMessage(
+          resolvedOrgId,
+          senderPhone,
+          replyText,
+          instanceFromWebhook
+        );
+
+        return {
+          status: 'long_audio_delegated_to_human',
+          seconds: audioSeconds,
+          phone: senderPhone
+        };
+      }
+
+      // Audio corto (< 15 segundos): Intentar transcribir y responder automáticamente
+      this.logger.log(
+        `[AUDIO CORTO < 15s] Nota de voz de ${audioSeconds || '<15'}s recibida de ${senderPhone}. Intentando transcribir...`
+      );
+
+      let transcribedText: string | null = null;
+      let audioBase64 = data.base64 || data.message?.base64 || body.base64 || null;
+
+      if (!audioBase64 && instanceFromWebhook && (key.id || data.id)) {
+        audioBase64 = await this.integrationsService.getEvolutionMediaBase64(
+          instanceFromWebhook,
+          key.id || data.id
+        );
+      }
+
+      if (audioBase64 && this.aiService) {
+        transcribedText = await this.aiService.transcribeAudioBase64(audioBase64, 'audio/ogg');
+      }
+
+      if (transcribedText) {
+        rawText = transcribedText;
+        this.logger.log(`[AUDIO TRANSCRITO EXITOSAMENTE]: "${rawText}"`);
+      } else {
+        rawText = '[Nota de voz / Audio breve]';
+      }
     }
 
     // 3. Manejo de mensajes salientes (fromMe === true)
@@ -364,12 +431,33 @@ export class ConversationsController {
       return { status: 'ignored_group_message' };
     }
 
+    if (message.type === 'audio') {
+      const audioSeconds = message.audio?.duration || 0;
+      if (audioSeconds >= 15) {
+        this.logger.log(
+          `[META AUDIO LARGO >= 15s] Nota de voz de ${audioSeconds}s recibida de ${senderPhone}. Delegando a atención humana...`
+        );
+        const replyText =
+          '¡Hola! He recibido tu mensaje de audio 🎙️. Como es una consulta detallada de más de 15 segundos, la derivé directamente a nuestro equipo para que un asesor la escuche con atención y te responda en breve.';
+
+        await this.conversationsService.recordHumanIntervention(
+          'default-org-id',
+          senderPhone,
+          `[Nota de voz recibida - ${audioSeconds}s]`
+        );
+
+        const creds = await this.resolveWhatsAppCredentials();
+        await this.integrationsService.sendWhatsAppMessage(senderPhone, replyText, creds);
+        return { status: 'long_audio_delegated_to_human', seconds: audioSeconds };
+      }
+    }
+
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText =
       message.type === 'text'
         ? message.text.body
         : message.type === 'audio'
-        ? '[Nota de voz / Audio]'
+        ? '[Nota de voz / Audio breve]'
         : '[Mensaje multimedia]';
 
     const metadata = changes?.value?.metadata;
@@ -449,12 +537,33 @@ export class ConversationsController {
       return { status: 'ignored_group_message' };
     }
 
+    if (message.type === 'audio') {
+      const audioSeconds = message.audio?.duration || 0;
+      if (audioSeconds >= 15) {
+        this.logger.log(
+          `[META AUDIO LARGO >= 15s] Nota de voz de ${audioSeconds}s recibida de ${senderPhone}. Delegando a atención humana...`
+        );
+        const replyText =
+          '¡Hola! He recibido tu mensaje de audio 🎙️. Como es una consulta detallada de más de 15 segundos, la derivé directamente a nuestro equipo para que un asesor la escuche con atención y te responda en breve.';
+
+        await this.conversationsService.recordHumanIntervention(
+          'default-org-id',
+          senderPhone,
+          `[Nota de voz recibida - ${audioSeconds}s]`
+        );
+
+        const creds = await this.resolveWhatsAppCredentials();
+        await this.integrationsService.sendWhatsAppMessage(senderPhone, replyText, creds);
+        return { status: 'long_audio_delegated_to_human', seconds: audioSeconds };
+      }
+    }
+
     const senderName = contact?.profile?.name || 'Cliente';
     const messageText =
       message.type === 'text'
         ? message.text.body
         : message.type === 'audio'
-        ? '[Nota de voz / Audio]'
+        ? '[Nota de voz / Audio breve]'
         : '[Mensaje multimedia]';
     const metadata = changes?.value?.metadata;
     const incomingPhoneNumberId = metadata?.phone_number_id;

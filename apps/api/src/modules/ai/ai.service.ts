@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import axios from 'axios';
 import { BusinessProfile } from '../../entities/business-profile.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Appointment } from '../../entities/appointment.entity';
@@ -162,6 +163,114 @@ export class AiService {
       openAiStatus: isOpenAiCooling ? 'COOLDOWN_30M' : 'HEALTHY',
       hasBackup
     };
+  }
+
+  async transcribeAudioBase64(base64Data: string, mimeType = 'audio/ogg'): Promise<string | null> {
+    const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    const cleanKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
+    const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '').trim();
+
+    if (!cleanBase64) return null;
+
+    // 1. Intentar con Gemini Multimodal nativo
+    if (cleanKey) {
+      const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+      for (const model of models) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+          const res = await axios.post(
+            url,
+            {
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text: 'Transcribe este mensaje de audio en español de forma literal, exacta y completa. Devuelve ÚNICAMENTE lo que dice la persona en el audio, sin introducciones, sin comentarios y sin comillas.'
+                    },
+                    {
+                      inlineData: {
+                        mimeType,
+                        data: cleanBase64
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 15000
+            }
+          );
+
+          const candidate = res.data?.candidates?.[0];
+          const text = candidate?.content?.parts?.[0]?.text;
+          if (text && text.trim()) {
+            this.logger.log(`[AUDIO TRANSCRITO CON ${model}]: "${text.trim()}"`);
+            return text.trim();
+          }
+        } catch (err: any) {
+          this.logger.warn(`Transcripción con Gemini ${model} falló: ${err?.message}`);
+        }
+      }
+    }
+
+    // 2. Intentar con Groq Whisper si hay clave
+    const groqKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    if (groqKey && typeof FormData !== 'undefined') {
+      try {
+        const buffer = Buffer.from(cleanBase64, 'base64');
+        const form = new FormData();
+        const blob = new Blob([buffer], { type: mimeType });
+        form.append('file', blob, 'audio.ogg');
+        form.append('model', 'whisper-large-v3-turbo');
+        form.append('language', 'es');
+
+        const res = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', form, {
+          headers: {
+            Authorization: `Bearer ${groqKey}`
+          },
+          timeout: 15000
+        });
+
+        if (res.data?.text?.trim()) {
+          this.logger.log(`[AUDIO TRANSCRITO CON GROQ WHISPER]: "${res.data.text.trim()}"`);
+          return res.data.text.trim();
+        }
+      } catch (err: any) {
+        this.logger.warn(`Transcripción con Groq Whisper falló: ${err?.message}`);
+      }
+    }
+
+    // 3. Intentar con OpenAI Whisper si hay clave
+    const openAiKey = (process.env.OPENAI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    if (openAiKey && typeof FormData !== 'undefined') {
+      try {
+        const buffer = Buffer.from(cleanBase64, 'base64');
+        const form = new FormData();
+        const blob = new Blob([buffer], { type: mimeType });
+        form.append('file', blob, 'audio.ogg');
+        form.append('model', 'whisper-1');
+        form.append('language', 'es');
+
+        const res = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+          headers: {
+            Authorization: `Bearer ${openAiKey}`
+          },
+          timeout: 15000
+        });
+
+        if (res.data?.text?.trim()) {
+          this.logger.log(`[AUDIO TRANSCRITO CON OPENAI WHISPER]: "${res.data.text.trim()}"`);
+          return res.data.text.trim();
+        }
+      } catch (err: any) {
+        this.logger.warn(`Transcripción con OpenAI Whisper falló: ${err?.message}`);
+      }
+    }
+
+    return null;
   }
 
   async getDefaultProfile(): Promise<BusinessProfile | null> {
