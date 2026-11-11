@@ -17,6 +17,12 @@ import { AgentRoleType, AIProviderType } from '@turnoflow/shared';
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
+  @Get('provider-status')
+  @ApiOperation({ summary: 'Obtener estado del motor de IA y Circuit Breaker de 30m' })
+  getProviderStatus() {
+    return this.aiService.getProviderHealth();
+  }
+
   @Post('playground')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Playground interactivo para simular conversaciones con agentes' })

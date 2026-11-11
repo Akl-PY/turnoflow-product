@@ -181,8 +181,15 @@ export class ConversationsController {
       return { status: 'ignored_unresolved_lid' };
     }
 
-    // 2. Extraer texto del mensaje
-    const rawText =
+    // 2. Extraer texto del mensaje y detectar notas de voz
+    const messageType = message.messageType || data?.messageType || body?.messageType || '';
+    const isAudio =
+      !!message.audioMessage ||
+      messageType === 'audioMessage' ||
+      messageType === 'audio' ||
+      data?.messageType === 'audioMessage';
+
+    let rawText =
       message.conversation ||
       message.extendedTextMessage?.text ||
       message.imageMessage?.caption ||
@@ -190,6 +197,10 @@ export class ConversationsController {
       data.body ||
       body.text ||
       '';
+
+    if (!rawText && isAudio) {
+      rawText = '[Nota de voz / Audio]';
+    }
 
     const senderPhone = bestJid
       .replace('@s.whatsapp.net', '')
@@ -354,7 +365,12 @@ export class ConversationsController {
     }
 
     const senderName = contact?.profile?.name || 'Cliente';
-    const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
+    const messageText =
+      message.type === 'text'
+        ? message.text.body
+        : message.type === 'audio'
+        ? '[Nota de voz / Audio]'
+        : '[Mensaje multimedia]';
 
     const metadata = changes?.value?.metadata;
     const incomingPhoneNumberId = metadata?.phone_number_id;
@@ -434,7 +450,12 @@ export class ConversationsController {
     }
 
     const senderName = contact?.profile?.name || 'Cliente';
-    const messageText = message.type === 'text' ? message.text.body : '[Mensaje multimedia]';
+    const messageText =
+      message.type === 'text'
+        ? message.text.body
+        : message.type === 'audio'
+        ? '[Nota de voz / Audio]'
+        : '[Mensaje multimedia]';
     const metadata = changes?.value?.metadata;
     const incomingPhoneNumberId = metadata?.phone_number_id;
 

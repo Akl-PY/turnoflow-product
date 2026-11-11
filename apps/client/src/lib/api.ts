@@ -208,6 +208,18 @@ export async function resetAllConversationsAi(): Promise<{ affected: number }> {
   return res.data;
 }
 
+export interface AiProviderStatus {
+  activeProvider: string;
+  geminiStatus: 'HEALTHY' | 'COOLDOWN_30M';
+  openAiStatus: 'HEALTHY' | 'COOLDOWN_30M';
+  hasBackup: boolean;
+}
+
+export async function fetchAiProviderStatus(): Promise<AiProviderStatus> {
+  const res = await apiClient.get('/ai/provider-status');
+  return res.data;
+}
+
 // Métricas iniciales limpias (datos reales del tenant)
 export const INITIAL_METRICS = {
   totalInquiries: 0,

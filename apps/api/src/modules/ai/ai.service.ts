@@ -138,6 +138,32 @@ export class AiService {
     return this.anthropicProvider;
   }
 
+  getProviderHealth(): {
+    activeProvider: string;
+    geminiStatus: 'HEALTHY' | 'COOLDOWN_30M';
+    openAiStatus: 'HEALTHY' | 'COOLDOWN_30M';
+    hasBackup: boolean;
+  } {
+    const isGeminiCooling = this.isProviderCoolingDown('gemini');
+    const isOpenAiCooling = this.isProviderCoolingDown('openai');
+    const hasBackup = !!(
+      process.env.OPENAI_API_KEY ||
+      process.env.GROQ_API_KEY ||
+      process.env.OPENROUTER_API_KEY
+    );
+
+    return {
+      activeProvider: isGeminiCooling
+        ? hasBackup
+          ? 'openai_groq_backup'
+          : 'knowledge_engine'
+        : 'gemini_flash',
+      geminiStatus: isGeminiCooling ? 'COOLDOWN_30M' : 'HEALTHY',
+      openAiStatus: isOpenAiCooling ? 'COOLDOWN_30M' : 'HEALTHY',
+      hasBackup
+    };
+  }
+
   async getDefaultProfile(): Promise<BusinessProfile | null> {
     return this.businessProfileRepo.findOne({ where: {} });
   }
@@ -155,6 +181,19 @@ export class AiService {
     handoffReason?: string;
   }> {
     const { organizationId, conversationId, userText, overrideProvider, overrideModel } = params;
+
+    // 0. Interceptar amablemente mensajes de audio / notas de voz de WhatsApp
+    if (
+      userText === '[Nota de voz / Audio]' ||
+      userText.toLowerCase().trim() === '[nota de voz / audio]'
+    ) {
+      return {
+        replyText:
+          '¡Hola! He recibido tu mensaje de audio 🎙️. En este momento el equipo está ocupado atendiendo; para darte respuesta o coordinar tu turno de inmediato, ¿podrías indicarme por texto qué servicio necesitas o para qué fecha buscas turno? ¡Muchas gracias!',
+        toolExecutions: [],
+        handoffToHuman: false
+      };
+    }
 
     // 1. Sanitización con Supervisor
     const securityCheck = this.supervisorAgent.sanitizeInput(userText);

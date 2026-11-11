@@ -36,9 +36,20 @@ import {
   pauseConversationAi,
   sendManualMessage,
   resetAllConversationsAi,
+  fetchAiProviderStatus,
+  AiProviderStatus,
   ConversationItem,
   ChatMessageItem
 } from '../src/lib/api';
+
+const QUICK_REPLIES = [
+  { icon: '📅', label: 'Pedir Día/Hora', text: '¡Hola! ¿Qué día y horario te vendría más cómodo para coordinar tu turno?' },
+  { icon: '📋', label: 'Servicios & Precios', text: 'Con gusto te comparto información sobre nuestros servicios disponibles y precios. ¿Hay alguno que te interese?' },
+  { icon: '💳', label: 'Medios de Pago', text: 'Aceptamos transferencias bancarias, tarjetas de débito/crédito y efectivo.' },
+  { icon: '📍', label: 'Ubicación', text: 'Estamos disponibles en nuestro horario de atención habitual. ¿Te gustaría coordinar una cita?' },
+  { icon: '⏳', label: 'Un momento por favor', text: '¡Hola! Estoy atendiendo a un cliente en este momento. En unos minutitos te respondo detalladamente.' },
+  { icon: '🟢', label: 'Turno Confirmado', text: '¡Excelente! Tu turno ha quedado confirmado para el horario acordado. ¡Te esperamos!' }
+];
 
 export default function ChatsScreen() {
   const { width } = useWindowDimensions();
@@ -71,6 +82,24 @@ export default function ChatsScreen() {
       }
     },
     refetchInterval: 8000 // Refrescar automáticamente cada 8s
+  });
+
+  // Consulta de estado de salud del motor de IA y Circuit Breaker
+  const { data: aiStatus } = useQuery<AiProviderStatus>({
+    queryKey: ['aiProviderStatus'],
+    queryFn: async () => {
+      try {
+        return await fetchAiProviderStatus();
+      } catch {
+        return {
+          activeProvider: 'gemini_flash',
+          geminiStatus: 'HEALTHY',
+          openAiStatus: 'HEALTHY',
+          hasBackup: true
+        };
+      }
+    },
+    refetchInterval: 15000
   });
 
   // Seleccionar la primera conversación al cargar en desktop
@@ -563,6 +592,27 @@ export default function ChatsScreen() {
           )}
         </ScrollView>
 
+        {/* Chips de Respuestas Rápidas con 1 Toque */}
+        <View style={styles.quickRepliesContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickRepliesScroll}
+          >
+            {QUICK_REPLIES.map((qr, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={styles.quickReplyChip}
+                onPress={() => setManualMessageText(qr.text)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.quickReplyChipIcon}>{qr.icon}</Text>
+                <Text style={styles.quickReplyChipText}>{qr.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Barra Inferior de Respuesta Manual Directa a WhatsApp */}
         <View style={styles.replyBar}>
           <TextInput
@@ -605,7 +655,38 @@ export default function ChatsScreen() {
                 <MessageSquare color="#1A73E8" size={24} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.headerTitle}>Chats & Control de IA 24/7</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <Text style={styles.headerTitle}>Chats & Control de IA 24/7</Text>
+                  <View
+                    style={[
+                      styles.providerBadge,
+                      aiStatus?.geminiStatus === 'COOLDOWN_30M'
+                        ? styles.providerBadgeWarning
+                        : styles.providerBadgeActive
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.providerDot,
+                        aiStatus?.geminiStatus === 'COOLDOWN_30M'
+                          ? styles.providerDotWarning
+                          : styles.providerDotActive
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.providerBadgeText,
+                        aiStatus?.geminiStatus === 'COOLDOWN_30M'
+                          ? styles.providerBadgeTextWarning
+                          : styles.providerBadgeTextActive
+                      ]}
+                    >
+                      {aiStatus?.geminiStatus === 'COOLDOWN_30M'
+                        ? 'Respaldo Activo (Gemini reposo 30m)'
+                        : 'Motor IA: Gemini Flash 24/7 • Failover Listo'}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={styles.headerSubtitle}>
                   Supervisa WhatsApp en tiempo real, responde manualmente o reactiva el bot con un solo clic.
                 </Text>
@@ -1209,6 +1290,75 @@ const styles = StyleSheet.create({
   },
   messageTextHuman: {
     color: '#064E3B'
+  },
+  providerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    gap: 6
+  },
+  providerBadgeActive: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0'
+  },
+  providerBadgeWarning: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A'
+  },
+  providerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3
+  },
+  providerDotActive: {
+    backgroundColor: '#10B981'
+  },
+  providerDotWarning: {
+    backgroundColor: '#F59E0B'
+  },
+  providerBadgeText: {
+    fontSize: 10,
+    fontWeight: '700'
+  },
+  providerBadgeTextActive: {
+    color: '#047857'
+  },
+  providerBadgeTextWarning: {
+    color: '#B45309'
+  },
+  quickRepliesContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingVertical: 6,
+    paddingHorizontal: 8
+  },
+  quickRepliesScroll: {
+    gap: 6,
+    alignItems: 'center'
+  },
+  quickReplyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    gap: 4
+  },
+  quickReplyChipIcon: {
+    fontSize: 12
+  },
+  quickReplyChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#334155'
   },
   replyBar: {
     flexDirection: 'row',
