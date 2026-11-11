@@ -25,7 +25,10 @@ import {
   ShieldCheck,
   Check,
   Sparkles,
-  Layers
+  Layers,
+  Trash2,
+  Lock,
+  ShieldAlert
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
@@ -47,7 +50,13 @@ export default function OnboardingScreen() {
   const [scalinkySlug, setScalinkySlug] = useState('');
   const [isScalinkyLinked, setIsScalinkyLinked] = useState(false);
   const [savingScalinky, setSavingScalinky] = useState(false);
-  const [scalinkyFeedback, setScalinkyFeedback] = useState<string | null>(null);
+  const [scalinkyFeedback, setScalinkyFeedback] = useState<{ text: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [scalinkyServerOnline, setScalinkyServerOnline] = useState<boolean | null>(null);
+  const [checkingScalinkyHealth, setCheckingScalinkyHealth] = useState(false);
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [ownerPassword, setOwnerPassword] = useState('');
+  const [showOwnerAuth, setShowOwnerAuth] = useState(false);
+  const [ownerVerified, setOwnerVerified] = useState(false);
 
   // Datos Comerciales
   const [businessName, setBusinessName] = useState(
@@ -118,6 +127,23 @@ export default function OnboardingScreen() {
     }
   }, [activeTab]);
 
+  // Consultar estado de Scalinky en tiempo real
+  const fetchScalinkyStatus = async () => {
+    setCheckingScalinkyHealth(true);
+    try {
+      const res = await apiClient.get('/integrations/scalinky/status');
+      setScalinkyServerOnline(Boolean(res.data?.online));
+    } catch {
+      setScalinkyServerOnline(false);
+    } finally {
+      setCheckingScalinkyHealth(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchScalinkyStatus();
+  }, [activeTab]);
+
   // Cargar datos comerciales
   useEffect(() => {
     const fetchBusiness = async () => {
@@ -138,6 +164,8 @@ export default function OnboardingScreen() {
               if (parsed?.scalinkySlug) {
                 setScalinkySlug(parsed.scalinkySlug);
                 setIsScalinkyLinked(true);
+                if (parsed.ownerEmail) setOwnerEmail(parsed.ownerEmail);
+                if (parsed.ownerVerified) setOwnerVerified(true);
               }
             } catch {
               // no es JSON
@@ -151,28 +179,125 @@ export default function OnboardingScreen() {
     fetchBusiness();
   }, [user?.organizationId]);
 
-  // Guardar vinculación de Scalinky
+  // Desvincular Scalinky por completo
+  const handleUnlinkScalinky = async () => {
+    setSavingScalinky(true);
+    setScalinkyFeedback(null);
+    try {
+      await apiClient.put('/business', { specialInstructions: '' });
+      setScalinkySlug('');
+      setIsScalinkyLinked(false);
+      setOwnerEmail('');
+      setOwnerPassword('');
+      setOwnerVerified(false);
+      setScalinkyFeedback({
+        type: 'success',
+        text: 'Scalinky desvinculado con éxito. Ahora el Asistente de IA responderá utilizando únicamente el catálogo nativo de TurnoFlow (Servicios & Tarifas).'
+      });
+      setTimeout(() => setScalinkyFeedback(null), 5000);
+    } catch {
+      setScalinkyFeedback({
+        type: 'error',
+        text: 'Error al desvincular Scalinky. Reintenta en unos instantes.'
+      });
+    } finally {
+      setSavingScalinky(false);
+    }
+  };
+
+  // Guardar vinculación de Scalinky con verificación de salud y propietario
   const handleSaveScalinky = async () => {
     setSavingScalinky(true);
     setScalinkyFeedback(null);
     try {
       const trimmed = scalinkySlug.trim().toLowerCase();
+
+      if (!trimmed) {
+        await handleUnlinkScalinky();
+        return;
+      }
+
+      // 1. Verificar si el backend de Scalinky está levantado y online
+      let online = false;
+      try {
+        const healthRes = await apiClient.get('/integrations/scalinky/status');
+        online = Boolean(healthRes.data?.online);
+        setScalinkyServerOnline(online);
+      } catch {
+        online = false;
+        setScalinkyServerOnline(false);
+      }
+
+      if (!online) {
+        setScalinkyFeedback({
+          type: 'error',
+          text: '⚠️ No se puede sincronizar: El servidor de Scalinky no está activo ni accesible (Offline). Inicia el backend de Scalinky en el puerto 3000 o mantén el catálogo nativo de TurnoFlow.'
+        });
+        setSavingScalinky(false);
+        return;
+      }
+
+      // 2. Si se ingresaron credenciales de dueño, verificar titularidad
+      let verifiedStatus = ownerVerified;
+      if (ownerEmail.trim() && ownerPassword.trim()) {
+        try {
+          const verifyRes = await apiClient.post(`/integrations/scalinky/${trimmed}/verify-owner`, {
+            email: ownerEmail.trim(),
+            password: ownerPassword.trim()
+          });
+          if (!verifyRes.data?.valid) {
+            setScalinkyFeedback({
+              type: 'error',
+              text: `❌ Verificación de dueño rechazada: ${verifyRes.data?.message || 'Credenciales incorrectas para este salón en Scalinky.'}`
+            });
+            setSavingScalinky(false);
+            return;
+          }
+          verifiedStatus = true;
+          setOwnerVerified(true);
+        } catch {
+          setScalinkyFeedback({
+            type: 'error',
+            text: '❌ Error al autenticar las credenciales del dueño en Scalinky.'
+          });
+          setSavingScalinky(false);
+          return;
+        }
+      } else {
+        // 3. Si no pasó contraseña, al menos validar que el salón exista en Scalinky
+        try {
+          await apiClient.get(`/integrations/scalinky/${trimmed}/services`);
+        } catch (slugErr: any) {
+          setScalinkyFeedback({
+            type: 'error',
+            text: `❌ No se encontró el salón "${trimmed}" en Scalinky. Verifica que el identificador sea exacto.`
+          });
+          setSavingScalinky(false);
+          return;
+        }
+      }
+
       const payload: any = {
-        specialInstructions: trimmed
-          ? JSON.stringify({ scalinkySlug: trimmed, updatedAt: new Date().toISOString() })
-          : ''
+        specialInstructions: JSON.stringify({
+          scalinkySlug: trimmed,
+          ownerEmail: ownerEmail.trim() || undefined,
+          ownerVerified: verifiedStatus,
+          updatedAt: new Date().toISOString()
+        })
       };
 
       await apiClient.put('/business', payload);
-      setIsScalinkyLinked(Boolean(trimmed));
-      setScalinkyFeedback(
-        trimmed
-          ? `¡Scalinky sincronizado correctamente con la cuenta "${trimmed}"!`
-          : 'Scalinky desvinculado. El asistente usará el catálogo propio de TurnoFlow.'
-      );
-      setTimeout(() => setScalinkyFeedback(null), 4000);
+      setIsScalinkyLinked(true);
+      setScalinkyFeedback({
+        type: 'success',
+        text: `¡Scalinky sincronizado correctamente con "${trimmed}"! El asistente consultará turnos y disponibilidad en vivo.`
+      });
+      setTimeout(() => setScalinkyFeedback(null), 5000);
     } catch {
-      setScalinkyFeedback('Error al actualizar la configuración de Scalinky.');
+      setScalinkyFeedback({
+        type: 'error',
+        text: 'Error al actualizar la configuración de Scalinky.'
+      });
     } finally {
       setSavingScalinky(false);
     }
@@ -387,25 +512,96 @@ export default function OnboardingScreen() {
               </View>
             </View>
 
-            {/* Estado actual de Scalinky */}
-            <View style={styles.scalinkyStatusBanner}>
-              <View style={[styles.statusIndicator, isScalinkyLinked ? styles.bgGreen : styles.bgSlate]}>
-                <Layers size={18} color="#FFFFFF" />
+            {/* Estado actual de Scalinky con verificación en tiempo real */}
+            <View
+              style={[
+                styles.scalinkyStatusBanner,
+                scalinkyServerOnline === false
+                  ? { borderColor: '#FECACA', backgroundColor: '#FEF2F2' }
+                  : isScalinkyLinked
+                  ? { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }
+                  : {}
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusIndicator,
+                  scalinkyServerOnline === false
+                    ? styles.bgRed
+                    : isScalinkyLinked
+                    ? styles.bgGreen
+                    : styles.bgSlate
+                ]}
+              >
+                {scalinkyServerOnline === false ? (
+                  <AlertCircle size={20} color="#FFFFFF" />
+                ) : isScalinkyLinked ? (
+                  <CheckCircle size={20} color="#FFFFFF" />
+                ) : (
+                  <Layers size={20} color="#FFFFFF" />
+                )}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.scalinkyStatusTitle}>
-                  Estado de Scalinky:{' '}
-                  <Text style={{ color: isScalinkyLinked ? '#16A34A' : '#64748B', fontWeight: '700' }}>
-                    {isScalinkyLinked ? `Sincronizado con "${scalinkySlug}"` : 'No vinculado'}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.scalinkyStatusTitle}>
+                    Estado de Scalinky:{' '}
+                    <Text
+                      style={{
+                        color:
+                          scalinkyServerOnline === false
+                            ? '#DC2626'
+                            : isScalinkyLinked
+                            ? '#16A34A'
+                            : '#64748B',
+                        fontWeight: '700'
+                      }}
+                    >
+                      {scalinkyServerOnline === false
+                        ? '🔴 Servidor Desconectado (Backend Offline)'
+                        : isScalinkyLinked
+                        ? `🟢 Sincronizado en Vivo con "${scalinkySlug}"`
+                        : '⚪ No vinculado'}
+                    </Text>
                   </Text>
-                </Text>
+                  <TouchableOpacity
+                    style={styles.refreshSmallBtn}
+                    onPress={fetchScalinkyStatus}
+                    disabled={checkingScalinkyHealth}
+                  >
+                    <RefreshCw
+                      size={14}
+                      color="#64748B"
+                      style={checkingScalinkyHealth ? { opacity: 0.5 } : {}}
+                    />
+                  </TouchableOpacity>
+                </View>
                 <Text style={styles.scalinkyStatusSub}>
-                  {isScalinkyLinked
-                    ? 'El Asistente de IA está consultando tu agenda y profesionales directamente desde Scalinky.'
+                  {scalinkyServerOnline === false
+                    ? isScalinkyLinked && scalinkySlug
+                      ? `Tenías configurado el slug "${scalinkySlug}", pero el backend de Scalinky (puerto 3000) no responde. El Asistente de IA está operando de forma 100% autónoma utilizando tu catálogo propio de TurnoFlow (Servicios & Tarifas).`
+                      : 'El backend de Scalinky no está levantado ni conectado en este momento. El Asistente de IA responderá utilizando únicamente el catálogo nativo de TurnoFlow.'
+                    : isScalinkyLinked
+                    ? 'El Asistente de IA está consultando tu agenda, profesionales y disponibilidad en tiempo real directamente desde Scalinky.'
                     : 'Actualmente el asistente responde precios y gestiona turnos usando el catálogo interno de TurnoFlow (Servicios & Tarifas).'}
                 </Text>
               </View>
             </View>
+
+            {/* Botón de desvinculación rápida si hay slug configurado */}
+            {(isScalinkyLinked || Boolean(scalinkySlug)) && (
+              <View style={styles.unlinkRow}>
+                <TouchableOpacity
+                  style={styles.unlinkBtn}
+                  onPress={handleUnlinkScalinky}
+                  disabled={savingScalinky}
+                >
+                  <Trash2 size={15} color="#DC2626" style={{ marginRight: 6 }} />
+                  <Text style={styles.unlinkBtnText}>
+                    Desvincular Scalinky (Volver al Catálogo Propio de TurnoFlow)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Formulario de Configuración de Scalinky */}
             <View style={styles.formContainer}>
@@ -432,16 +628,83 @@ export default function OnboardingScreen() {
                   ) : (
                     <>
                       <Save size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.primaryBtnText}>Guardar</Text>
+                      <Text style={styles.primaryBtnText}>Guardar y Validar</Text>
                     </>
                   )}
                 </TouchableOpacity>
               </View>
 
+              {/* Sección Opcional de Verificación de Dueño */}
+              <TouchableOpacity
+                style={styles.ownerAuthToggle}
+                onPress={() => setShowOwnerAuth(!showOwnerAuth)}
+              >
+                <Lock size={14} color="#1A73E8" style={{ marginRight: 6 }} />
+                <Text style={styles.ownerAuthToggleText}>
+                  {showOwnerAuth
+                    ? 'Ocultar verificación de dueño'
+                    : '🔐 ¿Deseas verificar que eres el dueño del salón en Scalinky? (Recomendado)'}
+                </Text>
+              </TouchableOpacity>
+
+              {showOwnerAuth && (
+                <View style={styles.ownerAuthContainer}>
+                  <Text style={styles.ownerAuthTitle}>
+                    Validación de Titularidad con Scalinky
+                  </Text>
+                  <Text style={styles.ownerAuthSubtitle}>
+                    Ingresa el email y contraseña de tu cuenta administradora de Scalinky para asegurar que nadie más pueda sincronizar tu salón.
+                  </Text>
+                  <View style={{ gap: 10, marginTop: 10 }}>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="Email de Scalinky (ej. duena@salon.com)"
+                      placeholderTextColor="#94A3B8"
+                      value={ownerEmail}
+                      onChangeText={setOwnerEmail}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                    />
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="Contraseña de Scalinky"
+                      placeholderTextColor="#94A3B8"
+                      value={ownerPassword}
+                      onChangeText={setOwnerPassword}
+                      secureTextEntry
+                    />
+                  </View>
+                </View>
+              )}
+
               {scalinkyFeedback && (
-                <View style={styles.feedbackBox}>
-                  <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
-                  <Text style={styles.feedbackText}>{scalinkyFeedback}</Text>
+                <View
+                  style={[
+                    styles.feedbackBox,
+                    scalinkyFeedback.type === 'error'
+                      ? { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }
+                      : scalinkyFeedback.type === 'warning'
+                      ? { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }
+                      : {}
+                  ]}
+                >
+                  {scalinkyFeedback.type === 'error' ? (
+                    <AlertCircle size={16} color="#DC2626" style={{ marginRight: 8 }} />
+                  ) : (
+                    <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
+                  )}
+                  <Text
+                    style={[
+                      styles.feedbackText,
+                      scalinkyFeedback.type === 'error'
+                        ? { color: '#B91C1C' }
+                        : scalinkyFeedback.type === 'warning'
+                        ? { color: '#D97706' }
+                        : {}
+                    ]}
+                  >
+                    {scalinkyFeedback.text}
+                  </Text>
                 </View>
               )}
 
@@ -851,6 +1114,68 @@ const styles = StyleSheet.create({
   },
   bgSlate: {
     backgroundColor: '#64748B'
+  },
+  bgRed: {
+    backgroundColor: '#DC2626'
+  },
+  bgAmber: {
+    backgroundColor: '#D97706'
+  },
+  refreshSmallBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0'
+  },
+  unlinkRow: {
+    marginBottom: 16
+  },
+  unlinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16
+  },
+  unlinkBtnText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  ownerAuthToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingVertical: 6
+  },
+  ownerAuthToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A73E8'
+  },
+  ownerAuthContainer: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    padding: 14,
+    marginTop: 8
+  },
+  ownerAuthTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4
+  },
+  ownerAuthSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 16
   },
   scalinkyStatusTitle: {
     fontSize: 14,
