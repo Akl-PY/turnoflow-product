@@ -46,10 +46,14 @@ export default function OnboardingScreen() {
   const [loadingQr, setLoadingQr] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
 
-  // Scalinky Turnero Opcional
+  // Agenda & Scalinky Turnero
+  const [bookingEnabled, setBookingEnabled] = useState(true);
+  const [togglingBooking, setTogglingBooking] = useState(false);
   const [scalinkySlug, setScalinkySlug] = useState('');
   const [isScalinkyLinked, setIsScalinkyLinked] = useState(false);
   const [savingScalinky, setSavingScalinky] = useState(false);
+  const [syncingScalinky, setSyncingScalinky] = useState(false);
+  const [scalinkyCache, setScalinkyCache] = useState<any | null>(null);
   const [scalinkyFeedback, setScalinkyFeedback] = useState<{ text: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [scalinkyServerOnline, setScalinkyServerOnline] = useState<boolean | null>(null);
   const [checkingScalinkyHealth, setCheckingScalinkyHealth] = useState(false);
@@ -58,17 +62,28 @@ export default function OnboardingScreen() {
   const [showOwnerAuth, setShowOwnerAuth] = useState(false);
   const [ownerVerified, setOwnerVerified] = useState(false);
 
-  // Datos Comerciales
+  // Datos Comerciales & Horarios
   const [businessName, setBusinessName] = useState(
-    user?.organizationName || 'TurnoFlow Beauty Studio'
+    user?.organizationName || 'Mi Negocio'
   );
-  const [description, setDescription] = useState('Estudio de belleza y estética integral');
-  const [location, setLocation] = useState('Av. Santa Fe 2450, Recoleta, Buenos Aires');
+  const [description, setDescription] = useState('Atención comercial y coordinación de servicios');
+  const [location, setLocation] = useState('Av. Principal 123, Ciudad');
   const [timezone, setTimezone] = useState('America/Argentina/Buenos_Aires');
   const [phone, setPhone] = useState('+5491133445566');
   const [cancellationPolicy, setCancellationPolicy] = useState(
-    'Cancelaciones con al menos 24 horas de antelación sin cargo.'
+    'Cancelaciones o reprogramaciones con al menos 24 horas de antelación.'
   );
+  const [businessHours, setBusinessHours] = useState<
+    Array<{ day: string; open: string; close: string; isOpen: boolean }>
+  >([
+    { day: 'monday', open: '09:00', close: '18:00', isOpen: true },
+    { day: 'tuesday', open: '09:00', close: '18:00', isOpen: true },
+    { day: 'wednesday', open: '09:00', close: '18:00', isOpen: true },
+    { day: 'thursday', open: '09:00', close: '18:00', isOpen: true },
+    { day: 'friday', open: '09:00', close: '18:00', isOpen: true },
+    { day: 'saturday', open: '09:00', close: '13:00', isOpen: true },
+    { day: 'sunday', open: '09:00', close: '13:00', isOpen: false }
+  ]);
 
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [businessSuccess, setBusinessSuccess] = useState(false);
@@ -144,7 +159,7 @@ export default function OnboardingScreen() {
     fetchScalinkyStatus();
   }, [activeTab]);
 
-  // Cargar datos comerciales
+  // Cargar datos comerciales y horarios
   useEffect(() => {
     const fetchBusiness = async () => {
       try {
@@ -156,16 +171,23 @@ export default function OnboardingScreen() {
           if (res.data.timezone) setTimezone(res.data.timezone);
           if (res.data.contactPhone) setPhone(res.data.contactPhone);
           if (res.data.cancellationPolicy) setCancellationPolicy(res.data.cancellationPolicy);
+          if (Array.isArray(res.data.businessHours) && res.data.businessHours.length > 0) {
+            setBusinessHours(res.data.businessHours);
+          }
 
-          // Revisar si existe configuración de Scalinky en specialInstructions
+          // Revisar si existe configuración de agenda y Scalinky en specialInstructions
           if (res.data.specialInstructions) {
             try {
               const parsed = JSON.parse(res.data.specialInstructions);
+              if (typeof parsed?.bookingEnabled === 'boolean') {
+                setBookingEnabled(parsed.bookingEnabled);
+              }
               if (parsed?.scalinkySlug) {
                 setScalinkySlug(parsed.scalinkySlug);
                 setIsScalinkyLinked(true);
                 if (parsed.ownerEmail) setOwnerEmail(parsed.ownerEmail);
                 if (parsed.ownerVerified) setOwnerVerified(true);
+                if (parsed.scalinkyCache) setScalinkyCache(parsed.scalinkyCache);
               }
             } catch {
               // no es JSON
@@ -179,14 +201,107 @@ export default function OnboardingScreen() {
     fetchBusiness();
   }, [user?.organizationId]);
 
+  // Habilitar / Deshabilitar Agenda de Turnos
+  const handleToggleBookingEnabled = async () => {
+    setTogglingBooking(true);
+    const nextValue = !bookingEnabled;
+    try {
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          bookingEnabled: nextValue,
+          updatedAt: new Date().toISOString()
+        })
+      });
+      setBookingEnabled(nextValue);
+      setScalinkyFeedback({
+        type: nextValue ? 'success' : 'warning',
+        text: nextValue
+          ? '✅ Agenda de turnos HABILITADA. El asistente verificará disponibilidad y coordinará turnos.'
+          : '⏸️ Agenda de turnos DESHABILITADA. El asistente solo responderá consultas, precios y horarios, derivando reservas al equipo humano.'
+      });
+      setTimeout(() => setScalinkyFeedback(null), 5000);
+    } catch {
+      setScalinkyFeedback({
+        type: 'error',
+        text: 'No se pudo actualizar el estado de la agenda.'
+      });
+    } finally {
+      setTogglingBooking(false);
+    }
+  };
+
+  // Botón para Sincronizar Datos de Scalinky manualmente cuando hagan un cambio
+  const handleSyncScalinkyNow = async () => {
+    const trimmed = scalinkySlug.trim().toLowerCase();
+    if (!trimmed) {
+      setScalinkyFeedback({
+        type: 'error',
+        text: 'Ingresa primero el identificador (slug) de tu negocio en Scalinky.'
+      });
+      return;
+    }
+
+    setSyncingScalinky(true);
+    setScalinkyFeedback(null);
+    try {
+      const syncRes = await apiClient.post(`/integrations/scalinky/${trimmed}/sync`);
+      const snapshot = syncRes.data;
+
+      if (!snapshot?.synced) {
+        setScalinkyServerOnline(snapshot?.status !== 'OFFLINE');
+        setScalinkyCache(snapshot);
+        setScalinkyFeedback({
+          type: 'error',
+          text: `⚠️ Estado Desincronizado: ${snapshot?.message || 'Verifica que tu negocio en Scalinky tenga horarios, servicios y empleados cargados.'}`
+        });
+        return;
+      }
+
+      setScalinkyServerOnline(true);
+      setScalinkyCache(snapshot);
+      setIsScalinkyLinked(true);
+
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          bookingEnabled,
+          scalinkySlug: trimmed,
+          scalinkyCache: snapshot,
+          ownerEmail: ownerEmail.trim() || undefined,
+          ownerVerified,
+          updatedAt: new Date().toISOString()
+        })
+      });
+
+      setScalinkyFeedback({
+        type: 'success',
+        text: `🔄 ¡Datos de Scalinky sincronizados y guardados! (${snapshot.services?.length || 0} servicios y ${snapshot.staff?.length || 0} empleados listos en memoria).`
+      });
+      setTimeout(() => setScalinkyFeedback(null), 6000);
+    } catch {
+      setScalinkyFeedback({
+        type: 'error',
+        text: '❌ Error de red al sincronizar con Scalinky.'
+      });
+    } finally {
+      setSyncingScalinky(false);
+    }
+  };
+
   // Desvincular Scalinky por completo
   const handleUnlinkScalinky = async () => {
     setSavingScalinky(true);
     setScalinkyFeedback(null);
     try {
-      await apiClient.put('/business', { specialInstructions: '' });
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          bookingEnabled,
+          scalinkySlug: '',
+          scalinkyCache: null
+        })
+      });
       setScalinkySlug('');
       setIsScalinkyLinked(false);
+      setScalinkyCache(null);
       setOwnerEmail('');
       setOwnerPassword('');
       setOwnerVerified(false);
@@ -205,7 +320,7 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Guardar vinculación de Scalinky con verificación de salud y propietario
+  // Guardar vinculación de Scalinky por primera vez (valida salud, dueño, horarios, servicios y empleados)
   const handleSaveScalinky = async () => {
     setSavingScalinky(true);
     setScalinkyFeedback(null);
@@ -248,7 +363,7 @@ export default function OnboardingScreen() {
           if (!verifyRes.data?.valid) {
             setScalinkyFeedback({
               type: 'error',
-              text: `❌ Verificación de dueño rechazada: ${verifyRes.data?.message || 'Credenciales incorrectas para este salón en Scalinky.'}`
+              text: `❌ Verificación de dueño rechazada: ${verifyRes.data?.message || 'Credenciales incorrectas para este negocio en Scalinky.'}`
             });
             setSavingScalinky(false);
             return;
@@ -263,23 +378,29 @@ export default function OnboardingScreen() {
           setSavingScalinky(false);
           return;
         }
-      } else {
-        // 3. Si no pasó contraseña, al menos validar que el salón exista en Scalinky
-        try {
-          await apiClient.get(`/integrations/scalinky/${trimmed}/services`);
-        } catch (slugErr: any) {
-          setScalinkyFeedback({
-            type: 'error',
-            text: `❌ No se encontró el salón "${trimmed}" en Scalinky. Verifica que el identificador sea exacto.`
-          });
-          setSavingScalinky(false);
-          return;
-        }
       }
+
+      // 3. Sincronizar por primera vez: verificar que el negocio tenga horarios, servicios, empleados y disponibilidad
+      const syncRes = await apiClient.post(`/integrations/scalinky/${trimmed}/sync`);
+      const snapshot = syncRes.data;
+
+      if (!snapshot?.synced) {
+        setScalinkyCache(snapshot);
+        setScalinkyFeedback({
+          type: 'error',
+          text: `❌ No se pudo vincular "${trimmed}": ${snapshot?.message || 'El negocio en Scalinky debe tener horarios, servicios y empleados configurados.'}`
+        });
+        setSavingScalinky(false);
+        return;
+      }
+
+      setScalinkyCache(snapshot);
 
       const payload: any = {
         specialInstructions: JSON.stringify({
+          bookingEnabled,
           scalinkySlug: trimmed,
+          scalinkyCache: snapshot,
           ownerEmail: ownerEmail.trim() || undefined,
           ownerVerified: verifiedStatus,
           updatedAt: new Date().toISOString()
@@ -290,9 +411,9 @@ export default function OnboardingScreen() {
       setIsScalinkyLinked(true);
       setScalinkyFeedback({
         type: 'success',
-        text: `¡Scalinky sincronizado correctamente con "${trimmed}"! El asistente consultará turnos y disponibilidad en vivo.`
+        text: `¡Conectado y sincronizado con "${trimmed}"! Se guardaron ${snapshot.services?.length || 0} servicios y ${snapshot.staff?.length || 0} empleados para no buscarlos en cada mensaje.`
       });
-      setTimeout(() => setScalinkyFeedback(null), 5000);
+      setTimeout(() => setScalinkyFeedback(null), 6000);
     } catch {
       setScalinkyFeedback({
         type: 'error',
@@ -303,7 +424,32 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Guardar datos comerciales
+  // Helpers para modificar horarios del negocio
+  const toggleDayOpen = (dayKey: string) => {
+    setBusinessHours((prev) =>
+      prev.map((item) => (item.day === dayKey ? { ...item, isOpen: !item.isOpen } : item))
+    );
+  };
+
+  const updateDayTime = (dayKey: string, field: 'open' | 'close', value: string) => {
+    setBusinessHours((prev) =>
+      prev.map((item) => (item.day === dayKey ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const copyMondayToWeekdays = () => {
+    const monday = businessHours.find((h) => h.day === 'monday');
+    if (!monday) return;
+    setBusinessHours((prev) =>
+      prev.map((item) =>
+        ['tuesday', 'wednesday', 'thursday', 'friday'].includes(item.day)
+          ? { ...item, open: monday.open, close: monday.close, isOpen: monday.isOpen }
+          : item
+      )
+    );
+  };
+
+  // Guardar datos comerciales y horarios del negocio
   const handleSaveBusiness = async () => {
     setSavingBusiness(true);
     setBusinessSuccess(false);
@@ -314,12 +460,13 @@ export default function OnboardingScreen() {
         location,
         timezone,
         contactPhone: phone,
-        cancellationPolicy
+        cancellationPolicy,
+        businessHours
       });
       setBusinessSuccess(true);
       setTimeout(() => setBusinessSuccess(false), 3000);
     } catch {
-      alert('Error al guardar los datos del negocio.');
+      alert('Error al guardar los datos y horarios del negocio. Verifica que las horas tengan formato HH:MM (ej. 09:00).');
     } finally {
       setSavingBusiness(false);
     }
@@ -329,7 +476,7 @@ export default function OnboardingScreen() {
     <View style={styles.container}>
       <Header
         title="Configuración & Canales"
-        subtitle="Conecta tu WhatsApp, sincroniza tu turnero o ajusta los datos de tu salón"
+        subtitle="Conecta tu WhatsApp, habilita o deshabilita tu agenda, sincroniza Scalinky y ajusta los datos y horarios de tu negocio"
       />
 
       {/* Tabs Superiores */}
@@ -350,7 +497,7 @@ export default function OnboardingScreen() {
         >
           <Calendar size={16} color={activeTab === 'scalinky' ? '#1A73E8' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'scalinky' && styles.tabTextActive]}>
-            2. Turnero Scalinky (Opcional)
+            2. Agenda & Scalinky
           </Text>
         </TouchableOpacity>
 
@@ -360,7 +507,7 @@ export default function OnboardingScreen() {
         >
           <Building2 size={16} color={activeTab === 'business' ? '#1A73E8' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'business' && styles.tabTextActive]}>
-            3. Datos de tu Salón
+            3. Datos y Horarios del Negocio
           </Text>
         </TouchableOpacity>
       </View>
@@ -378,7 +525,7 @@ export default function OnboardingScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Vincular WhatsApp Móvil</Text>
                 <Text style={styles.cardSubtitle}>
-                  Escanea el código QR desde tu teléfono para que el asistente responda consultas 24/7 en tu línea comercial.
+                  Escanea el código QR desde tu teléfono para que el asistente responda consultas 24/7 en la línea comercial de tu negocio.
                 </Text>
               </View>
             </View>
@@ -496,18 +643,75 @@ export default function OnboardingScreen() {
         )}
 
         {/* ======================================================== */}
-        {/* PESTAÑA 2: SCALINKY TURNERO (OPCIONAL) */}
+        {/* PESTAÑA 2: AGENDA & SCALINKY TURNERO */}
         {/* ======================================================== */}
         {activeTab === 'scalinky' && (
           <View style={styles.sectionCard}>
+            {/* Interruptor Maestro: Habilitar o Deshabilitar Agenda */}
+            <View
+              style={[
+                styles.scalinkyStatusBanner,
+                bookingEnabled
+                  ? { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }
+                  : { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusIndicator,
+                  bookingEnabled ? styles.bgGreen : styles.bgAmber
+                ]}
+              >
+                <Calendar size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.scalinkyStatusTitle}>
+                  Módulo de Agenda de Turnos:{' '}
+                  <Text
+                    style={{
+                      color: bookingEnabled ? '#16A34A' : '#D97706',
+                      fontWeight: '700'
+                    }}
+                  >
+                    {bookingEnabled ? '🟢 HABILITADA' : '⏸️ DESHABILITADA (Solo Atención y Consultas)'}
+                  </Text>
+                </Text>
+                <Text style={styles.scalinkyStatusSub}>
+                  {bookingEnabled
+                    ? 'El Asistente de IA consulta horarios libres y coordina/agenda turnos automáticamente con tus clientes.'
+                    : 'El Asistente de IA responde precios, servicios, horarios de atención y dudas generales, pero NO ofrece ni agenda turnos en calendario (deriva al equipo humano cuando el cliente quiere coordinar).'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.primaryBtn,
+                  {
+                    backgroundColor: bookingEnabled ? '#DC2626' : '#16A34A',
+                    paddingHorizontal: 14,
+                    paddingVertical: 10
+                  }
+                ]}
+                onPress={handleToggleBookingEnabled}
+                disabled={togglingBooking}
+              >
+                {togglingBooking ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.primaryBtnText}>
+                    {bookingEnabled ? 'Deshabilitar Agenda' : 'Habilitar Agenda'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.cardHeader}>
               <View style={styles.headerIcon}>
-                <Calendar size={20} color="#1A73E8" />
+                <Layers size={20} color="#1A73E8" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Sincronización con Scalinky (Opcional)</Text>
                 <Text style={styles.cardSubtitle}>
-                  Si utilizas Scalinky como tu sistema de reservas online, conecta tu cuenta para sincronizar turnos y disponibilidad en vivo.
+                  Si tu negocio utiliza Scalinky, vincula tu cuenta para traer sus horarios, servicios, empleados y consultar disponibilidad en vivo por cada empleado.
                 </Text>
               </View>
             </View>
@@ -518,6 +722,8 @@ export default function OnboardingScreen() {
                 styles.scalinkyStatusBanner,
                 scalinkyServerOnline === false
                   ? { borderColor: '#FECACA', backgroundColor: '#FEF2F2' }
+                  : scalinkyCache && scalinkyCache.synced === false
+                  ? { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }
                   : isScalinkyLinked
                   ? { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }
                   : {}
@@ -528,6 +734,8 @@ export default function OnboardingScreen() {
                   styles.statusIndicator,
                   scalinkyServerOnline === false
                     ? styles.bgRed
+                    : scalinkyCache && scalinkyCache.synced === false
+                    ? styles.bgAmber
                     : isScalinkyLinked
                     ? styles.bgGreen
                     : styles.bgSlate
@@ -550,6 +758,8 @@ export default function OnboardingScreen() {
                         color:
                           scalinkyServerOnline === false
                             ? '#DC2626'
+                            : scalinkyCache && scalinkyCache.synced === false
+                            ? '#D97706'
                             : isScalinkyLinked
                             ? '#16A34A'
                             : '#64748B',
@@ -558,9 +768,11 @@ export default function OnboardingScreen() {
                     >
                       {scalinkyServerOnline === false
                         ? '🔴 Servidor Desconectado (Backend Offline)'
+                        : scalinkyCache && scalinkyCache.synced === false
+                        ? `🟠 Desincronizado (${scalinkyCache.status})`
                         : isScalinkyLinked
-                        ? `🟢 Sincronizado en Vivo con "${scalinkySlug}"`
-                        : '⚪ No vinculado'}
+                        ? `🟢 Sincronizado con "${scalinkySlug}"`
+                        : '⚪ No vinculado (Catálogo Propio de TurnoFlow)'}
                     </Text>
                   </Text>
                   <TouchableOpacity
@@ -578,41 +790,99 @@ export default function OnboardingScreen() {
                 <Text style={styles.scalinkyStatusSub}>
                   {scalinkyServerOnline === false
                     ? isScalinkyLinked && scalinkySlug
-                      ? `Tenías configurado el slug "${scalinkySlug}", pero el backend de Scalinky (puerto 3000) no responde. El Asistente de IA está operando de forma 100% autónoma utilizando tu catálogo propio de TurnoFlow (Servicios & Tarifas).`
-                      : 'El backend de Scalinky no está levantado ni conectado en este momento. El Asistente de IA responderá utilizando únicamente el catálogo nativo de TurnoFlow.'
+                      ? `Tenías configurado el slug "${scalinkySlug}", pero el backend de Scalinky (puerto 3000) no responde. Si un cliente pide turno y falla la resincronización, el bot indicará que aguarde a ser atendido por un humano.`
+                      : 'El backend de Scalinky no está levantado en este momento. El Asistente de IA utiliza el catálogo nativo de TurnoFlow.'
                     : isScalinkyLinked
-                    ? 'El Asistente de IA está consultando tu agenda, profesionales y disponibilidad en tiempo real directamente desde Scalinky.'
+                    ? 'Tus horarios, servicios y empleados están guardados en memoria para responder al instante. Los turnos disponibles se consultan siempre en vivo y por cada empleado.'
                     : 'Actualmente el asistente responde precios y gestiona turnos usando el catálogo interno de TurnoFlow (Servicios & Tarifas).'}
                 </Text>
               </View>
             </View>
 
-            {/* Botón de desvinculación rápida si hay slug configurado */}
+            {/* Botones de Sincronizar Ahora y Desvincular */}
             {(isScalinkyLinked || Boolean(scalinkySlug)) && (
-              <View style={styles.unlinkRow}>
+              <View style={[styles.unlinkRow, { flexDirection: 'row', gap: 10, flexWrap: 'wrap' }]}>
                 <TouchableOpacity
-                  style={styles.unlinkBtn}
+                  style={[
+                    styles.primaryBtn,
+                    { backgroundColor: '#0284C7', flex: 1, minWidth: 220 }
+                  ]}
+                  onPress={handleSyncScalinkyNow}
+                  disabled={syncingScalinky || savingScalinky}
+                >
+                  {syncingScalinky ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <>
+                      <RefreshCw size={15} color="#FFFFFF" style={{ marginRight: 8 }} />
+                      <Text style={styles.primaryBtnText}>
+                        🔄 Sincronizar Datos de Scalinky Ahora
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.unlinkBtn, { flex: 1, minWidth: 220 }]}
                   onPress={handleUnlinkScalinky}
-                  disabled={savingScalinky}
+                  disabled={savingScalinky || syncingScalinky}
                 >
                   <Trash2 size={15} color="#DC2626" style={{ marginRight: 6 }} />
                   <Text style={styles.unlinkBtnText}>
-                    Desvincular Scalinky (Volver al Catálogo Propio de TurnoFlow)
+                    Desvincular Scalinky (Usar Catálogo Propio)
                   </Text>
                 </TouchableOpacity>
               </View>
             )}
 
+            {/* Aviso explícito de sincronización manual tras cambios en Scalinky */}
+            <View style={[styles.infoTip, { marginBottom: 16, marginTop: 0, backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+              <Sparkles size={16} color="#1D4ED8" style={{ marginRight: 8 }} />
+              <Text style={[styles.infoTipText, { color: '#1E3A8A' }]}>
+                <Text style={styles.bold}>¿Cómo funciona la memoria de Scalinky?</Text> Al conectar tu cuenta revisamos que el negocio tenga su horario, servicios y empleados, y los guardamos para no buscarlos en cada mensaje (excepto los turnos libres, que siempre se consultan en vivo y por cada empleado).{' '}
+                <Text style={styles.bold}>
+                  Si realizas algún cambio de horarios, servicios, precios o empleados en Scalinky, debes tocar el botón "🔄 Sincronizar Datos de Scalinky Ahora" para traer la información actualizada.
+                </Text>
+              </Text>
+            </View>
+
+            {/* Resumen de Datos Guardados en Caché de Scalinky */}
+            {scalinkyCache && scalinkyCache.synced && (
+              <View style={[styles.dualCard, { marginBottom: 18, backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
+                <Text style={[styles.dualCardTitle, { color: '#15803D' }]}>
+                  📦 Datos de "{scalinkyCache.slug}" guardados en memoria (Caché Activa)
+                </Text>
+                <Text style={[styles.dualCardText, { color: '#166534', marginBottom: 4 }]}>
+                  • <Text style={styles.bold}>Horario del Negocio:</Text> {scalinkyCache.businessHoursSummary || 'Según disponibilidad de empleados'}
+                </Text>
+                <Text style={[styles.dualCardText, { color: '#166534', marginBottom: 4 }]}>
+                  • <Text style={styles.bold}>Empleados ({scalinkyCache.staff?.length || 0}):</Text>{' '}
+                  {(scalinkyCache.staff || []).map((st: any) => st.name).join(', ') || 'Sin empleados'}
+                </Text>
+                <Text style={[styles.dualCardText, { color: '#166534', marginBottom: 4 }]}>
+                  • <Text style={styles.bold}>Servicios ({scalinkyCache.services?.length || 0}):</Text>{' '}
+                  {(scalinkyCache.services || [])
+                    .map((sv: any) => `${sv.name} ($${sv.price})`)
+                    .join(' | ') || 'Sin servicios'}
+                </Text>
+                {scalinkyCache.lastSyncedAt && (
+                  <Text style={{ fontSize: 11, color: '#15803D', marginTop: 4 }}>
+                    Última sincronización: {new Date(scalinkyCache.lastSyncedAt).toLocaleString()}
+                  </Text>
+                )}
+              </View>
+            )}
+
             {/* Formulario de Configuración de Scalinky */}
             <View style={styles.formContainer}>
-              <Text style={styles.inputLabel}>Identificador o Slug de tu salón en Scalinky</Text>
+              <Text style={styles.inputLabel}>Identificador o Slug de tu negocio en Scalinky</Text>
               <Text style={styles.inputHelper}>
-                Es el nombre que figura en el link de tu agenda pública (por ejemplo: si tu link es scalinky.com/esteticaglow, tu identificador es "esteticaglow").
+                Es el nombre que figura en el link de tu agenda pública (por ejemplo: si tu link es scalinky.com/minegocio, tu identificador es "minegocio").
               </Text>
               <View style={styles.scalinkyInputRow}>
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Ej. esteticaglow (deja vacío si no usas Scalinky)"
+                  placeholder="Ej. hes194 o el slug de tu negocio (deja vacío si no usas Scalinky)"
                   placeholderTextColor="#94A3B8"
                   value={scalinkySlug}
                   onChangeText={setScalinkySlug}
@@ -621,14 +891,14 @@ export default function OnboardingScreen() {
                 <TouchableOpacity
                   style={styles.primaryBtn}
                   onPress={handleSaveScalinky}
-                  disabled={savingScalinky}
+                  disabled={savingScalinky || syncingScalinky}
                 >
                   {savingScalinky ? (
                     <ActivityIndicator color="#FFFFFF" size="small" />
                   ) : (
                     <>
                       <Save size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.primaryBtnText}>Guardar y Validar</Text>
+                      <Text style={styles.primaryBtnText}>Conectar y Sincronizar</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -643,7 +913,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.ownerAuthToggleText}>
                   {showOwnerAuth
                     ? 'Ocultar verificación de dueño'
-                    : '🔐 ¿Deseas verificar que eres el dueño del salón en Scalinky? (Recomendado)'}
+                    : '🔐 ¿Deseas verificar que eres el dueño del negocio en Scalinky? (Recomendado)'}
                 </Text>
               </TouchableOpacity>
 
@@ -653,12 +923,12 @@ export default function OnboardingScreen() {
                     Validación de Titularidad con Scalinky
                   </Text>
                   <Text style={styles.ownerAuthSubtitle}>
-                    Ingresa el email y contraseña de tu cuenta administradora de Scalinky para asegurar que nadie más pueda sincronizar tu salón.
+                    Ingresa el email y contraseña de tu cuenta administradora de Scalinky para validar tu titularidad al vincular.
                   </Text>
                   <View style={{ gap: 10, marginTop: 10 }}>
                     <TextInput
                       style={styles.textInput}
-                      placeholder="Email de Scalinky (ej. duena@salon.com)"
+                      placeholder="Email de Scalinky (ej. admin@minegocio.com)"
                       placeholderTextColor="#94A3B8"
                       value={ownerEmail}
                       onChangeText={setOwnerEmail}
@@ -710,17 +980,17 @@ export default function OnboardingScreen() {
 
               {/* Aclaración importante para el usuario */}
               <View style={styles.dualModeExplanation}>
-                <Text style={styles.dualTitle}>¿Cómo funciona el catálogo de turnos?</Text>
+                <Text style={styles.dualTitle}>¿Cómo funciona el catálogo y la agenda?</Text>
                 <View style={styles.dualCard}>
-                  <Text style={styles.dualCardTitle}>Opción A: Sin Scalinky (Recomendada si comienzas)</Text>
+                  <Text style={styles.dualCardTitle}>Opción A: Sin Scalinky (Catálogo Propio Universal)</Text>
                   <Text style={styles.dualCardText}>
-                    Dirígete a <Text style={styles.bold}>"Servicios & Tarifas"</Text> en el menú lateral. Allí puedes dar de alta tus tratamientos (corte, alisado, limpieza facial, etc.), definir la duración y el precio. La IA usará esa lista automáticamente para responder y coordinar turnos.
+                    Dirígete a <Text style={styles.bold}>"Servicios & Tarifas"</Text> en el menú lateral. Allí puedes cargar cualquier servicio, mantenimiento, consulta o producto que ofrezca tu negocio, con su precio y duración.
                   </Text>
                 </View>
                 <View style={styles.dualCard}>
-                  <Text style={styles.dualCardTitle}>Opción B: Con Scalinky</Text>
+                  <Text style={styles.dualCardTitle}>Opción B: Con Scalinky (Reglas y Empleados)</Text>
                   <Text style={styles.dualCardText}>
-                    Al escribir tu identificador arriba y guardar, TurnoFlow consultará en tiempo real la disponibilidad de tus profesionales y los servicios cargados en tu cuenta de Scalinky.
+                    Al conectar Scalinky, TurnoFlow guarda los horarios, servicios y empleados de tu negocio, y consulta en vivo los turnos libres por cada empleado. Si ocurre un error de conexión, intenta resincronizar automáticamente y, si no responde, avisa al cliente que aguarde a un humano.
                   </Text>
                 </View>
               </View>
@@ -729,7 +999,7 @@ export default function OnboardingScreen() {
         )}
 
         {/* ======================================================== */}
-        {/* PESTAÑA 3: DATOS DEL NEGOCIO */}
+        {/* PESTAÑA 3: DATOS Y HORARIOS DEL NEGOCIO */}
         {/* ======================================================== */}
         {activeTab === 'business' && (
           <View style={styles.sectionCard}>
@@ -738,49 +1008,49 @@ export default function OnboardingScreen() {
                 <Building2 size={20} color="#1A73E8" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Información de tu Salón o Centro</Text>
+                <Text style={styles.cardTitle}>Información y Horarios de tu Negocio</Text>
                 <Text style={styles.cardSubtitle}>
-                  Estos datos los utiliza el asistente de IA para indicar la dirección exacta, horarios y normas de atención a los clientes que pregunten por WhatsApp.
+                  Configura el nombre, rubro, dirección y horarios de apertura de tu empresa o actividad (mantenimiento, consultorio, tienda, servicios técnicos, estética, etc.).
                 </Text>
               </View>
             </View>
 
             <View style={styles.formContainer}>
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Nombre del Salón o Estudio</Text>
+                <Text style={styles.inputLabel}>Nombre de tu Negocio, Empresa o Marca</Text>
                 <TextInput
                   style={styles.textInput}
                   value={businessName}
                   onChangeText={setBusinessName}
-                  placeholder="Ej. Glow Hair & Beauty Studio"
+                  placeholder="Ej. CrystalPool, Clínica Dental Norte, Taller Integral, etc."
                   placeholderTextColor="#94A3B8"
                 />
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Descripción breve de tu propuesta</Text>
+                <Text style={styles.inputLabel}>Rubro y Descripción de lo que ofrecen</Text>
                 <TextInput
                   style={styles.textInput}
                   value={description}
                   onChangeText={setDescription}
-                  placeholder="Ej. Estudio especializado en colorimetría, balayage y estética facial"
+                  placeholder="Ej. Mantenimiento de piscinas, reparación de bombas, limpieza y control de agua"
                   placeholderTextColor="#94A3B8"
                 />
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Dirección / Ubicación Física</Text>
+                <Text style={styles.inputLabel}>Dirección Física o Zona de Cobertura</Text>
                 <TextInput
                   style={styles.textInput}
                   value={location}
                   onChangeText={setLocation}
-                  placeholder="Ej. Av. Santa Fe 2450, Piso 2, Recoleta, CABA"
+                  placeholder="Ej. Av. Principal 2450 o Atención a domicilio en Zona Norte"
                   placeholderTextColor="#94A3B8"
                 />
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Teléfono de Contacto del Administrador (Dueño)</Text>
+                <Text style={styles.inputLabel}>Teléfono de Contacto del Administrador / Dueño (Para Alertas)</Text>
                 <TextInput
                   style={styles.textInput}
                   value={phone}
@@ -789,20 +1059,129 @@ export default function OnboardingScreen() {
                   placeholderTextColor="#94A3B8"
                 />
                 <Text style={styles.inputHelper}>
-                  A este número se enviarán las alertas urgentes de WhatsApp cuando una clienta solicite atención humana o surja un caso especial.
+                  A este número se enviarán las alertas urgentes de WhatsApp cuando un cliente solicite hablar con una persona o requiera asistencia especial.
                 </Text>
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Política de Cancelación y Reprogramación</Text>
+                <Text style={styles.inputLabel}>Política Comercial, Cancelaciones o Garantías</Text>
                 <TextInput
                   style={[styles.textInput, { height: 70 }]}
                   multiline
                   value={cancellationPolicy}
                   onChangeText={setCancellationPolicy}
-                  placeholder="Ej. Cancelaciones o cambios de turno con al menos 24 hs de anticipación sin costo."
+                  placeholder="Ej. Cancelaciones o reprogramaciones con al menos 24 hs de anticipación sin cargo."
                   placeholderTextColor="#94A3B8"
                 />
+              </View>
+
+              {/* Editor Visual de Horarios de Atención del Negocio */}
+              <View style={[styles.dualModeExplanation, { marginTop: 12, marginBottom: 20 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  <View>
+                    <Text style={styles.dualTitle}>🕒 Horarios de Atención del Negocio</Text>
+                    <Text style={styles.inputHelper}>
+                      Define qué días está abierto tu negocio y en qué horario (formato HH:MM, ej. 09:00 a 18:00).
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.refreshSmallBtn, { paddingHorizontal: 10, paddingVertical: 7, backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
+                    onPress={copyMondayToWeekdays}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>
+                      ⚡ Copiar Lunes a Lun-Vie
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {[
+                  { key: 'monday', label: 'Lunes' },
+                  { key: 'tuesday', label: 'Martes' },
+                  { key: 'wednesday', label: 'Miércoles' },
+                  { key: 'thursday', label: 'Jueves' },
+                  { key: 'friday', label: 'Viernes' },
+                  { key: 'saturday', label: 'Sábado' },
+                  { key: 'sunday', label: 'Domingo' }
+                ].map((dayInfo) => {
+                  const row = businessHours.find((h) => h.day === dayInfo.key) || {
+                    day: dayInfo.key,
+                    open: '09:00',
+                    close: '18:00',
+                    isOpen: false
+                  };
+                  return (
+                    <View
+                      key={dayInfo.key}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: row.isOpen ? '#FFFFFF' : '#F8FAFC',
+                        borderWidth: 1,
+                        borderColor: row.isOpen ? '#CBD5E1' : '#E2E8F0',
+                        borderRadius: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        marginBottom: 8,
+                        flexWrap: 'wrap',
+                        gap: 10
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 160, gap: 10 }}>
+                        <TouchableOpacity
+                          onPress={() => toggleDayOpen(dayInfo.key)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            backgroundColor: row.isOpen ? '#DCFCE7' : '#F1F5F9',
+                            borderWidth: 1,
+                            borderColor: row.isOpen ? '#86EFAC' : '#CBD5E1'
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: row.isOpen ? '#15803D' : '#64748B'
+                            }}
+                          >
+                            {row.isOpen ? '🟢 Abierto' : '⚪ Cerrado'}
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                          {dayInfo.label}
+                        </Text>
+                      </View>
+
+                      {row.isOpen ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={{ fontSize: 12, color: '#64748B' }}>De</Text>
+                          <TextInput
+                            style={[styles.textInput, { width: 80, flex: 0, textAlign: 'center', paddingVertical: 6 }]}
+                            value={row.open}
+                            onChangeText={(val) => updateDayTime(dayInfo.key, 'open', val)}
+                            placeholder="09:00"
+                            maxLength={5}
+                          />
+                          <Text style={{ fontSize: 12, color: '#64748B' }}>a</Text>
+                          <TextInput
+                            style={[styles.textInput, { width: 80, flex: 0, textAlign: 'center', paddingVertical: 6 }]}
+                            value={row.close}
+                            onChangeText={(val) => updateDayTime(dayInfo.key, 'close', val)}
+                            placeholder="18:00"
+                            maxLength={5}
+                          />
+                          <Text style={{ fontSize: 12, color: '#64748B' }}>hs</Text>
+                        </View>
+                      ) : (
+                        <Text style={{ fontSize: 12, color: '#94A3B8', fontStyle: 'italic' }}>
+                          Sin atención al público este día
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
 
               <TouchableOpacity
@@ -815,7 +1194,7 @@ export default function OnboardingScreen() {
                 ) : (
                   <>
                     <Save size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={styles.primaryBtnText}>Guardar Datos del Salón</Text>
+                    <Text style={styles.primaryBtnText}>Guardar Datos y Horarios del Negocio</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -824,7 +1203,7 @@ export default function OnboardingScreen() {
                 <View style={styles.feedbackBox}>
                   <CheckCircle size={16} color="#16A34A" style={{ marginRight: 8 }} />
                   <Text style={styles.feedbackText}>
-                    ¡Datos guardados con éxito! El Asistente de IA ya cuenta con la información actualizada.
+                    ¡Datos y horarios guardados con éxito! El Asistente de IA ya cuenta con la información actualizada.
                   </Text>
                 </View>
               )}

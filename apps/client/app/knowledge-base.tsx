@@ -74,7 +74,7 @@ export default function KnowledgeBaseScreen() {
     const item = {
       name: newServiceName.trim(),
       category: 'General',
-      description: newServiceDesc.trim() || 'Servicio integral del salón',
+      description: newServiceDesc.trim() || 'Servicio profesional de nuestro negocio',
       price: parseFloat(newServicePrice) || 30,
       currency: 'USD',
       durationMinutes: parseInt(newServiceDuration, 10) || 60,
@@ -158,7 +158,7 @@ export default function KnowledgeBaseScreen() {
         >
           <Tag size={16} color={activeTab === 'services' ? '#1A73E8' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'services' && styles.tabTextActive]}>
-            Tratamientos & Tarifas ({services.length})
+            Servicios & Tarifas ({services.length})
           </Text>
         </TouchableOpacity>
 
@@ -183,7 +183,7 @@ export default function KnowledgeBaseScreen() {
               <View style={styles.infoBanner}>
                 <BookOpen size={16} color="#1A73E8" style={{ marginRight: 8 }} />
                 <Text style={styles.infoBannerText}>
-                  Si no tienes Scalinky vinculado, el asistente utiliza esta lista para cotizar y dar turnos por WhatsApp.
+                  Si no tienes Scalinky vinculado, el asistente utiliza esta lista para cotizar, responder consultas y coordinar turnos por WhatsApp.
                 </Text>
               </View>
 
@@ -192,20 +192,20 @@ export default function KnowledgeBaseScreen() {
                 onPress={() => setShowAddModal(!showAddModal)}
               >
                 <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>Nuevo Tratamiento</Text>
+                <Text style={styles.primaryBtnText}>Nuevo Servicio</Text>
               </TouchableOpacity>
             </View>
 
             {/* Modal / Formulario Agregar Servicio */}
             {showAddModal && (
               <View style={styles.formCard}>
-                <Text style={styles.formTitle}>Dar de Alta Nuevo Tratamiento</Text>
+                <Text style={styles.formTitle}>Dar de Alta Nuevo Servicio o Prestación</Text>
                 <View style={styles.formGrid}>
                   <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Nombre del Servicio</Text>
+                    <Text style={styles.fieldLabel}>Nombre del Servicio / Producto</Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. Corte & Nutrición Capilar"
+                      placeholder="Ej. Mantenimiento Mensual, Consulta General, Reparación..."
                       placeholderTextColor="#94A3B8"
                       value={newServiceName}
                       onChangeText={setNewServiceName}
@@ -237,7 +237,7 @@ export default function KnowledgeBaseScreen() {
                     <Text style={styles.fieldLabel}>Descripción Breve</Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. Incluye lavado, masaje capilar y peinado final"
+                      placeholder="Ej. Incluye revisión técnica, insumos y garantía"
                       placeholderTextColor="#94A3B8"
                       value={newServiceDesc}
                       onChangeText={setNewServiceDesc}
@@ -262,7 +262,7 @@ export default function KnowledgeBaseScreen() {
                     ) : (
                       <>
                         <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                        <Text style={styles.saveBtnText}>Guardar Tratamiento</Text>
+                        <Text style={styles.saveBtnText}>Guardar Servicio</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -279,9 +279,9 @@ export default function KnowledgeBaseScreen() {
             ) : services.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Tag size={44} color="#94A3B8" />
-                <Text style={styles.emptyTitle}>No hay tratamientos cargados aún</Text>
+                <Text style={styles.emptyTitle}>No hay servicios cargados aún</Text>
                 <Text style={styles.emptySub}>
-                  Agrega los servicios que ofreces en tu salón para que el asistente de WhatsApp pueda informar los precios exactos a tus clientas.
+                  Agrega los servicios, mantenimientos o prestaciones que ofrece tu negocio para que el asistente de WhatsApp pueda informar los precios exactos a tus clientes.
                 </Text>
               </View>
             ) : (
@@ -301,7 +301,7 @@ export default function KnowledgeBaseScreen() {
                     <Text style={styles.servicePrice}>${srv.price}</Text>
 
                     <Text style={styles.serviceDesc}>
-                      {srv.description || 'Tratamiento personalizado en salón.'}
+                      {srv.description || 'Servicio disponible en nuestro catálogo.'}
                     </Text>
 
                     <View style={styles.serviceFooter}>

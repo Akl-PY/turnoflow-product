@@ -8,7 +8,7 @@ import { Appointment } from '../../entities/appointment.entity';
 import { Conversation } from '../../entities/conversation.entity';
 import { Message } from '../../entities/message.entity';
 import { AgentConfigEntity } from '../../entities/agent-config.entity';
-import { ScalinkyService } from '../integrations/scalinky.service';
+import { ScalinkyService, ScalinkyCachedSnapshot } from '../integrations/scalinky.service';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 import { GeminiProvider } from './providers/gemini.provider';
@@ -327,35 +327,48 @@ export class AiService {
     const activeRole = this.supervisorAgent.determineActiveRole(userText);
     const provider = this.getProvider(overrideProvider);
 
-    // 4. Preparar contexto y herramientas según el rol
-    const tools =
-      activeRole === AgentRoleType.BOOKING
+    // 4. Preparar contexto y herramientas según el rol y estado de agenda
+    const bookingEnabled = this.extractBookingEnabled(profile);
+    const rawTools =
+      activeRole === AgentRoleType.BOOKING && bookingEnabled
         ? this.bookingAgent.getToolDefinitions()
         : this.receptionistAgent.getToolDefinitions();
+
+    const tools = bookingEnabled
+      ? rawTools
+      : rawTools.filter(
+          (t) =>
+            !['check_availability', 'check_available_slots', 'confirm_appointment', 'cancel_appointment'].includes(
+              t.name
+            )
+        );
 
     const scalinkySlug = this.extractScalinkySlug(profile);
     let scalinkyInfo = '';
 
-    if (scalinkySlug && this.scalinkyService) {
+    if (bookingEnabled && scalinkySlug && this.scalinkyService) {
       try {
-        const isHealthy = await this.scalinkyService.isHealthy();
-        if (isHealthy) {
-          const scServices = await this.scalinkyService.getServices(scalinkySlug);
-          if (scServices.length > 0) {
-            const scStaff = await this.scalinkyService.getStaff(scalinkySlug);
-            const staffListStr = scStaff.map((s) => s.name).join(', ');
-            const servListStr = scServices
-              .map((s) => `- ${s.name}: $${s.price} (Duración: ${s.duration_minutes} min)`)
-              .join('\n');
-            scalinkyInfo = `\n\nSISTEMA DE TURNOS Y PRECIOS EN VIVO (Scalinky - Negocio: ${scalinkySlug}):
-Profesionales activos: ${staffListStr || 'Staff del salón'}
-Servicios y Precios vigentes:
+        const snapshot = await this.getOrSyncScalinkySnapshot(profile);
+        if (snapshot && snapshot.synced && snapshot.services.length > 0 && snapshot.staff.length > 0) {
+          const staffListStr = snapshot.staff.map((s) => `${s.name} (ID: ${s.staff_id})`).join(', ');
+          const servListStr = snapshot.services
+            .map((s) => `- ${s.name}: $${s.price} (Duración: ${s.duration_minutes} min | ID: ${s.service_id})`)
+            .join('\n');
+          scalinkyInfo = `\n\nSISTEMA DE AGENDA SINCRONIZADO CON SCALINKY (Negocio: "${scalinkySlug}"):
+Horario operativo en Scalinky: ${snapshot.businessHoursSummary || 'Según disponibilidad de empleados'}
+Empleados / Profesionales activos: ${staffListStr}
+Servicios y Precios vigentes en Scalinky:
 ${servListStr}
-(IMPORTANTE: Utiliza SIEMPRE estos precios y servicios para responder y cotizar al cliente).`;
-          }
+REGLAS DE SCALINKY:
+- Utiliza SIEMPRE estos servicios, precios y empleados sincronizados de Scalinky.
+- Los turnos disponibles NUNCA los inventes: consúltalos SIEMPRE en tiempo real usando la herramienta 'check_availability' (o 'check_available_slots').
+- Si el cliente menciona un empleado específico, pasa su nombre en 'staffName'; si no tiene preferencia, se consultarán los turnos disponibles de todos los empleados.`;
+        } else if (snapshot && !snapshot.synced) {
+          scalinkyInfo = `\n\nALERTA DE AGENDA SCALINKY (${scalinkySlug}): Estado ${snapshot.status} (${snapshot.message || 'Desincronizado'}).
+IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar una cita, utiliza la herramienta 'handoff_to_human' e infórmale con amabilidad que la agenda está desincronizada en este instante y que un miembro del equipo humano le atenderá enseguida.`;
         }
       } catch (err: any) {
-        this.logger.warn(`No se pudo precargar catálogo Scalinky: ${err.message}`);
+        this.logger.warn(`No se pudo cargar snapshot Scalinky: ${err.message}`);
       }
     }
 
@@ -374,12 +387,12 @@ ${servListStr}
         ? profile.businessHours
             .map((h) => `${dayNames[h.day] || h.day}: ${h.isOpen ? `${h.open} a ${h.close} hs` : 'Cerrado'}`)
             .join(' | ')
-        : 'Lunes a Viernes de 09:00 a 20:00 hs, Sábados de 09:00 a 18:00 hs (Domingos cerrado)';
+        : 'Lunes a Viernes de 09:00 a 18:00 hs, Sábados de 09:00 a 13:00 hs (Domingos cerrado)';
 
     const servicesSummary =
       Array.isArray(profile.services) && profile.services.length > 0
         ? profile.services
-            .map((s) => `- ${s.name}: $${s.price} ${s.currency || profile.currency || 'USD'} (${s.durationMinutes || 60} min)`)
+            .map((s) => `- ${s.name}: $${s.price} ${s.currency || profile.currency || 'USD'} (${s.durationMinutes || 60} min)${s.description ? ` — ${s.description}` : ''}`)
             .join('\n')
         : 'Consultar mediante herramienta get_services';
 
@@ -405,25 +418,30 @@ ${servListStr}
     }
     const isoDate = now.toISOString().split('T')[0];
 
-    const systemPrompt = `Eres el Asistente Inteligente de Recepción y Ventas de ${profile.businessName}.
-Rubro: ${profile.vertical}.
-Ubicación: ${profile.location}.
-Horarios de Atención: ${hoursList}.
+    const bookingDirective = bookingEnabled
+      ? `4. CONSULTA DE DISPONIBILIDAD Y TURNOS: La agenda está HABILITADA. Para verificar turnos libres, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD), el nombre/ID del servicio y opcionalmente el nombre del empleado.`
+      : `4. AGENDA DESHABILITADA: Este negocio tiene DESHABILITADA la toma automática de turnos por calendario. Responde todas las consultas sobre servicios, precios, presupuestos, horarios de atención y ubicación. Si el cliente quiere contratar un servicio, coordinar una visita o reservar, regístralo o utiliza 'handoff_to_human' e indícale que ya avisaste a un asesor del equipo para coordinarlo personalmente.`;
+
+    const systemPrompt = `Eres el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
+Descripción del Negocio: ${profile.description || 'Atención comercial y servicios profesionales'}.
+Ubicación / Cobertura: ${profile.location}.
+Horarios de Atención del Negocio: ${hoursList}.
 Zona Horaria: ${timeZone}.
 FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
-Política de Cancelación: ${profile.cancellationPolicy}.
-Servicios del Negocio:
+Política Comercial / Cancelaciones: ${profile.cancellationPolicy}.
+Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
+Catálogo Propio del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
 
 REGLAS ESTRICTAS DE CONVERSACIÓN:
-1. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un servicio específico (ej. "puesta a punto", "limpieza general", etc.) en mensajes anteriores, NO le vuelvas a preguntar qué servicio necesita. Usa ese servicio directamente para cotizar o verificar disponibilidad.
-2. CÁLCULO DE FECHAS: Cuando el cliente diga "mañana", "hoy", "este viernes", calcula la fecha exacta en base a la FECHA ACTUAL (${isoDate}).
-3. NO SALUDES REPETIDAMENTE: Si la conversación ya está en curso (hay mensajes previos en el historial), NO vuelvas a decir "¡Hola!" o "Bienvenido/a". Responde de forma directa, ágil y conversacional como un humano en WhatsApp.
-4. CONSULTA DE DISPONIBILIDAD: Para verificar turnos libres, llama SIEMPRE a la herramienta 'check_availability' con la fecha calculada (YYYY-MM-DD) y el nombre del servicio.
-5. NO INVENTES: No inventes precios ni servicios que no estén en la lista.
-6. ATENCIÓN HUMANA: Si el cliente solicita explícitamente hablar con una persona, recepcionista o dueño, o expresa un reclamo urgente: utiliza SIEMPRE la herramienta handoff_to_human y confírmale de forma amable que ya avisaste al equipo humano y que le responderán a la brevedad.`;
+1. ADÁPTATE AL RUBRO REAL DEL NEGOCIO: Responde acorde a la actividad de "${profile.businessName}" (${profile.description || 'servicios generales'}). Nunca asumas un rubro distinto al descripto en el catálogo.
+2. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un servicio o producto específico en mensajes anteriores, NO le vuelvas a preguntar qué servicio necesita.
+3. CÁLCULO DE FECHAS Y CONCISIÓN: Cuando el cliente diga "mañana", "hoy", "este viernes", calcula la fecha exacta en base a la FECHA ACTUAL (${isoDate}). Si la conversación ya está en curso, NO vuelvas a saludar con "¡Hola!"; responde de forma directa, natural y empática.
+${bookingDirective}
+5. NO INVENTES: No inventes precios, empleados, horarios ni servicios que no figuren en el catálogo.
+6. ATENCIÓN HUMANA: Si el cliente solicita hablar con una persona, dueño o encargado, si hay una urgencia técnica o si la agenda arroja estado desincronizado: utiliza SIEMPRE la herramienta 'handoff_to_human' y confírmale que ya notificaste al equipo humano para que le atiendan a la brevedad.`;
 
     const historyMessages: ChatMessage[] = [];
 
@@ -604,12 +622,28 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
           timestamp: new Date().toISOString()
         });
 
-        if (tc.name === 'handoff_to_human') {
+        if (tc.name === 'handoff_to_human' || result.data?.handoffTriggered) {
           handoffToHuman = true;
-          handoffReason = (tc.arguments.reason as string) || 'Solicitud de operador o caso especial';
+          handoffReason =
+            (tc.arguments?.reason as string) ||
+            result.data?.reason ||
+            'Solicitud de operador o caso especial';
           await this.conversationRepo.update(conversationId, {
             status: ConversationStatus.HUMAN_TAKEOVER
           });
+        }
+
+        if (result.data?.scalinkyDesynced) {
+          await this.conversationRepo.update(conversationId, {
+            status: ConversationStatus.HUMAN_TAKEOVER
+          });
+          return {
+            replyText:
+              'En este momento nuestra agenda se encuentra desincronizada. Ya le avisé a un miembro de nuestro equipo humano para que te atienda personalmente y coordine con vos a la brevedad.',
+            toolExecutions,
+            handoffToHuman: true,
+            handoffReason: result.data?.reason || 'Agenda Scalinky desincronizada'
+          };
         }
 
         messages.push({
@@ -622,11 +656,25 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
     }
 
     return {
-      replyText: 'He tomado nota de tu consulta. ¿Deseas que te reservemos un horario para esta semana?',
+      replyText: 'He tomado nota de tu consulta. ¿En qué más te puedo ayudar?',
       toolExecutions,
       handoffToHuman,
       handoffReason
     };
+  }
+
+  private extractBookingEnabled(profile: BusinessProfile): boolean {
+    if (profile?.specialInstructions) {
+      try {
+        const parsed = JSON.parse(profile.specialInstructions);
+        if (typeof parsed?.bookingEnabled === 'boolean') {
+          return parsed.bookingEnabled;
+        }
+      } catch {
+        // Ignorar si no es JSON
+      }
+    }
+    return true;
   }
 
   private extractScalinkySlug(profile: BusinessProfile): string | null {
@@ -646,6 +694,54 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
     return null;
   }
 
+  private async getOrSyncScalinkySnapshot(profile: BusinessProfile): Promise<ScalinkyCachedSnapshot | null> {
+    const slug = this.extractScalinkySlug(profile);
+    if (!slug || !this.scalinkyService) return null;
+
+    if (profile?.specialInstructions) {
+      try {
+        const parsed = JSON.parse(profile.specialInstructions);
+        const cached: ScalinkyCachedSnapshot | undefined = parsed?.scalinkyCache;
+        if (
+          cached &&
+          cached.slug === slug &&
+          cached.synced === true &&
+          Array.isArray(cached.services) &&
+          cached.services.length > 0 &&
+          Array.isArray(cached.staff) &&
+          cached.staff.length > 0
+        ) {
+          return cached;
+        }
+      } catch {
+        // No es JSON
+      }
+    }
+
+    // Si no estaba guardado en caché todavía, sincronizar por primera vez y guardarlo
+    return this.forceSyncScalinkySnapshot(profile, slug);
+  }
+
+  private async forceSyncScalinkySnapshot(
+    profile: BusinessProfile,
+    slug: string
+  ): Promise<ScalinkyCachedSnapshot | null> {
+    if (!this.scalinkyService) return null;
+    const snapshot = await this.scalinkyService.syncBusinessSnapshot(slug);
+    try {
+      const prev = profile.specialInstructions ? JSON.parse(profile.specialInstructions) : {};
+      prev.scalinkySlug = slug;
+      prev.scalinkyCache = snapshot;
+      profile.specialInstructions = JSON.stringify(prev);
+      if (this.businessProfileRepo && profile.id) {
+        await this.businessProfileRepo.save(profile);
+      }
+    } catch (err: any) {
+      this.logger.warn(`No se pudo persistir caché de Scalinky: ${err.message}`);
+    }
+    return snapshot;
+  }
+
   private async executeTool(
     organizationId: string,
     toolCall: ToolCall,
@@ -661,9 +757,9 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
 
         if (scalinkySlug && this.scalinkyService) {
           try {
-            const scServices = await this.scalinkyService.getServices(scalinkySlug);
-            if (scServices.length > 0) {
-              list = scServices.map((s) => ({
+            const snapshot = await this.getOrSyncScalinkySnapshot(profile);
+            if (snapshot && snapshot.services.length > 0) {
+              list = snapshot.services.map((s) => ({
                 id: s.service_id,
                 name: s.name,
                 price: s.price,
@@ -694,8 +790,10 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
 
         if (scalinkySlug && this.scalinkyService) {
           try {
-            const scServices = await this.scalinkyService.getServices(scalinkySlug);
-            const scFound = scServices.find((s) => s.name.toLowerCase().includes(query));
+            const snapshot = await this.getOrSyncScalinkySnapshot(profile);
+            const scFound = (snapshot?.services || []).find((s) =>
+              s.name.toLowerCase().includes(query)
+            );
             if (scFound) {
               return {
                 success: true,
@@ -738,12 +836,12 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
           Array.isArray(profile.businessHours) && profile.businessHours.length > 0
             ? profile.businessHours
             : [
-                { day: 'monday', open: '09:00', close: '20:00', isOpen: true },
-                { day: 'tuesday', open: '09:00', close: '20:00', isOpen: true },
-                { day: 'wednesday', open: '09:00', close: '20:00', isOpen: true },
-                { day: 'thursday', open: '09:00', close: '20:00', isOpen: true },
-                { day: 'friday', open: '09:00', close: '20:00', isOpen: true },
-                { day: 'saturday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'monday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'tuesday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'wednesday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'thursday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'friday', open: '09:00', close: '18:00', isOpen: true },
+                { day: 'saturday', open: '09:00', close: '13:00', isOpen: true },
                 { day: 'sunday', open: '00:00', close: '00:00', isOpen: false }
               ];
         return { success: true, data: hours };
@@ -792,35 +890,153 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
 
       case 'check_availability':
       case 'check_available_slots': {
+        if (!this.extractBookingEnabled(profile)) {
+          return {
+            success: false,
+            data: {
+              agendaDisabled: true,
+              handoffTriggered: true,
+              reason: 'Agenda deshabilitada por configuración del negocio',
+              message: 'La agenda automática está deshabilitada. Deriva al cliente con un asesor humano.'
+            }
+          };
+        }
+
         const date = (args.date as string) || new Date().toISOString().split('T')[0];
-        let slots = await this.calculateAvailableSlots(organizationId, date);
+        const requestedServiceRaw = ((args.serviceId || args.serviceName || '') as string).toLowerCase().trim();
+        const requestedStaffRaw = ((args.staffName || '') as string).toLowerCase().trim();
 
         const slug = this.extractScalinkySlug(profile);
         if (slug && this.scalinkyService) {
-          try {
-            const staffList = await this.scalinkyService.getStaff(slug);
-            const serviceList = await this.scalinkyService.getServices(slug);
-            if (staffList.length > 0 && serviceList.length > 0) {
-              const staffId = staffList[0].staff_id;
-              const serviceId = (args.serviceId as string) || serviceList[0].service_id;
-              const possibilities = await this.scalinkyService.getPossibilities(slug, staffId, serviceId);
-              const dayMatch = possibilities.find((p) => p.date === date);
-              if (dayMatch && dayMatch.items.length > 0) {
-                const scalinkySlots = dayMatch.items.flatMap((it) => it.slots);
-                if (scalinkySlots.length > 0) {
-                  slots = scalinkySlots;
-                }
+          let snapshot = await this.getOrSyncScalinkySnapshot(profile);
+
+          // Si no está sincronizado o está incompleto, intentar resincronizar automáticamente 1 vez
+          if (!snapshot || !snapshot.synced || snapshot.services.length === 0 || snapshot.staff.length === 0) {
+            this.logger.warn(`[SCALINKY SELF-HEAL] Intentando resincronizar negocio "${slug}" antes de consultar turnos...`);
+            snapshot = await this.forceSyncScalinkySnapshot(profile, slug);
+          }
+
+          if (!snapshot || !snapshot.synced || snapshot.services.length === 0 || snapshot.staff.length === 0) {
+            return {
+              success: false,
+              data: {
+                scalinkyDesynced: true,
+                handoffTriggered: true,
+                status: 'DESINCRONIZADO',
+                reason: `Scalinky desincronizado (${snapshot?.message || 'sin conexión o sin datos'})`,
+                message: 'No se pudo sincronizar con Scalinky. Dile al cliente que aguarde a ser atendido por un humano.'
+              }
+            };
+          }
+
+          const resolveAndQuery = async (snap: ScalinkyCachedSnapshot) => {
+            const matchedService =
+              snap.services.find(
+                (s) =>
+                  s.service_id.toLowerCase() === requestedServiceRaw ||
+                  s.name.toLowerCase().includes(requestedServiceRaw) ||
+                  requestedServiceRaw.includes(s.name.toLowerCase())
+              ) || snap.services[0];
+
+            const matchedStaff = requestedStaffRaw
+              ? snap.staff.find(
+                  (st) =>
+                    st.staff_id.toLowerCase() === requestedStaffRaw ||
+                    st.name.toLowerCase().includes(requestedStaffRaw) ||
+                    requestedStaffRaw.includes(st.name.toLowerCase())
+                )
+              : undefined;
+
+            const perStaffResults = await this.scalinkyService!.getLivePossibilitiesPerStaff(
+              slug,
+              matchedService.service_id,
+              snap.staff,
+              matchedStaff?.staff_id
+            );
+
+            const byEmployee: Array<{ employeeName: string; staffId: string; slots: string[] }> = [];
+            const allSlotsSet = new Set<string>();
+
+            for (const entry of perStaffResults) {
+              const dayMatch = entry.possibilities.find((p) => p.date === date);
+              const empSlots = dayMatch
+                ? dayMatch.items.flatMap((it) => it.slots || [])
+                : [];
+              if (empSlots.length > 0) {
+                byEmployee.push({
+                  employeeName: entry.staffName,
+                  staffId: entry.staffId,
+                  slots: empSlots
+                });
+                empSlots.forEach((s) => allSlotsSet.add(s));
               }
             }
-          } catch (e: any) {
-            this.logger.warn(`Scalinky availability check notice: ${e.message}`);
+
+            return {
+              serviceName: matchedService.name,
+              serviceId: matchedService.service_id,
+              byEmployee,
+              availableSlots: Array.from(allSlotsSet).sort()
+            };
+          };
+
+          try {
+            const liveData = await resolveAndQuery(snapshot);
+            return {
+              success: true,
+              data: {
+                date,
+                source: 'scalinky',
+                serviceName: liveData.serviceName,
+                isAvailable: liveData.availableSlots.length > 0,
+                availableSlots: liveData.availableSlots,
+                availabilityByEmployee: liveData.byEmployee
+              }
+            };
+          } catch (err: any) {
+            this.logger.warn(
+              `[SCALINKY RETRY] Error consultando disponibilidad (${err.message}). Re-sincronizando snapshot y reintentando...`
+            );
+            const resynced = await this.forceSyncScalinkySnapshot(profile, slug);
+            if (resynced && resynced.synced) {
+              try {
+                const retryData = await resolveAndQuery(resynced);
+                return {
+                  success: true,
+                  data: {
+                    date,
+                    source: 'scalinky',
+                    serviceName: retryData.serviceName,
+                    isAvailable: retryData.availableSlots.length > 0,
+                    availableSlots: retryData.availableSlots,
+                    availabilityByEmployee: retryData.byEmployee
+                  }
+                };
+              } catch (retryErr: any) {
+                this.logger.error(`[SCALINKY DESYNC] Falló reintento en Scalinky: ${retryErr.message}`);
+              }
+            }
+
+            return {
+              success: false,
+              data: {
+                scalinkyDesynced: true,
+                handoffTriggered: true,
+                status: 'DESINCRONIZADO',
+                reason: 'Fallo al consultar disponibilidad en Scalinky tras reintentar sincronización',
+                message: 'Devuelve estado desincronizado y dile al cliente que espere a un humano.'
+              }
+            };
           }
         }
 
+        // Modo catálogo nativo de TurnoFlow
+        const slots = await this.calculateAvailableSlots(organizationId, date, profile);
         return {
           success: true,
           data: {
             date,
+            source: 'turnoflow',
             isAvailable: slots.length > 0,
             availableSlots: slots
           }
@@ -828,29 +1044,84 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
       }
 
       case 'confirm_appointment': {
+        if (!this.extractBookingEnabled(profile)) {
+          return {
+            success: false,
+            data: {
+              agendaDisabled: true,
+              handoffTriggered: true,
+              reason: 'Intento de reserva con agenda deshabilitada'
+            }
+          };
+        }
+
         const startTime = new Date(args.startTime as string);
-        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hora estándar
+        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+        const requestedServiceRaw = ((args.serviceId || '') as string).toLowerCase().trim();
+        const requestedStaffRaw = ((args.staffName || '') as string).toLowerCase().trim();
 
         let scalinkyBooking: any = null;
+        let resolvedServiceName = (args.serviceId as string) || 'Servicio General';
         const slug = this.extractScalinkySlug(profile);
-        if (slug && this.scalinkyService) {
-          try {
-            const staffList = await this.scalinkyService.getStaff(slug);
-            const serviceList = await this.scalinkyService.getServices(slug);
-            if (staffList.length > 0 && serviceList.length > 0) {
-              const staffId = staffList[0].staff_id;
-              const serviceId = (args.serviceId as string) || serviceList[0].service_id;
-              const dateStr = startTime.toISOString().split('T')[0];
-              const possibilities = await this.scalinkyService.getPossibilities(slug, staffId, serviceId);
-              const dayMatch = possibilities.find((p) => p.date === dateStr);
-              const availId = dayMatch?.items[0]?.availability_id;
 
-              if (availId) {
-                const timeStr = `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`;
-                const endTimeStr = `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
-                scalinkyBooking = await this.scalinkyService.bookAppointment(slug, {
-                  service_id: serviceId,
-                  availability_id: availId,
+        if (slug && this.scalinkyService) {
+          let snapshot = await this.getOrSyncScalinkySnapshot(profile);
+          if (!snapshot || !snapshot.synced) {
+            snapshot = await this.forceSyncScalinkySnapshot(profile, slug);
+          }
+
+          if (!snapshot || !snapshot.synced || snapshot.services.length === 0 || snapshot.staff.length === 0) {
+            return {
+              success: false,
+              data: {
+                scalinkyDesynced: true,
+                handoffTriggered: true,
+                status: 'DESINCRONIZADO',
+                reason: 'Scalinky desincronizado al intentar confirmar turno'
+              }
+            };
+          }
+
+          const attemptScalinkyBook = async (snap: ScalinkyCachedSnapshot) => {
+            const matchedService =
+              snap.services.find(
+                (s) =>
+                  s.service_id.toLowerCase() === requestedServiceRaw ||
+                  s.name.toLowerCase().includes(requestedServiceRaw) ||
+                  requestedServiceRaw.includes(s.name.toLowerCase())
+              ) || snap.services[0];
+
+            resolvedServiceName = matchedService.name;
+
+            const matchedStaff = requestedStaffRaw
+              ? snap.staff.find(
+                  (st) =>
+                    st.staff_id.toLowerCase() === requestedStaffRaw ||
+                    st.name.toLowerCase().includes(requestedStaffRaw) ||
+                    requestedStaffRaw.includes(st.name.toLowerCase())
+                )
+              : undefined;
+
+            const dateStr = startTime.toISOString().split('T')[0];
+            const timeStr = `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`;
+            const endTimeStr = `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
+
+            const perStaff = await this.scalinkyService!.getLivePossibilitiesPerStaff(
+              slug,
+              matchedService.service_id,
+              snap.staff,
+              matchedStaff?.staff_id
+            );
+
+            for (const entry of perStaff) {
+              const dayMatch = entry.possibilities.find((p) => p.date === dateStr);
+              if (!dayMatch) continue;
+              const slotItem =
+                dayMatch.items.find((it) => (it.slots || []).includes(timeStr)) || dayMatch.items[0];
+              if (slotItem?.availability_id) {
+                return this.scalinkyService!.bookAppointment(slug, {
+                  service_id: matchedService.service_id,
+                  availability_id: slotItem.availability_id,
                   startAt: timeStr,
                   endAt: endTimeStr,
                   date: dateStr,
@@ -860,8 +1131,39 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
                 });
               }
             }
-          } catch (e: any) {
-            this.logger.warn(`Scalinky appointment booking notice: ${e.message}`);
+            throw new Error('SLOT_NOT_AVAILABLE_IN_SCALINKY');
+          };
+
+          try {
+            scalinkyBooking = await attemptScalinkyBook(snapshot);
+          } catch (bookErr: any) {
+            this.logger.warn(`[SCALINKY BOOK RETRY] Re-sincronizando y reintentando reserva: ${bookErr.message}`);
+            const resynced = await this.forceSyncScalinkySnapshot(profile, slug);
+            if (resynced && resynced.synced) {
+              try {
+                scalinkyBooking = await attemptScalinkyBook(resynced);
+              } catch {
+                return {
+                  success: false,
+                  data: {
+                    scalinkyDesynced: true,
+                    handoffTriggered: true,
+                    status: 'DESINCRONIZADO',
+                    reason: 'No se pudo registrar el turno en Scalinky tras resincronizar'
+                  }
+                };
+              }
+            } else {
+              return {
+                success: false,
+                data: {
+                  scalinkyDesynced: true,
+                  handoffTriggered: true,
+                  status: 'DESINCRONIZADO',
+                  reason: 'Scalinky fuera de línea al confirmar turno'
+                }
+              };
+            }
           }
         }
 
@@ -870,7 +1172,7 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
           customerName: args.customerName as string,
           customerPhone: args.customerPhone as string,
           serviceId: (args.serviceId as string) || 'srv-default',
-          serviceName: (args.serviceId as string) || 'Tratamiento Estético',
+          serviceName: resolvedServiceName,
           startTime,
           endTime,
           status: AppointmentStatus.CONFIRMED,
@@ -934,17 +1236,54 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
     return this.followUpAgent.parseResult(response.content);
   }
 
-  private async calculateAvailableSlots(organizationId: string, dateStr: string): Promise<string[]> {
-    // Franjas de ejemplo entre 09:00 y 18:00
-    const candidateSlots = ['10:00', '11:30', '14:00', '15:30', '17:00'];
+  private async calculateAvailableSlots(
+    organizationId: string,
+    dateStr: string,
+    profile?: BusinessProfile
+  ): Promise<string[]> {
+    let candidateSlots = ['09:00', '10:00', '11:30', '14:00', '15:30', '17:00'];
+
+    if (profile && Array.isArray(profile.businessHours) && profile.businessHours.length > 0) {
+      const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const parsedDate = new Date(`${dateStr}T12:00:00Z`);
+      if (!isNaN(parsedDate.getTime())) {
+        const dayKey = dayKeys[parsedDate.getUTCDay()];
+        const daySched = profile.businessHours.find((h) => h.day === dayKey);
+        if (daySched) {
+          if (!daySched.isOpen) {
+            return [];
+          }
+          const openH = parseInt((daySched.open || '09:00').split(':')[0], 10);
+          const closeH = parseInt((daySched.close || '18:00').split(':')[0], 10);
+          if (!isNaN(openH) && !isNaN(closeH) && closeH > openH) {
+            const generated: string[] = [];
+            for (let h = openH; h < closeH; h++) {
+              generated.push(`${String(h).padStart(2, '0')}:00`);
+            }
+            if (generated.length > 0) {
+              candidateSlots = generated;
+            }
+          }
+        }
+      }
+    }
+
     const existing = await this.appointmentRepo.find({
       where: { organizationId, status: AppointmentStatus.CONFIRMED }
     });
 
-    const bookedHours = existing.map((a) => {
-      const d = new Date(a.startTime);
-      return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-    });
+    const bookedHours = existing
+      .filter((a) => {
+        try {
+          return new Date(a.startTime).toISOString().split('T')[0] === dateStr;
+        } catch {
+          return false;
+        }
+      })
+      .map((a) => {
+        const d = new Date(a.startTime);
+        return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+      });
 
     return candidateSlots.filter((slot) => !bookedHours.includes(slot));
   }
@@ -1024,6 +1363,7 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
     const textLower = userText.toLowerCase().trim();
     const services = Array.isArray(profile.services) ? profile.services : [];
     const currency = profile.currency || 'USD';
+    const bookingEnabled = this.extractBookingEnabled(profile);
 
     // 1. Coincidencia con servicio específico
     const matchedService = services.find(
@@ -1036,8 +1376,11 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
     );
 
     if (matchedService) {
+      const followUpQuestion = bookingEnabled
+        ? '¿Te gustaría que verifiquemos disponibilidad para agendar?'
+        : '¿Te gustaría que un asesor de nuestro equipo se comunique con vos para coordinarlo?';
       return {
-        content: `El servicio de ${matchedService.name} tiene un valor de $${matchedService.price} ${currency} (${matchedService.durationMinutes || 60} min). ${matchedService.description ? matchedService.description + '. ' : ''}¿Te gustaría que verifiquemos disponibilidad para agendar tu turno?`,
+        content: `El servicio de ${matchedService.name} tiene un valor de $${matchedService.price} ${currency} (${matchedService.durationMinutes || 60} min). ${matchedService.description ? matchedService.description + '. ' : ''}${followUpQuestion}`,
         usage: { inputTokens: 0, outputTokens: 0 }
       };
     }
@@ -1058,7 +1401,7 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
         .map((s) => `• ${s.name}: $${s.price} ${currency}`)
         .join('\n');
       return {
-        content: `En ${profile.businessName} te ofrecemos los siguientes servicios principales:\n\n${topServices}\n\n¿Te interesa consultar o agendar alguno en particular?`,
+        content: `En ${profile.businessName} ofrecemos:\n\n${topServices}\n\n¿Te interesa consultar por alguno en particular?`,
         usage: { inputTokens: 0, outputTokens: 0 }
       };
     }
@@ -1074,8 +1417,24 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
       textLower.includes('ubicacion') ||
       textLower.includes('ubicación')
     ) {
+      const dayNames: Record<string, string> = {
+        monday: 'Lun',
+        tuesday: 'Mar',
+        wednesday: 'Mié',
+        thursday: 'Jue',
+        friday: 'Vie',
+        saturday: 'Sáb',
+        sunday: 'Dom'
+      };
+      const hoursText =
+        Array.isArray(profile.businessHours) && profile.businessHours.length > 0
+          ? profile.businessHours
+              .filter((h) => h.isOpen)
+              .map((h) => `${dayNames[h.day] || h.day} ${h.open}-${h.close}`)
+              .join(', ')
+          : 'Lunes a Sábados';
       return {
-        content: `Estamos disponibles de Lunes a Sábados. ${profile.location ? `Nuestra ubicación es ${profile.location}. ` : ''}¿En qué horario te gustaría coordinar tu atención?`,
+        content: `Nuestros horarios de atención son: ${hoursText}. ${profile.location ? `Ubicación: ${profile.location}. ` : ''}¿En qué te podemos ayudar?`,
         usage: { inputTokens: 0, outputTokens: 0 }
       };
     }
@@ -1089,15 +1448,21 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
       textLower.includes('hoy') ||
       textLower.includes('disponib')
     ) {
+      if (!bookingEnabled) {
+        return {
+          content: `Ya le avisé a nuestro equipo en ${profile.businessName} para que un asesor se comunique contigo a la brevedad y coordine directamente con vos.`,
+          usage: { inputTokens: 0, outputTokens: 0 }
+        };
+      }
       return {
-        content: `Con gusto coordinamos tu turno en ${profile.businessName}. ¿Qué servicio necesitas y en qué día y rango de horario prefieres?`,
+        content: `Con gusto coordinamos en ${profile.businessName}. ¿Qué servicio necesitas y en qué día y rango de horario prefieres?`,
         usage: { inputTokens: 0, outputTokens: 0 }
       };
     }
 
     // 5. Saludo o respuesta general
     return {
-      content: `¡Hola! Bienvenido/a a ${profile.businessName}. Con gusto te ayudo con información de nuestros servicios, precios y coordinación de turnos. ¿En qué te puedo orientar hoy?`,
+      content: `¡Hola! Bienvenido/a a ${profile.businessName}. Con gusto te ayudo con información sobre nuestros servicios, precios y atención. ¿En qué te puedo orientar hoy?`,
       usage: { inputTokens: 0, outputTokens: 0 }
     };
   }

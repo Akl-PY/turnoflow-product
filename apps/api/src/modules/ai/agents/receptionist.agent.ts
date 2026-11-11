@@ -80,12 +80,13 @@ export class ReceptionistAgent {
       },
       {
         name: 'check_availability',
-        description: 'Verifica turnos libres en Google Calendar y base de datos para una fecha determinada.',
+        description: 'Verifica turnos y horarios libres en vivo para una fecha, servicio y empleado.',
         parameters: {
           type: 'object',
           properties: {
             date: { type: 'string', description: 'Fecha en formato YYYY-MM-DD' },
-            serviceName: { type: 'string', description: 'Nombre o ID del servicio para calcular duración' }
+            serviceName: { type: 'string', description: 'Nombre o ID del servicio solicitado' },
+            staffName: { type: 'string', description: 'Nombre o ID del empleado/profesional (opcional)' }
           },
           required: ['date']
         }

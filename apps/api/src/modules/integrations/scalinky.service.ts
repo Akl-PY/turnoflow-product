@@ -37,6 +37,18 @@ export interface CreateScalinkyAppointmentDto {
   status?: 'booked' | 'cancelled' | 'completed';
 }
 
+export interface ScalinkyCachedSnapshot {
+  slug: string;
+  synced: boolean;
+  status: 'SYNCED' | 'DESINCRONIZADO' | 'OFFLINE' | 'INCOMPLETE';
+  lastSyncedAt: string;
+  businessName?: string;
+  businessHoursSummary?: string;
+  services: ScalinkyServiceItem[];
+  staff: ScalinkyStaffItem[];
+  message?: string;
+}
+
 @Injectable()
 export class ScalinkyService {
   private readonly logger = new Logger(ScalinkyService.name);
@@ -147,5 +159,147 @@ export class ScalinkyService {
       this.logger.warn(`Verificación de dueño fallida en Scalinky (${slug}): ${msg}`);
       return { valid: false, message: msg };
     }
+  }
+
+  /**
+   * Sincroniza y valida el negocio en Scalinky:
+   * Verifica salud, servicios, empleados (staff), horarios y disponibilidad inicial.
+   * Devuelve un snapshot listo para guardarse en caché y no consultar catálogo en cada mensaje.
+   */
+  async syncBusinessSnapshot(slug: string): Promise<ScalinkyCachedSnapshot> {
+    const cleanSlug = slug.trim().toLowerCase();
+    const online = await this.isHealthy();
+
+    if (!online) {
+      return {
+        slug: cleanSlug,
+        synced: false,
+        status: 'OFFLINE',
+        lastSyncedAt: new Date().toISOString(),
+        services: [],
+        staff: [],
+        message: 'El servidor de Scalinky no está activo ni accesible en este momento (Offline).'
+      };
+    }
+
+    try {
+      const [rawServices, staff] = await Promise.all([
+        this.getServices(cleanSlug),
+        this.getStaff(cleanSlug)
+      ]);
+
+      const services = rawServices.filter((s) => s.active !== false);
+
+      if (services.length === 0 || staff.length === 0) {
+        const reason =
+          services.length === 0 && staff.length === 0
+            ? `El negocio "${cleanSlug}" no existe en Scalinky o no tiene servicios ni empleados cargados.`
+            : services.length === 0
+            ? `El negocio "${cleanSlug}" en Scalinky no tiene servicios activos configurados.`
+            : `El negocio "${cleanSlug}" en Scalinky no tiene empleados/profesionales configurados.`;
+
+        return {
+          slug: cleanSlug,
+          synced: false,
+          status: 'INCOMPLETE',
+          lastSyncedAt: new Date().toISOString(),
+          services,
+          staff,
+          message: reason
+        };
+      }
+
+      // Verificar disponibilidad y deducir franja horaria del negocio a partir de las posibilidades reales
+      let businessHoursSummary = 'Según disponibilidad de cada profesional en Scalinky';
+      try {
+        const samplePossibilities = await this.getPossibilities(
+          cleanSlug,
+          staff[0].staff_id,
+          services[0].service_id
+        );
+        const allSlots = samplePossibilities
+          .flatMap((d) => (Array.isArray(d.items) ? d.items.flatMap((it) => it.slots || []) : []))
+          .filter(Boolean)
+          .sort();
+
+        if (allSlots.length > 0) {
+          const minSlot = allSlots[0];
+          const maxSlot = allSlots[allSlots.length - 1];
+          businessHoursSummary = `Franja operativa detectada en Scalinky: ${minSlot} a ${maxSlot} hs`;
+        }
+      } catch {
+        // Ignorar si falla inferencia de horario
+      }
+
+      return {
+        slug: cleanSlug,
+        synced: true,
+        status: 'SYNCED',
+        lastSyncedAt: new Date().toISOString(),
+        businessHoursSummary,
+        services,
+        staff,
+        message: `Sincronizado correctamente: ${services.length} servicio(s) y ${staff.length} empleado(s) cargados.`
+      };
+    } catch (err: any) {
+      this.logger.error(`Error sincronizando snapshot de Scalinky (${cleanSlug}): ${err.message}`);
+      return {
+        slug: cleanSlug,
+        synced: false,
+        status: 'DESINCRONIZADO',
+        lastSyncedAt: new Date().toISOString(),
+        services: [],
+        staff: [],
+        message: `Error al sincronizar con Scalinky: ${err.message}`
+      };
+    }
+  }
+
+  /**
+   * Consulta en vivo los turnos disponibles para una fecha (o próximos días),
+   * buscando por cada empleado activo (o por un empleado específico si se indicó).
+   */
+  async getLivePossibilitiesPerStaff(
+    slug: string,
+    serviceId: string,
+    staffList: ScalinkyStaffItem[],
+    targetStaffId?: string
+  ): Promise<
+    Array<{
+      staffId: string;
+      staffName: string;
+      possibilities: ScalinkyDayPossibility[];
+    }>
+  > {
+    const online = await this.isHealthy();
+    if (!online) {
+      throw new Error('SCALINKY_OFFLINE');
+    }
+
+    const targets = targetStaffId
+      ? staffList.filter((s) => s.staff_id === targetStaffId)
+      : staffList;
+
+    const effectiveTargets = targets.length > 0 ? targets : staffList;
+    if (effectiveTargets.length === 0) {
+      throw new Error('SCALINKY_NO_STAFF');
+    }
+
+    const results = await Promise.all(
+      effectiveTargets.map(async (member) => {
+        const res = await axios.get(
+          `${this.baseUrl}/${slug}/appointment/staff/${member.staff_id}/service/${serviceId}`,
+          { timeout: 6000 }
+        );
+        const possibilities: ScalinkyDayPossibility[] = Array.isArray(res.data) ? res.data : [];
+        return {
+          staffId: member.staff_id,
+          staffName: member.name,
+          possibilities
+        };
+      })
+    );
+
+    return results;
   }
 }

@@ -172,9 +172,143 @@ export class IntegrationsService {
     };
   }
 
+  async resolveActiveEvolutionInstance(organizationId: string): Promise<string> {
+    const preferred = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    if (!evolutionUrl || !evolutionKey) return preferred;
+
+    try {
+      const instRes = await axios.get(`${evolutionUrl}/instance/fetchInstances`, {
+        headers: { apikey: evolutionKey, Authorization: `Bearer ${evolutionKey}` },
+        timeout: 3500
+      });
+      const instList = Array.isArray(instRes.data) ? instRes.data : [instRes.data];
+      const exact = instList.find(
+        (i: any) =>
+          (i?.name === preferred || i?.instanceName === preferred || i?.instance?.instanceName === preferred) &&
+          (i?.connectionStatus === 'open' || i?.state === 'open' || i?.instance?.state === 'open')
+      );
+      if (exact) return preferred;
+
+      const anyOpenTf = instList.find((i: any) => {
+        const name = i?.name || i?.instanceName || i?.instance?.instanceName || '';
+        const status = i?.connectionStatus || i?.state || i?.instance?.state || '';
+        return name.startsWith('tf_') && status === 'open';
+      });
+      if (anyOpenTf) {
+        return anyOpenTf.name || anyOpenTf.instanceName || anyOpenTf.instance?.instanceName || preferred;
+      }
+    } catch {
+      // Fallback al nombre preferido
+    }
+    return preferred;
+  }
+
+  async fetchEvolutionRecentMessages(organizationId: string): Promise<
+    Array<{
+      remotePhone: string;
+      senderName: string;
+      fromMe: boolean;
+      text: string;
+      messageId: string;
+      timestamp: number;
+    }>
+  > {
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    if (!evolutionUrl || !evolutionKey) return [];
+
+    try {
+      const instanceName = await this.resolveActiveEvolutionInstance(organizationId);
+      const res = await axios.post(
+        `${evolutionUrl}/chat/findMessages/${instanceName}`,
+        { where: {}, limit: 100 },
+        {
+          headers: {
+            apikey: evolutionKey,
+            Authorization: `Bearer ${evolutionKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 6000
+        }
+      );
+
+      const rawRecords =
+        res.data?.messages?.records ||
+        res.data?.records ||
+        (Array.isArray(res.data?.messages) ? res.data.messages : null) ||
+        (Array.isArray(res.data) ? res.data : []);
+
+      if (!Array.isArray(rawRecords)) return [];
+
+      const parsed: Array<{
+        remotePhone: string;
+        senderName: string;
+        fromMe: boolean;
+        text: string;
+        messageId: string;
+        timestamp: number;
+      }> = [];
+
+      for (const item of rawRecords) {
+        const key = item?.key || {};
+        const jid = key.remoteJid || item?.remoteJid || '';
+        if (
+          !jid ||
+          jid.includes('@g.us') ||
+          jid.includes('@broadcast') ||
+          jid.includes('@newsletter') ||
+          jid.endsWith('@lid')
+        ) {
+          continue;
+        }
+        const cleanPhone = jid
+          .replace('@s.whatsapp.net', '')
+          .replace('@c.us', '')
+          .split(':')[0]
+          .replace(/\D/g, '');
+        if (!cleanPhone || cleanPhone.length < 8 || cleanPhone.length > 15) continue;
+
+        const msgObj = item?.message || {};
+        const text =
+          msgObj.conversation ||
+          msgObj.extendedTextMessage?.text ||
+          msgObj.imageMessage?.caption ||
+          (msgObj.audioMessage ? '[Nota de voz / Audio]' : '') ||
+          '';
+
+        if (!text || !text.trim()) continue;
+
+        const ts = Number(item?.messageTimestamp || Date.now() / 1000);
+        parsed.push({
+          remotePhone: `+${cleanPhone}`,
+          senderName: item?.pushName || `+${cleanPhone}`,
+          fromMe: Boolean(key.fromMe),
+          text: text.trim(),
+          messageId: key.id || `evo_${ts}_${Math.random().toString(36).substring(2, 7)}`,
+          timestamp: ts > 1e11 ? ts : ts * 1000
+        });
+      }
+
+      // Ordenar cronológicamente ascendente
+      parsed.sort((a, b) => a.timestamp - b.timestamp);
+      return parsed;
+    } catch (err: any) {
+      this.logger.warn(`No se pudo sincronizar historial previo desde Evolution API: ${err.message}`);
+      return [];
+    }
+  }
+
   async getQRStatus(organizationId: string): Promise<{ status: string; connectedPhone?: string; connectedAt?: string }> {
     const session = this.qrSessions.get(organizationId);
-    const instanceName = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+    const instanceName = await this.resolveActiveEvolutionInstance(organizationId);
     const rawUrl = process.env.EVOLUTION_API_URL || '';
     const rawKey = process.env.EVOLUTION_API_KEY || '';
     const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
@@ -338,7 +472,7 @@ export class IntegrationsService {
     try {
       this.recordBotSentMessage(undefined, text);
       const instanceName =
-        explicitInstanceName || `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+        explicitInstanceName || (await this.resolveActiveEvolutionInstance(organizationId));
       const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
 
       const response = await axios.post(

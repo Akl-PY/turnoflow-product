@@ -119,4 +119,10 @@ export class IntegrationsController {
   ) {
     return this.scalinkyService.verifyOwner(slug, credentials);
   }
+
+  @Post('scalinky/:slug/sync')
+  @ApiOperation({ summary: 'Sincronizar y validar horarios, servicios, empleados y disponibilidad desde Scalinky' })
+  async syncScalinkyBusiness(@Param('slug') slug: string) {
+    return this.scalinkyService.syncBusinessSnapshot(slug);
+  }
 }

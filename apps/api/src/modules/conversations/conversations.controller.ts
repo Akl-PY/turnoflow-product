@@ -71,11 +71,14 @@ export class ConversationsController {
   }
 
   private async resolveOrganizationFromInstance(organizationId: string, instanceName?: string): Promise<string> {
-    if (organizationId && organizationId !== 'default-org-id') {
-      return organizationId;
-    }
     try {
       const profiles = await this.profileRepo.find();
+      if (organizationId && organizationId !== 'default-org-id') {
+        const exact = profiles.find((p) => p.organizationId === organizationId);
+        if (exact) {
+          return exact.organizationId;
+        }
+      }
       if (instanceName && instanceName.startsWith('tf_')) {
         const prefix = instanceName.replace(/^tf_/, '').toLowerCase();
         const matched = profiles.find((p) =>

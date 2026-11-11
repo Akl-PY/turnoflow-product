@@ -281,13 +281,28 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
   }
 
   async findAll(organizationId: string): Promise<Conversation[]> {
-    const list = await this.conversationRepo.find({
+    let list = await this.conversationRepo.find({
       where: [
         { organizationId },
         { organizationId: 'default-org-id' }
       ],
       order: { updatedAt: 'DESC' }
     });
+
+    // Fallback: si hubo cambio de UUID de organización en redeploy pero hay conversaciones en la base
+    if (list.length === 0) {
+      list = await this.conversationRepo.find({
+        order: { updatedAt: 'DESC' }
+      });
+    }
+
+    // Si aún está vacío (ej. tras redeploy de contenedor efímero), sincronizar historial reciente desde Evolution API
+    if (list.length === 0 && this.integrationsService) {
+      await this.syncRecentChatsFromEvolution(organizationId);
+      list = await this.conversationRepo.find({
+        order: { updatedAt: 'DESC' }
+      });
+    }
 
     const seen = new Set<string>();
     const deduplicated: Conversation[] = [];
@@ -300,6 +315,55 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       }
     }
     return deduplicated;
+  }
+
+  private async syncRecentChatsFromEvolution(organizationId: string): Promise<void> {
+    if (!this.integrationsService) return;
+    try {
+      const records = await this.integrationsService.fetchEvolutionRecentMessages(organizationId);
+      if (!records || records.length === 0) return;
+
+      const convByPhone = new Map<string, Conversation>();
+      for (const rec of records) {
+        let conv = convByPhone.get(rec.remotePhone);
+        if (!conv) {
+          const existing = await this.findByPhone(organizationId, rec.remotePhone);
+          if (existing) {
+            conv = existing;
+          } else {
+            conv = this.conversationRepo.create({
+              organizationId,
+              channel: 'whatsapp_qr',
+              channelConversationId: rec.remotePhone,
+              status: ConversationStatus.AI_HANDLED,
+              messagesCount: 0,
+              lastMessagePreview: rec.text.substring(0, 100)
+            });
+            conv = await this.conversationRepo.save(conv);
+          }
+          convByPhone.set(rec.remotePhone, conv);
+        }
+
+        const existingMsg = await this.messageRepo.findOne({
+          where: { externalMessageId: rec.messageId }
+        });
+        if (!existingMsg) {
+          const msg = this.messageRepo.create({
+            conversationId: conv.id,
+            sender: rec.fromMe ? MessageSender.AI : MessageSender.USER,
+            content: rec.text,
+            externalMessageId: rec.messageId
+          });
+          await this.messageRepo.save(msg);
+          conv.lastMessagePreview = rec.text.substring(0, 100);
+          conv.messagesCount = (conv.messagesCount || 0) + 1;
+          await this.conversationRepo.save(conv);
+        }
+      }
+      this.logger.log(`[EVOLUTION SYNC] Recuperadas ${convByPhone.size} conversaciones desde Evolution API.`);
+    } catch (err: any) {
+      this.logger.warn(`Error recuperando chats desde Evolution API: ${err.message}`);
+    }
   }
 
   async getMessages(conversationId: string): Promise<Message[]> {
