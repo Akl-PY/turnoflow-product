@@ -576,7 +576,7 @@ REGLAS ESTRICTAS DE CONVERSACIÓN:
 2. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un producto o servicio específico en mensajes anteriores, NO le vuelvas a preguntar qué busca.
 3. CÁLCULO DE FECHAS Y CONCISIÓN: Cuando el cliente diga "mañana", "hoy", "este viernes", calcula la fecha exacta en base a la FECHA ACTUAL (${isoDate}). Si la conversación ya está en curso, NO vuelvas a saludar con "¡Hola!"; responde de forma directa, natural y empática.
 ${bookingDirective}
-5. COMPRAS Y COMPROBANTES: Si el cliente quiere comprar o pagar y hay datos en MEDIOS DE PAGO, proporciónale esos datos claramente. Si el cliente envía una imagen de comprobante de pago ([COMPROBANTE_DETECTADO]), confírmale que recibiste el comprobante con los datos detectados y que ya notificaste a administración.
+5. COMPRAS, PEDIDOS Y COMPROBANTES: Si el cliente confirma que quiere comprar un producto o realizar un pedido, registra la venta usando la herramienta 'create_order' con el detalle de los artículos, monto y entrega, y pásale los datos de MEDIOS DE PAGO si corresponde. Si el cliente envía una imagen de comprobante de pago ([COMPROBANTE_DETECTADO]), confírmale que recibiste el comprobante con los datos detectados y que ya notificaste a administración.
 6. NO INVENTES: No inventes precios, empleados, horarios ni condiciones que no figuren en el contexto o catálogo.
 7. ATENCIÓN HUMANA: Si el cliente solicita hablar con una persona, dueño o encargado, si quiere cerrar una compra especial, si hay una urgencia técnica o si la agenda arroja estado desincronizado: utiliza SIEMPRE la herramienta 'handoff_to_human' y confírmale que ya notificaste al equipo humano para que le atiendan a la brevedad.`;
 
@@ -1023,6 +1023,51 @@ ${bookingDirective}
         });
         const saved = await this.leadRepo.save(lead);
         return { success: true, data: { leadId: saved.id, status: 'saved' } };
+      }
+
+      case 'create_order': {
+        const newOrder = {
+          id: `ord-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+          customerName: (args.customerName as string) || 'Cliente WhatsApp',
+          customerPhone: (args.customerPhone as string) || '',
+          itemsSummary: (args.itemsSummary as string) || 'Compra de producto/servicio',
+          totalAmount: Number(args.totalAmount) || 0,
+          currency: profile.currency || 'USD',
+          deliveryMethod: (args.deliveryMethod as string) || 'A coordinar',
+          paymentMethod: (args.paymentMethod as string) || 'A confirmar',
+          status: 'PENDIENTE',
+          notes: (args.notes as string) || '',
+          createdAt: new Date().toISOString()
+        };
+
+        try {
+          let parsed: any = {};
+          if (profile.specialInstructions) {
+            try {
+              parsed = JSON.parse(profile.specialInstructions);
+            } catch {
+              parsed = { customContext: profile.specialInstructions };
+            }
+          }
+          const orders = Array.isArray(parsed.salesOrders) ? parsed.salesOrders : [];
+          orders.unshift(newOrder);
+          parsed.salesOrders = orders;
+          profile.specialInstructions = JSON.stringify(parsed);
+          if (this.businessProfileRepo && profile.id) {
+            await this.businessProfileRepo.save(profile);
+          }
+        } catch (err: any) {
+          this.logger.warn(`Error guardando pedido en perfil: ${err.message}`);
+        }
+
+        return {
+          success: true,
+          data: {
+            orderCreated: true,
+            order: newOrder,
+            message: 'Pedido registrado con éxito en el panel y notificado al dueño.'
+          }
+        };
       }
 
       case 'check_availability':

@@ -34,6 +34,11 @@ import {
   fetchConversationMessages,
   resumeConversationAi,
   pauseConversationAi,
+  excludeConversationPermanently,
+  unexcludeConversation,
+  fetchExcludedPhones,
+  addExcludedPhone,
+  removeExcludedPhone,
   sendManualMessage,
   resetAllConversationsAi,
   fetchAiProviderStatus,
@@ -59,11 +64,14 @@ export default function ChatsScreen() {
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'LIST' | 'DETAIL'>('LIST');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'AI_HANDLED' | 'HUMAN_TAKEOVER'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'AI_HANDLED' | 'HUMAN_TAKEOVER' | 'EXCLUDED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [manualMessageText, setManualMessageText] = useState('');
   const [isSendingManual, setIsSendingManual] = useState(false);
+  const [showExcludedManager, setShowExcludedManager] = useState(false);
+  const [newExcludedPhone, setNewExcludedPhone] = useState('');
+  const [newExcludedLabel, setNewExcludedLabel] = useState('Proveedor / Personal');
 
   // Consulta de conversaciones
   const {
@@ -164,15 +172,83 @@ export default function ChatsScreen() {
     }
   });
 
-  // Mutación para reactivar TODAS las conversaciones a Modo IA
+  // Consulta de números excluidos permanentemente
+  const { data: excludedPhones = [], refetch: refetchExcluded } = useQuery({
+    queryKey: ['excluded-phones'],
+    queryFn: async () => {
+      try {
+        return await fetchExcludedPhones();
+      } catch {
+        return [];
+      }
+    }
+  });
+
+  // Mutación para excluir permanentemente un chat (Proveedores, Familiares, etc.)
+  const excludeMutation = useMutation({
+    mutationFn: (id: string) => excludeConversationPermanently(id, 'Proveedor / Personal'),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<ConversationItem[]>(['conversations'], (old) => {
+        if (!old) return [updated];
+        return old.map((c) => (c.id === updated.id ? updated : c));
+      });
+      refetchExcluded();
+      setActionNotice(
+        '🚫 Contacto excluido permanentemente. El bot NO le responderá jamás ni se reactivará a las 24 hs.'
+      );
+      setTimeout(() => setActionNotice(null), 5000);
+    }
+  });
+
+  // Mutación para quitar exclusión permanente
+  const unexcludeMutation = useMutation({
+    mutationFn: (id: string) => unexcludeConversation(id),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<ConversationItem[]>(['conversations'], (old) => {
+        if (!old) return [updated];
+        return old.map((c) => (c.id === updated.id ? updated : c));
+      });
+      refetchExcluded();
+      setActionNotice('✅ Exclusión quitada. El contacto volvió al Modo IA 24/7.');
+      setTimeout(() => setActionNotice(null), 5000);
+    }
+  });
+
+  const handleAddExcludedPhoneDirect = async () => {
+    if (!newExcludedPhone.trim()) return;
+    try {
+      await addExcludedPhone(newExcludedPhone.trim(), newExcludedLabel.trim() || 'Proveedor / Personal');
+      setNewExcludedPhone('');
+      refetchExcluded();
+      refetch();
+      setActionNotice('🚫 Número agregado a la lista de No Responder Nunca.');
+      setTimeout(() => setActionNotice(null), 4000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRemoveExcludedPhoneDirect = async (phone: string) => {
+    try {
+      await removeExcludedPhone(phone);
+      refetchExcluded();
+      refetch();
+    } catch {
+      // ignore
+    }
+  };
+
+  // Mutación para reactivar TODAS las conversaciones a Modo IA (respetando excluidos permanentes)
   const resetAllMutation = useMutation({
     mutationFn: () => resetAllConversationsAi(),
     onSuccess: (res) => {
       queryClient.setQueryData<ConversationItem[]>(['conversations'], (old) => {
         if (!old) return [];
-        return old.map((c) => ({ ...c, status: 'AI_HANDLED' }));
+        return old.map((c) =>
+          c.assignedAgent === 'EXCLUDED_PERMANENT' ? c : { ...c, status: 'AI_HANDLED' }
+        );
       });
-      setActionNotice(`¡Listo! Se reactivaron todas las conversaciones (${res.affected} chats) al Modo IA 24/7.`);
+      setActionNotice(`¡Listo! Se reactivaron ${res.affected} chats al Modo IA 24/7 (los contactos excluidos permanecen silenciados).`);
       setTimeout(() => setActionNotice(null), 6000);
       refetch();
     }
@@ -215,8 +291,10 @@ export default function ChatsScreen() {
 
   // Filtrado de conversaciones
   const filteredConversations = conversations.filter((c) => {
-    if (filterStatus === 'AI_HANDLED' && c.status !== 'AI_HANDLED') return false;
-    if (filterStatus === 'HUMAN_TAKEOVER' && c.status !== 'HUMAN_TAKEOVER') return false;
+    const isExcluded = c.assignedAgent === 'EXCLUDED_PERMANENT';
+    if (filterStatus === 'AI_HANDLED' && (c.status !== 'AI_HANDLED' || isExcluded)) return false;
+    if (filterStatus === 'HUMAN_TAKEOVER' && (c.status !== 'HUMAN_TAKEOVER' || isExcluded)) return false;
+    if (filterStatus === 'EXCLUDED' && !isExcluded) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const phoneMatch = (c.channelConversationId || '').toLowerCase().includes(q);
@@ -226,8 +304,13 @@ export default function ChatsScreen() {
     return true;
   });
 
-  const aiActiveCount = conversations.filter((c) => c.status === 'AI_HANDLED').length;
-  const humanTakeoverCount = conversations.filter((c) => c.status === 'HUMAN_TAKEOVER').length;
+  const aiActiveCount = conversations.filter(
+    (c) => c.status === 'AI_HANDLED' && c.assignedAgent !== 'EXCLUDED_PERMANENT'
+  ).length;
+  const humanTakeoverCount = conversations.filter(
+    (c) => c.status === 'HUMAN_TAKEOVER' && c.assignedAgent !== 'EXCLUDED_PERMANENT'
+  ).length;
+  const excludedCount = conversations.filter((c) => c.assignedAgent === 'EXCLUDED_PERMANENT').length;
 
   const handleSelectChat = (id: string) => {
     setSelectedChatId(id);
@@ -270,7 +353,7 @@ export default function ChatsScreen() {
       </View>
 
       {/* Tabs de Filtro */}
-      <View style={styles.filterTabs}>
+      <View style={[styles.filterTabs, { flexWrap: 'wrap' }]}>
         <TouchableOpacity
           style={[styles.filterTab, filterStatus === 'ALL' && styles.filterTabActive]}
           onPress={() => setFilterStatus('ALL')}
@@ -309,6 +392,132 @@ export default function ChatsScreen() {
             🟡 Pausados ({humanTakeoverCount})
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.filterTab, filterStatus === 'EXCLUDED' && styles.filterTabActive]}
+          onPress={() => setFilterStatus('EXCLUDED')}
+        >
+          <Text
+            style={[
+              styles.filterTabText,
+              filterStatus === 'EXCLUDED' && styles.filterTabTextActive
+            ]}
+          >
+            🚫 Excluidos ({excludedCount})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Gestor Rápido de Números Excluidos (Proveedores / Familiares) */}
+      <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+        <TouchableOpacity
+          onPress={() => setShowExcludedManager(!showExcludedManager)}
+          style={{
+            backgroundColor: '#FEF2F2',
+            borderWidth: 1,
+            borderColor: '#FECACA',
+            borderRadius: 8,
+            paddingHorizontal: 10,
+            paddingVertical: 7,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}
+        >
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#B91C1C' }}>
+            🚫 Lista "No Responder Nunca" ({excludedPhones.length} números excluidos)
+          </Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
+            {showExcludedManager ? 'Ocultar ▲' : 'Gestionar ▼'}
+          </Text>
+        </TouchableOpacity>
+
+        {showExcludedManager && (
+          <View
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderWidth: 1,
+              borderColor: '#FECACA',
+              borderRadius: 8,
+              padding: 10,
+              marginTop: 6,
+              gap: 8
+            }}
+          >
+            <Text style={{ fontSize: 11, color: '#64748B' }}>
+              Agrega números de proveedores, familiares o amigos a los que el bot no debe responder jamás (ni reactivarse a las 24 hs):
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+              <TextInput
+                style={{
+                  flex: 1,
+                  minWidth: 120,
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                  borderRadius: 6,
+                  paddingHorizontal: 8,
+                  paddingVertical: 5,
+                  fontSize: 12
+                }}
+                placeholder="+5491122334455"
+                value={newExcludedPhone}
+                onChangeText={setNewExcludedPhone}
+              />
+              <TextInput
+                style={{
+                  flex: 1,
+                  minWidth: 110,
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                  borderRadius: 6,
+                  paddingHorizontal: 8,
+                  paddingVertical: 5,
+                  fontSize: 12
+                }}
+                placeholder="Ej. Proveedor / Mamá"
+                value={newExcludedLabel}
+                onChangeText={setNewExcludedLabel}
+              />
+              <TouchableOpacity
+                onPress={handleAddExcludedPhoneDirect}
+                style={{
+                  backgroundColor: '#DC2626',
+                  borderRadius: 6,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  justifyContent: 'center'
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Excluir</Text>
+              </TouchableOpacity>
+            </View>
+            {excludedPhones.length > 0 && (
+              <View style={{ gap: 4, marginTop: 4 }}>
+                {excludedPhones.map((ep: any) => (
+                  <View
+                    key={ep.phone}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#F8FAFC',
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 6
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: '#0F172A', fontWeight: '600' }}>
+                      {ep.phone} — <Text style={{ color: '#64748B', fontWeight: '400' }}>{ep.label}</Text>
+                    </Text>
+                    <TouchableOpacity onPress={() => handleRemoveExcludedPhoneDirect(ep.phone)}>
+                      <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '700' }}>Quitar</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Listado de Chats */}
@@ -329,7 +538,8 @@ export default function ChatsScreen() {
         ) : (
           filteredConversations.map((conv) => {
             const isSelected = conv.id === selectedChatId;
-            const isAi = conv.status === 'AI_HANDLED';
+            const isExcluded = conv.assignedAgent === 'EXCLUDED_PERMANENT';
+            const isAi = conv.status === 'AI_HANDLED' && !isExcluded;
 
             return (
               <TouchableOpacity
@@ -344,7 +554,7 @@ export default function ChatsScreen() {
                       {isAi ? (
                         <Bot size={15} color="#059669" />
                       ) : (
-                        <User size={15} color="#D97706" />
+                        <User size={15} color={isExcluded ? '#DC2626' : '#D97706'} />
                       )}
                     </View>
                     <Text style={styles.chatPhone}>
@@ -352,9 +562,27 @@ export default function ChatsScreen() {
                     </Text>
                   </View>
 
-                  <View style={[styles.statusBadge, isAi ? styles.statusBadgeAi : styles.statusBadgeHuman]}>
-                    <Text style={[styles.statusBadgeText, isAi ? styles.statusBadgeTextAi : styles.statusBadgeTextHuman]}>
-                      {isAi ? '🟢 IA Activa' : '🟡 En Pausa'}
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      isExcluded
+                        ? { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 }
+                        : isAi
+                        ? styles.statusBadgeAi
+                        : styles.statusBadgeHuman
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusBadgeText,
+                        isExcluded
+                          ? { color: '#DC2626' }
+                          : isAi
+                          ? styles.statusBadgeTextAi
+                          : styles.statusBadgeTextHuman
+                      ]}
+                    >
+                      {isExcluded ? '🚫 Excluido' : isAi ? '🟢 IA Activa' : '🟡 En Pausa'}
                     </Text>
                   </View>
                 </View>
@@ -400,7 +628,8 @@ export default function ChatsScreen() {
       );
     }
 
-    const isAiActive = selectedChat.status === 'AI_HANDLED';
+    const isExcluded = selectedChat.assignedAgent === 'EXCLUDED_PERMANENT';
+    const isAiActive = selectedChat.status === 'AI_HANDLED' && !isExcluded;
     const targetPhone = selectedChat.channelConversationId || (selectedChat as any).customerPhone;
 
     return (
@@ -428,16 +657,28 @@ export default function ChatsScreen() {
                 <View
                   style={[
                     styles.statusBadge,
-                    isAiActive ? styles.statusBadgeAi : styles.statusBadgeHuman
+                    isExcluded
+                      ? { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 }
+                      : isAiActive
+                      ? styles.statusBadgeAi
+                      : styles.statusBadgeHuman
                   ]}
                 >
                   <Text
                     style={[
                       styles.statusBadgeText,
-                      isAiActive ? styles.statusBadgeTextAi : styles.statusBadgeTextHuman
+                      isExcluded
+                        ? { color: '#DC2626' }
+                        : isAiActive
+                        ? styles.statusBadgeTextAi
+                        : styles.statusBadgeTextHuman
                     ]}
                   >
-                    {isAiActive ? '🟢 Modo IA Activo' : '🟡 En Pausa Humana'}
+                    {isExcluded
+                      ? '🚫 Excluido Permanente (No responde nunca)'
+                      : isAiActive
+                      ? '🟢 Modo IA Activo'
+                      : '🟡 En Pausa Humana'}
                   </Text>
                 </View>
               </View>
@@ -449,7 +690,7 @@ export default function ChatsScreen() {
           </View>
 
           {/* Acciones Rápidas de Cabecera */}
-          <View style={styles.actionButtons}>
+          <View style={[styles.actionButtons, { flexWrap: 'wrap' }]}>
             {/* Botón Abrir en WhatsApp */}
             <TouchableOpacity
               style={styles.whatsappDirectButton}
@@ -460,40 +701,67 @@ export default function ChatsScreen() {
               {isDesktop && <Text style={styles.whatsappDirectText}>WhatsApp</Text>}
             </TouchableOpacity>
 
-            {/* Botón Control IA: Reactivar o Pausar */}
-            {!isAiActive ? (
+            {/* Botón Excluir Permanente o Quitar Exclusión */}
+            {isExcluded ? (
               <TouchableOpacity
-                style={styles.resumeButton}
-                onPress={() => resumeMutation.mutate(selectedChat.id)}
-                disabled={resumeMutation.isPending}
+                style={[styles.resumeButton, { backgroundColor: '#0284C7' }]}
+                onPress={() => unexcludeMutation.mutate(selectedChat.id)}
+                disabled={unexcludeMutation.isPending}
                 activeOpacity={0.8}
               >
-                {resumeMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Play size={14} color="#FFFFFF" fill="#FFFFFF" />
-                )}
-                <Text style={styles.resumeButtonText}>
-                  Reactivar IA
-                </Text>
+                <Text style={styles.resumeButtonText}>✅ Quitar Exclusión</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={styles.pauseButton}
-                onPress={() => pauseMutation.mutate(selectedChat.id)}
-                disabled={pauseMutation.isPending}
+                style={[
+                  styles.pauseButton,
+                  { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 }
+                ]}
+                onPress={() => excludeMutation.mutate(selectedChat.id)}
+                disabled={excludeMutation.isPending}
                 activeOpacity={0.8}
               >
-                {pauseMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#B45309" />
-                ) : (
-                  <Pause size={14} color="#B45309" />
-                )}
-                <Text style={styles.pauseButtonText}>
-                  Pausar IA
+                <Text style={[styles.pauseButtonText, { color: '#DC2626' }]}>
+                  🚫 Excluir Permanente
                 </Text>
               </TouchableOpacity>
             )}
+
+            {/* Botón Control IA: Reactivar o Pausar */}
+            {!isExcluded &&
+              (!isAiActive ? (
+                <TouchableOpacity
+                  style={styles.resumeButton}
+                  onPress={() => resumeMutation.mutate(selectedChat.id)}
+                  disabled={resumeMutation.isPending}
+                  activeOpacity={0.8}
+                >
+                  {resumeMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Play size={14} color="#FFFFFF" fill="#FFFFFF" />
+                  )}
+                  <Text style={styles.resumeButtonText}>
+                    Reactivar IA
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.pauseButton}
+                  onPress={() => pauseMutation.mutate(selectedChat.id)}
+                  disabled={pauseMutation.isPending}
+                  activeOpacity={0.8}
+                >
+                  {pauseMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#B45309" />
+                  ) : (
+                    <Pause size={14} color="#B45309" />
+                  )}
+                  <Text style={styles.pauseButtonText}>
+                    Pausar IA (24h)
+                  </Text>
+                </TouchableOpacity>
+              ))}
           </View>
         </View>
 

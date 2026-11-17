@@ -21,53 +21,58 @@ import { useAuth } from '../src/lib/auth';
 
 const BUSINESS_AUTOMATIONS = [
   {
-    id: 'auto-1',
-    name: 'Atención y Cotización Inmediata 24/7',
-    description: 'Responde preguntas sobre tratamientos, tarifas vigentes y horarios de apertura en menos de 5 segundos.',
-    category: 'Recepción WhatsApp',
+    id: 'autoReply247',
+    name: 'Atención, Ventas y Cotización 24/7 + Buffer Anti-Ráfaga (3.5s)',
+    description:
+      'Agrupa mensajes consecutivos durante 3.5 segundos para no responder cortado y contesta consultas de precios, catálogo y ventas las 24 horas.',
+    category: 'Recepción & Ventas WhatsApp',
     icon: MessageSquare,
     isActive: true,
-    runs: 48,
+    runs: 0,
     rate: '100%'
   },
   {
-    id: 'auto-2',
-    name: 'Registro Automático de Clientas',
-    description: 'Detecta el interés de cada clienta y guarda su nombre, teléfono y tratamiento consultado en el directorio.',
-    category: 'Directorio & Clientes',
-    icon: Users,
-    isActive: true,
-    runs: 35,
-    rate: '100%'
-  },
-  {
-    id: 'auto-3',
-    name: 'Coordinación y Reserva de Turnos',
-    description: 'Consulta disponibilidad en la agenda del salón (o en Scalinky si está vinculado) y confirma la cita sin superposiciones.',
-    category: 'Agenda & Citas',
+    id: 'visionReceipts',
+    name: 'Lectura Multimodal de Comprobantes de Pago, Fotos y Audios Cortos',
+    description:
+      'Analiza fotos de comprobantes bancarios, imágenes de productos/fallas y transcribe notas de voz menores a 15 segundos automáticamente.',
+    category: 'Visión & Audio IA',
     icon: CalendarCheck,
     isActive: true,
-    runs: 18,
+    runs: 0,
     rate: '100%'
   },
   {
-    id: 'auto-4',
-    name: 'Alerta Urgente al Administrador',
-    description: 'Te envía un aviso directo a tu WhatsApp personal si una clienta pide hablar con una persona o tiene una consulta especial.',
-    category: 'Supervisión Humana',
+    id: 'autoLeadCapture',
+    name: 'Auto-Captura de Clientes y Clasificación de Intención en CRM',
+    description:
+      'Registra automáticamente en Clientes & Leads a cada contacto que escribe por WhatsApp y etiqueta su temperatura (🔥 Alta Intención, 🚨 Urgencia o 💬 Consulta).',
+    category: 'Directorio & CRM',
+    icon: Users,
+    isActive: true,
+    runs: 0,
+    rate: '100%'
+  },
+  {
+    id: 'adminAlerts',
+    name: 'Alertas al WhatsApp del Dueño (Ventas, Comprobantes y Atención Humana)',
+    description:
+      'Envía un aviso inmediato a tu WhatsApp personal cuando un cliente confirma un pedido, manda un comprobante de pago o solicita hablar con una persona.',
+    category: 'Supervisión & Ventas',
     icon: BellRing,
     isActive: true,
-    runs: 6,
+    runs: 0,
     rate: '100%'
   },
   {
-    id: 'auto-5',
-    name: 'Recordatorios y Seguimiento de Turnos',
-    description: 'Envía recordatorios cordiales antes de la cita y da seguimiento a quienes consultaron precios pero aún no reservaron.',
-    category: 'Fidelización',
+    id: 'appointmentReminders',
+    name: 'Recordatorios Automáticos de Turnos por WhatsApp (24 hs y 2 hs antes)',
+    description:
+      'Envía avisos automáticos por WhatsApp 24 horas y 2 horas antes de cada compromiso confirmado en la agenda.',
+    category: 'Agenda & Fidelización',
     icon: RotateCcw,
     isActive: true,
-    runs: 12,
+    runs: 0,
     rate: '100%'
   }
 ];
@@ -83,9 +88,17 @@ export default function AutomationsScreen() {
         if (Array.isArray(res.data) && res.data.length > 0) {
           setWorkflows((prev) =>
             prev.map((item, idx) => {
-              const matched = res.data[idx];
+              const matched =
+                res.data.find((r: any) => r.id === item.id) || res.data[idx];
               return matched
-                ? { ...item, isActive: matched.isActive, runs: matched.totalRuns ?? item.runs }
+                ? {
+                    ...item,
+                    name: matched.name || item.name,
+                    description: matched.description || item.description,
+                    category: matched.category || item.category,
+                    isActive: Boolean(matched.isActive),
+                    runs: matched.totalRuns ?? 0
+                  }
                 : item;
             })
           );
@@ -112,8 +125,8 @@ export default function AutomationsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Automatizaciones del Salón"
-        subtitle="Reglas de atención que funcionan solas las 24 horas en tu WhatsApp"
+        title="Automatizaciones del Negocio"
+        subtitle="Controla en vivo las reglas automáticas que operan las 24 horas en tu WhatsApp"
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -123,9 +136,9 @@ export default function AutomationsScreen() {
             <Zap size={20} color="#1A73E8" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bannerTitle}>Automatización Integral del Salón</Text>
+            <Text style={styles.bannerTitle}>Automatización Integral Conectada</Text>
             <Text style={styles.bannerText}>
-              Todas las funciones trabajan de forma automática en tiempo real. Puedes activar o pausar cualquiera de ellas con un solo toque cuando lo necesites.
+              Cada interruptor activa o desactiva en tiempo real la función correspondiente en el motor de WhatsApp e Inteligencia Artificial de tu negocio.
             </Text>
           </View>
         </View>

@@ -208,6 +208,63 @@ export async function resetAllConversationsAi(): Promise<{ affected: number }> {
   return res.data;
 }
 
+export async function excludeConversationPermanently(
+  conversationId: string,
+  label?: string
+): Promise<ConversationItem> {
+  const res = await apiClient.patch(`/conversations/${conversationId}/exclude`, { label });
+  return res.data;
+}
+
+export async function unexcludeConversation(conversationId: string): Promise<ConversationItem> {
+  const res = await apiClient.patch(`/conversations/${conversationId}/unexclude`);
+  return res.data;
+}
+
+export async function fetchExcludedPhones(): Promise<
+  Array<{ phone: string; label: string; addedAt: string }>
+> {
+  const res = await apiClient.get('/conversations/excluded-phones');
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function addExcludedPhone(phone: string, label?: string): Promise<any[]> {
+  const res = await apiClient.post('/conversations/excluded-phones', { phone, label });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function removeExcludedPhone(phone: string): Promise<any[]> {
+  const res = await apiClient.delete(`/conversations/excluded-phones/${encodeURIComponent(phone)}`);
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function sendDailySummaryToOwner(
+  targetPhone?: string
+): Promise<{ sent: boolean; summaryText: string; targetPhone?: string }> {
+  const res = await apiClient.post('/conversations/send-daily-summary', { targetPhone });
+  return res.data;
+}
+
+export async function fetchSalesOrders(): Promise<any[]> {
+  const res = await apiClient.get('/business/sales-orders');
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function createSalesOrder(data: any): Promise<any> {
+  const res = await apiClient.post('/business/sales-orders', data);
+  return res.data;
+}
+
+export async function updateSalesOrderStatus(orderId: string, status: string): Promise<any> {
+  const res = await apiClient.patch(`/business/sales-orders/${orderId}`, { status });
+  return res.data;
+}
+
+export async function deleteSalesOrder(orderId: string): Promise<any> {
+  const res = await apiClient.delete(`/business/sales-orders/${orderId}`);
+  return res.data;
+}
+
 export interface AiProviderStatus {
   activeProvider: string;
   geminiStatus: 'HEALTHY' | 'COOLDOWN_30M';

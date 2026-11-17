@@ -8,7 +8,14 @@ import { BusinessProfile } from '../../entities/business-profile.entity';
 import { Lead } from '../../entities/lead.entity';
 import { AiService } from '../ai/ai.service';
 import { IntegrationsService } from '../integrations/integrations.service';
-import { ConversationStatus, MessageSender, LeadStatus, LeadIntent, LeadPriority } from '@turnoflow/shared';
+import {
+  ConversationStatus,
+  MessageSender,
+  LeadStatus,
+  LeadIntent,
+  LeadPriority,
+  AgentRoleType
+} from '@turnoflow/shared';
 
 @Injectable()
 export class ConversationsService {
@@ -106,16 +113,70 @@ export class ConversationsService {
     // 2. Buscar o crear conversación
     let conversation = await this.findByPhone(orgId, params.senderPhone);
 
+    const isExcludedPhone = await this.isPhoneExcluded(orgId, params.senderPhone);
+
     if (!conversation) {
       conversation = this.conversationRepo.create({
         organizationId: orgId,
         channel: params.channel,
         channelConversationId: params.senderPhone.startsWith('+') ? params.senderPhone : `+${params.senderPhone}`,
-        status: ConversationStatus.AI_HANDLED,
+        status: isExcludedPhone ? ConversationStatus.HUMAN_TAKEOVER : ConversationStatus.AI_HANDLED,
+        assignedAgent: isExcludedPhone ? ('EXCLUDED_PERMANENT' as any) : AgentRoleType.RECEPTIONIST,
         messagesCount: 0
       });
       conversation = await this.conversationRepo.save(conversation);
-    } else if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
+    }
+
+    // 2.0 Si el contacto está en la Lista de Excluidos Permanentes (Proveedores, Familiares, Personal),
+    // guardar el mensaje en el historial pero JAMÁS responder ni reactivar a las 24 horas
+    if (isExcludedPhone || (conversation.assignedAgent as any) === 'EXCLUDED_PERMANENT') {
+      this.logger.log(
+        `[EXCLUIDO PERMANENTE] Mensaje de ${params.senderPhone} guardado sin responder (Contacto Excluido).`
+      );
+      const userMsg = this.messageRepo.create({
+        conversationId: conversation.id,
+        sender: MessageSender.USER,
+        content: params.messageText,
+        externalMessageId: params.externalMessageId
+      });
+      await this.messageRepo.save(userMsg);
+
+      await this.conversationRepo.update(conversation.id, {
+        status: ConversationStatus.HUMAN_TAKEOVER,
+        assignedAgent: 'EXCLUDED_PERMANENT' as any,
+        lastMessagePreview: params.messageText.substring(0, 100),
+        messagesCount: (conversation.messagesCount || 0) + 1
+      });
+
+      return {
+        replyMessage: '',
+        handoffToHuman: true,
+        duplicate: false
+      };
+    }
+
+    // Revisar switches de automatizaciones activas del negocio
+    const autoSettings = await this.getAutomationFlags(orgId);
+    if (!autoSettings.autoReply247) {
+      const userMsg = this.messageRepo.create({
+        conversationId: conversation.id,
+        sender: MessageSender.USER,
+        content: params.messageText,
+        externalMessageId: params.externalMessageId
+      });
+      await this.messageRepo.save(userMsg);
+      await this.conversationRepo.update(conversation.id, {
+        lastMessagePreview: params.messageText.substring(0, 100),
+        messagesCount: (conversation.messagesCount || 0) + 1
+      });
+      return {
+        replyMessage: '',
+        handoffToHuman: true,
+        duplicate: false
+      };
+    }
+
+    if (conversation.status === ConversationStatus.HUMAN_TAKEOVER) {
       // Buscar la última intervención humana (desde WhatsApp o desde el Panel)
       const lastHumanMsg = await this.messageRepo.findOne({
         where: {
@@ -246,6 +307,30 @@ export class ConversationsService {
       conversation.messagesCount += 1;
     }
 
+    // Notificar al dueño si la IA acaba de registrar un nuevo Pedido / Venta (create_order)
+    const createdOrderTool = (aiResult.toolExecutions || []).find(
+      (t) => t.toolName === 'create_order' && t.success && (t.result as any)?.order
+    );
+    if (createdOrderTool && autoSettings.adminAlerts && this.profileRepo && this.integrationsService) {
+      try {
+        const ord = (createdOrderTool.result as any).order;
+        const profile = await this.profileRepo.findOne({ where: { organizationId: orgId } });
+        const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
+        if (adminPhone && adminPhone.replace(/\D/g, '') !== params.senderPhone.replace(/\D/g, '')) {
+          const orderAlert = `🛍️ *[Nueva Venta / Pedido Confirmado]*\nEl cliente *${
+            ord.customerName || params.senderName || 'Cliente'
+          }* (${params.senderPhone}) confirmó un pedido por WhatsApp.\n\n*Detalle:* ${
+            ord.itemsSummary
+          }\n*Total:* $${ord.totalAmount} ${ord.currency || 'USD'}\n*Entrega:* ${
+            ord.deliveryMethod
+          }\n*Pago:* ${ord.paymentMethod}`;
+          await this.integrationsService.sendQRWhatsAppMessage(orgId, adminPhone, orderAlert).catch(() => null);
+        }
+      } catch (err: any) {
+        this.logger.warn(`No se pudo enviar alerta de pedido al admin: ${err.message}`);
+      }
+    }
+
     if (aiResult.handoffToHuman) {
       conversation.status = ConversationStatus.HUMAN_TAKEOVER;
       conversation.updatedAt = new Date();
@@ -255,7 +340,7 @@ export class ConversationsService {
       const lastAlertTs = this.recentAdminAlerts.get(params.senderPhone) || 0;
       const hoursSinceLastAlert = (now - lastAlertTs) / (1000 * 60 * 60);
 
-      if (hoursSinceLastAlert >= 6 && this.profileRepo && this.integrationsService) {
+      if (autoSettings.adminAlerts && hoursSinceLastAlert >= 6 && this.profileRepo && this.integrationsService) {
         try {
           const profile = await this.profileRepo.findOne({ where: { organizationId: orgId } });
           const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
@@ -278,20 +363,60 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     await this.conversationRepo.save(conversation);
 
     // 4. Auto-captura y clasificación de Lead en CRM a partir de la interacción
-    await this.autoCaptureLeadFromMessage(
-      orgId,
-      params.senderPhone,
-      params.senderName,
-      params.messageText,
-      Boolean(aiResult.handoffToHuman),
-      aiResult.toolExecutions || []
-    );
+    if (autoSettings.autoLeadCapture) {
+      await this.autoCaptureLeadFromMessage(
+        orgId,
+        params.senderPhone,
+        params.senderName,
+        params.messageText,
+        Boolean(aiResult.handoffToHuman),
+        aiResult.toolExecutions || []
+      );
+    }
 
     return {
       replyMessage: aiResult.replyText,
       handoffToHuman: aiResult.handoffToHuman,
       duplicate: false
     };
+  }
+
+  async getAutomationFlags(organizationId: string): Promise<{
+    autoReply247: boolean;
+    visionReceipts: boolean;
+    autoLeadCapture: boolean;
+    adminAlerts: boolean;
+    appointmentReminders: boolean;
+  }> {
+    const defaults = {
+      autoReply247: true,
+      visionReceipts: true,
+      autoLeadCapture: true,
+      adminAlerts: true,
+      appointmentReminders: true
+    };
+    if (!this.profileRepo) return defaults;
+    try {
+      let profile = await this.profileRepo.findOne({ where: { organizationId } });
+      if (!profile) {
+        profile = await this.profileRepo.findOne({ where: {} });
+      }
+      if (profile?.specialInstructions) {
+        const parsed = JSON.parse(profile.specialInstructions);
+        if (parsed?.automations) {
+          return {
+            autoReply247: parsed.automations.autoReply247 !== false,
+            visionReceipts: parsed.automations.visionReceipts !== false,
+            autoLeadCapture: parsed.automations.autoLeadCapture !== false,
+            adminAlerts: parsed.automations.adminAlerts !== false,
+            appointmentReminders: parsed.automations.appointmentReminders !== false
+          };
+        }
+      }
+    } catch {
+      // Ignorar
+    }
+    return defaults;
   }
 
   private async autoCaptureLeadFromMessage(
@@ -564,6 +689,10 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       throw new BadRequestException('Conversación no encontrada.');
     }
     conv.status = ConversationStatus.AI_HANDLED;
+    if ((conv.assignedAgent as any) === 'EXCLUDED_PERMANENT') {
+      conv.assignedAgent = AgentRoleType.RECEPTIONIST;
+      await this.removeExcludedPhone(conv.organizationId, conv.channelConversationId);
+    }
     conv.updatedAt = new Date();
     const saved = await this.conversationRepo.save(conv);
     this.logger.log(
@@ -572,12 +701,238 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     return saved;
   }
 
+  async excludeConversationPermanently(conversationId: string, label?: string): Promise<Conversation> {
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    if (!conv) {
+      throw new BadRequestException('Conversación no encontrada.');
+    }
+    conv.status = ConversationStatus.HUMAN_TAKEOVER;
+    conv.assignedAgent = 'EXCLUDED_PERMANENT' as any;
+    conv.updatedAt = new Date();
+    const saved = await this.conversationRepo.save(conv);
+    await this.addExcludedPhone(conv.organizationId, conv.channelConversationId, label || 'Contacto Excluido');
+    this.logger.log(
+      `[EXCLUIDO PERMANENTE] El contacto ${conv.channelConversationId} fue marcado como No Responder Nunca.`
+    );
+    return saved;
+  }
+
+  async unexcludeConversation(conversationId: string): Promise<Conversation> {
+    return this.resumeAi(conversationId);
+  }
+
+  async isPhoneExcluded(organizationId: string, phone: string): Promise<boolean> {
+    const cleanDigits = (phone || '').replace(/\D/g, '');
+    if (!cleanDigits) return false;
+    const list = await this.getExcludedPhones(organizationId);
+    return list.some((item) => (item.phone || '').replace(/\D/g, '') === cleanDigits);
+  }
+
+  async getExcludedPhones(
+    organizationId: string
+  ): Promise<Array<{ phone: string; label: string; addedAt: string }>> {
+    if (!this.profileRepo) return [];
+    try {
+      let profile = await this.profileRepo.findOne({ where: { organizationId } });
+      if (!profile) {
+        profile = await this.profileRepo.findOne({ where: {} });
+      }
+      if (profile?.specialInstructions) {
+        const parsed = JSON.parse(profile.specialInstructions);
+        if (Array.isArray(parsed.excludedPhones)) {
+          return parsed.excludedPhones;
+        }
+      }
+    } catch {
+      // Ignorar
+    }
+    return [];
+  }
+
+  async addExcludedPhone(
+    organizationId: string,
+    phone: string,
+    label = 'Proveedor / Personal'
+  ): Promise<Array<{ phone: string; label: string; addedAt: string }>> {
+    if (!this.profileRepo) return [];
+    const cleanDigits = (phone || '').replace(/\D/g, '');
+    if (!cleanDigits) return [];
+    const formattedPhone = `+${cleanDigits}`;
+
+    let profile = await this.profileRepo.findOne({ where: { organizationId } });
+    if (!profile) {
+      profile = await this.profileRepo.findOne({ where: {} });
+    }
+    if (!profile) return [];
+
+    let parsed: any = {};
+    if (profile.specialInstructions) {
+      try {
+        parsed = JSON.parse(profile.specialInstructions);
+      } catch {
+        parsed = { customContext: profile.specialInstructions };
+      }
+    }
+
+    const list: Array<{ phone: string; label: string; addedAt: string }> = Array.isArray(parsed.excludedPhones)
+      ? parsed.excludedPhones
+      : [];
+
+    if (!list.some((item) => (item.phone || '').replace(/\D/g, '') === cleanDigits)) {
+      list.unshift({
+        phone: formattedPhone,
+        label,
+        addedAt: new Date().toISOString()
+      });
+    }
+
+    parsed.excludedPhones = list;
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+
+    // También marcar conversación existente si la hubiera
+    const existingConv = await this.findByPhone(organizationId, formattedPhone);
+    if (existingConv) {
+      existingConv.status = ConversationStatus.HUMAN_TAKEOVER;
+      existingConv.assignedAgent = 'EXCLUDED_PERMANENT' as any;
+      await this.conversationRepo.save(existingConv);
+    }
+
+    return list;
+  }
+
+  async removeExcludedPhone(
+    organizationId: string,
+    phone: string
+  ): Promise<Array<{ phone: string; label: string; addedAt: string }>> {
+    if (!this.profileRepo) return [];
+    const cleanDigits = (phone || '').replace(/\D/g, '');
+
+    let profile = await this.profileRepo.findOne({ where: { organizationId } });
+    if (!profile) {
+      profile = await this.profileRepo.findOne({ where: {} });
+    }
+    if (!profile) return [];
+
+    let parsed: any = {};
+    if (profile.specialInstructions) {
+      try {
+        parsed = JSON.parse(profile.specialInstructions);
+      } catch {
+        parsed = {};
+      }
+    }
+
+    const list: Array<{ phone: string; label: string; addedAt: string }> = Array.isArray(parsed.excludedPhones)
+      ? parsed.excludedPhones
+      : [];
+
+    parsed.excludedPhones = list.filter((item) => (item.phone || '').replace(/\D/g, '') !== cleanDigits);
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+
+    const existingConv = await this.findByPhone(organizationId, `+${cleanDigits}`);
+    if (existingConv && (existingConv.assignedAgent as any) === 'EXCLUDED_PERMANENT') {
+      existingConv.assignedAgent = AgentRoleType.RECEPTIONIST;
+      existingConv.status = ConversationStatus.AI_HANDLED;
+      await this.conversationRepo.save(existingConv);
+    }
+
+    return parsed.excludedPhones;
+  }
+
+  async sendOwnerExecutiveSummary(
+    organizationId: string,
+    overrideTargetPhone?: string,
+    instanceName?: string
+  ): Promise<{ sent: boolean; summaryText: string; targetPhone?: string }> {
+    let businessName = 'Mi Negocio';
+    let targetPhone = overrideTargetPhone || process.env.ADMIN_PHONE_NUMBER || '';
+    let salesOrders: any[] = [];
+
+    if (this.profileRepo) {
+      let profile = await this.profileRepo.findOne({ where: { organizationId } });
+      if (!profile) {
+        profile = await this.profileRepo.findOne({ where: {} });
+      }
+      if (profile) {
+        businessName = profile.businessName || businessName;
+        if (!targetPhone && profile.contactPhone) {
+          targetPhone = profile.contactPhone;
+        }
+        if (profile.specialInstructions) {
+          try {
+            const parsed = JSON.parse(profile.specialInstructions);
+            if (Array.isArray(parsed.salesOrders)) {
+              salesOrders = parsed.salesOrders;
+            }
+          } catch {
+            // Ignorar
+          }
+        }
+      }
+    }
+
+    const allConvs = await this.findAll(organizationId);
+    const aiActiveCount = allConvs.filter((c) => c.status === ConversationStatus.AI_HANDLED).length;
+    const pausedCount = allConvs.filter(
+      (c) => c.status === ConversationStatus.HUMAN_TAKEOVER && (c.assignedAgent as any) !== 'EXCLUDED_PERMANENT'
+    ).length;
+    const excludedCount = allConvs.filter((c) => (c.assignedAgent as any) === 'EXCLUDED_PERMANENT').length;
+
+    let totalLeads = 0;
+    let hotLeads = 0;
+    if (this.leadRepo) {
+      const leads = await this.leadRepo.find();
+      totalLeads = leads.length;
+      hotLeads = leads.filter((l) => l.priority === LeadPriority.HOT || l.intent === LeadIntent.HIGH).length;
+    }
+
+    const totalOrders = salesOrders.length;
+    const pendingOrders = salesOrders.filter((o) => o.status === 'PENDIENTE').length;
+    const totalSalesRevenue = salesOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+
+    const dateStr = new Date().toLocaleDateString('es-AR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const summaryText = `📊 *[Resumen Ejecutivo — ${businessName}]*
+📅 *Fecha:* ${dateStr}
+
+💬 *Chats Activos:* ${allConvs.length} totales
+  • 🟢 Respondidos por IA: ${aiActiveCount}
+  • 🟡 En Pausa Humana: ${pausedCount}
+  • 🚫 Excluidos Permanentes: ${excludedCount}
+
+👥 *Clientes / Leads en CRM:* ${totalLeads} (${hotLeads} 🔥 Alta Intención)
+🛍️ *Pedidos / Ventas:* ${totalOrders} registrados ($${totalSalesRevenue} acumulado | ${pendingOrders} pendientes de despacho)
+
+💡 *Tip:* Podés pedir este reporte en cualquier momento enviando */resumen* por WhatsApp o desde el Panel Ejecutivo.`;
+
+    if (targetPhone && this.integrationsService) {
+      const res = await this.integrationsService.sendQRWhatsAppMessage(
+        organizationId,
+        targetPhone,
+        summaryText,
+        instanceName
+      );
+      return { sent: res.success, summaryText, targetPhone };
+    }
+
+    return { sent: false, summaryText, targetPhone };
+  }
+
   async resetAllToAi(organizationId?: string): Promise<{ affected: number }> {
     const qb = this.conversationRepo
       .createQueryBuilder()
       .update(Conversation)
       .set({ status: ConversationStatus.AI_HANDLED, updatedAt: new Date() })
-      .where('status = :status', { status: ConversationStatus.HUMAN_TAKEOVER });
+      .where('status = :status', { status: ConversationStatus.HUMAN_TAKEOVER })
+      .andWhere("(assignedAgent IS NULL OR assignedAgent != 'EXCLUDED_PERMANENT')");
 
     if (organizationId && organizationId !== 'default-org-id') {
       qb.andWhere('(organizationId = :orgId OR organizationId = :defaultOrg)', {
@@ -588,7 +943,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
     const result = await qb.execute();
     const count = result.affected || 0;
-    this.logger.log(`[RESET ALL IA] Se reactivaron ${count} conversaciones a Modo IA.`);
+    this.logger.log(`[RESET ALL IA] Se reactivaron ${count} conversaciones a Modo IA (respetando excluidos permanentes).`);
     return { affected: count };
   }
 

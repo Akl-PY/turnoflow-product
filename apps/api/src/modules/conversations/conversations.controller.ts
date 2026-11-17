@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -37,6 +38,19 @@ export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
 @Controller('conversations')
 export class ConversationsController {
   private readonly logger = new Logger(ConversationsController.name);
+  private readonly messageBurstBuffer = new Map<
+    string,
+    {
+      texts: string[];
+      externalIds: Set<string>;
+      lastExternalId?: string;
+      senderName: string;
+      senderPhone: string;
+      resolvedOrgId: string;
+      instanceFromWebhook?: string;
+      timer: NodeJS.Timeout;
+    }
+  >();
 
   constructor(
     private readonly conversationsService: ConversationsService,
@@ -235,8 +249,10 @@ export class ConversationsController {
       return { status: 'ignored_group_or_invalid_phone', senderPhone };
     }
 
+    const autoFlags = await this.conversationsService.getAutomationFlags(resolvedOrgId);
+
     // Lectura Multimodal de Imágenes y Comprobantes de Pago por WhatsApp
-    if (isImage && !key.fromMe) {
+    if (isImage && !key.fromMe && autoFlags.visionReceipts) {
       const captionText = message.imageMessage?.caption || '';
       const imageMime = message.imageMessage?.mimetype || 'image/jpeg';
       let imageBase64 = data.base64 || data.message?.base64 || body.base64 || null;
@@ -264,13 +280,15 @@ export class ConversationsController {
             }. Datos extraídos del comprobante: ${analysis.analysisText}`;
 
             // Notificar al dueño/administrador por WhatsApp con el resumen del comprobante
-            const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
-            if (adminPhone && adminPhone.replace(/\D/g, '') !== digitsOnly) {
-              const senderName = data.pushName || body.pushName || 'Cliente';
-              const receiptAlert = `💳 *[Comprobante de Pago Recibido]*\nEl cliente *${senderName}* (+${digitsOnly}) envió un comprobante por WhatsApp.\n\n*Detalle detectado por IA:*\n${analysis.analysisText}`;
-              await this.integrationsService
-                .sendQRWhatsAppMessage(resolvedOrgId, adminPhone, receiptAlert, instanceFromWebhook)
-                .catch(() => null);
+            if (autoFlags.adminAlerts) {
+              const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
+              if (adminPhone && adminPhone.replace(/\D/g, '') !== digitsOnly) {
+                const senderName = data.pushName || body.pushName || 'Cliente';
+                const receiptAlert = `💳 *[Comprobante de Pago Recibido]*\nEl cliente *${senderName}* (+${digitsOnly}) envió un comprobante por WhatsApp.\n\n*Detalle detectado por IA:*\n${analysis.analysisText}`;
+                await this.integrationsService
+                  .sendQRWhatsAppMessage(resolvedOrgId, adminPhone, receiptAlert, instanceFromWebhook)
+                  .catch(() => null);
+              }
             }
           } else {
             rawText = `[Imagen enviada por el cliente${
@@ -283,13 +301,13 @@ export class ConversationsController {
 
     // Regla de Audios: < 15 segundos se transcriben y se responden; >= 15 segundos se delegan a atención humana
     if (isAudio && !key.fromMe) {
-      if (audioSeconds >= 15) {
+      if (audioSeconds >= 15 || !autoFlags.visionReceipts) {
         this.logger.log(
           `[AUDIO LARGO >= 15s] Nota de voz de ${audioSeconds}s recibida de ${senderPhone}. Delegando a atención humana...`
         );
 
         const replyText =
-          '¡Hola! He recibido tu mensaje de audio 🎙️. Como es una consulta detallada de más de 15 segundos, la derivé directamente a nuestro equipo para que un asesor la escuche con atención y te responda en breve.';
+          '¡Hola! He recibido tu mensaje de audio 🎙️. Como es una consulta detallada, la derivé directamente a nuestro equipo para que un asesor la escuche con atención y te responda en breve.';
 
         await this.conversationsService.recordHumanIntervention(
           resolvedOrgId,
@@ -338,6 +356,17 @@ export class ConversationsController {
       }
     }
 
+    // 2.9 Comando de Resumen Ejecutivo para el Dueño (/resumen)
+    const cmdNormalize = (typeof rawText === 'string' ? rawText.toLowerCase().trim() : '');
+    if (cmdNormalize === '/resumen' || cmdNormalize === 'resumen del dia' || cmdNormalize === 'resumen del día') {
+      const summaryRes = await this.conversationsService.sendOwnerExecutiveSummary(
+        resolvedOrgId,
+        senderPhone,
+        instanceFromWebhook
+      );
+      return { status: 'owner_summary_sent', sent: summaryRes.sent };
+    }
+
     // 3. Manejo de mensajes salientes (fromMe === true)
     if (key.fromMe) {
       const isFromBot = this.integrationsService.isBotSentMessage(
@@ -366,7 +395,8 @@ export class ConversationsController {
         'disculpa la demora',
         'disculpa el inconveniente',
         'puesta a punto',
-        'limpieza de pileta'
+        'limpieza de pileta',
+        'resumen ejecutivo'
       ];
       if (automatedBotPhrases.some((phrase) => textClean.includes(phrase))) {
         return { status: 'ignored_automated_bot_phrase' };
@@ -404,31 +434,87 @@ export class ConversationsController {
     const senderName = data.pushName || body.pushName || 'Cliente';
     const externalMessageId = key.id || data.id;
 
-    const result = await this.conversationsService.handleIncomingMessage({
-      channel: 'whatsapp_qr',
-      senderPhone,
+    // 4. Agrupador Anti-Ráfaga de Mensajes (Ventana de 3.5 segundos)
+    // Si el cliente envía varios mensajes cortos seguidos, espera 3.5s desde el último,
+    // los une en un único mensaje coherente y realiza 1 sola consulta de IA.
+    const bufferKey = `${resolvedOrgId}:${digitsOnly}`;
+    const existingBuffer = this.messageBurstBuffer.get(bufferKey);
+
+    if (existingBuffer) {
+      if (externalMessageId && existingBuffer.externalIds.has(externalMessageId)) {
+        return { status: 'duplicate_in_burst_ignored' };
+      }
+      clearTimeout(existingBuffer.timer);
+      existingBuffer.texts.push(rawText.trim());
+      if (externalMessageId) {
+        existingBuffer.externalIds.add(externalMessageId);
+        existingBuffer.lastExternalId = externalMessageId;
+      }
+      if (senderName && senderName !== 'Cliente') {
+        existingBuffer.senderName = senderName;
+      }
+    }
+
+    const entry = existingBuffer || {
+      texts: [rawText.trim()],
+      externalIds: new Set<string>(externalMessageId ? [externalMessageId] : []),
+      lastExternalId: externalMessageId,
       senderName,
-      messageText: rawText.trim(),
-      externalMessageId,
-      organizationId: resolvedOrgId
-    });
+      senderPhone,
+      resolvedOrgId,
+      instanceFromWebhook,
+      timer: null as any
+    };
 
-    // Si es un duplicado descartado por idempotencia, NO enviar "Mensaje ya procesado." por WhatsApp
-    if (result.duplicate || result.replyMessage === 'Mensaje ya procesado.') {
-      return { status: 'duplicate_ignored' };
+    const timer = setTimeout(async () => {
+      this.messageBurstBuffer.delete(bufferKey);
+      const combinedText = entry.texts.join('\n');
+      if (entry.texts.length > 1) {
+        this.logger.log(
+          `[ANTI-RÁFAGA] Se agruparon ${entry.texts.length} mensajes consecutivos de ${entry.senderPhone} en una sola consulta: "${combinedText.substring(0, 120)}"`
+        );
+      }
+      try {
+        const result = await this.conversationsService.handleIncomingMessage({
+          channel: 'whatsapp_qr',
+          senderPhone: entry.senderPhone,
+          senderName: entry.senderName,
+          messageText: combinedText,
+          externalMessageId: entry.lastExternalId,
+          organizationId: entry.resolvedOrgId
+        });
+
+        if (result.duplicate || result.replyMessage === 'Mensaje ya procesado.') {
+          return;
+        }
+
+        if (result.replyMessage && result.replyMessage.trim()) {
+          await this.integrationsService.sendQRWhatsAppMessage(
+            entry.resolvedOrgId,
+            entry.senderPhone,
+            result.replyMessage,
+            entry.instanceFromWebhook
+          );
+        }
+      } catch (err: any) {
+        this.logger.error(
+          `[ANTI-RÁFAGA ERROR] Error procesando mensajes agrupados de ${entry.senderPhone}: ${err.message}`
+        );
+      }
+    }, 3500);
+
+    if (typeof timer.unref === 'function') {
+      timer.unref();
     }
 
-    // Enviar la respuesta generada por la IA al WhatsApp del cliente si hay texto para responder
-    if (result.replyMessage && result.replyMessage.trim()) {
-      await this.integrationsService.sendQRWhatsAppMessage(
-        resolvedOrgId,
-        senderPhone,
-        result.replyMessage,
-        instanceFromWebhook
-      );
-    }
+    entry.timer = timer;
+    this.messageBurstBuffer.set(bufferKey, entry);
 
-    return result;
+    return {
+      status: 'queued_in_anti_burst_buffer',
+      bufferedMessages: entry.texts.length,
+      debounceMs: 3500
+    };
   }
 
   @Post('whatsapp-qr-webhook')
@@ -664,10 +750,49 @@ export class ConversationsController {
   @Patch('reset-all-ai')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Reactivar todas las conversaciones a Modo IA' })
+  @ApiOperation({ summary: 'Reactivar todas las conversaciones a Modo IA (respetando excluidos permanentes)' })
   async resetAllAi(@Request() req: any) {
     const orgId = req?.user?.organizationId || 'default-org-id';
     return this.conversationsService.resetAllToAi(orgId);
+  }
+
+  @Post('send-daily-summary')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generar y enviar el Resumen Ejecutivo al WhatsApp del dueño' })
+  async sendDailySummary(@Request() req: any, @Body('targetPhone') targetPhone?: string) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.sendOwnerExecutiveSummary(orgId, targetPhone);
+  }
+
+  @Get('excluded-phones')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Obtener lista de teléfonos excluidos permanentemente (Proveedores, Familiares, etc.)' })
+  async getExcludedPhones(@Request() req: any) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.getExcludedPhones(orgId);
+  }
+
+  @Post('excluded-phones')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Agregar un número de teléfono a la lista de No Responder Nunca' })
+  async addExcludedPhone(
+    @Request() req: any,
+    @Body() body: { phone: string; label?: string }
+  ) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.addExcludedPhone(orgId, body.phone, body.label);
+  }
+
+  @Delete('excluded-phones/:phone')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Quitar un número de la lista de excluidos permanentes' })
+  async removeExcludedPhone(@Request() req: any, @Param('phone') phone: string) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.removeExcludedPhone(orgId, phone);
   }
 
   @Get(':id/messages')
@@ -692,6 +817,22 @@ export class ConversationsController {
   @ApiOperation({ summary: 'Reactivar IA para una conversación pausada' })
   async resumeAi(@Param('id') id: string) {
     return this.conversationsService.resumeAi(id);
+  }
+
+  @Patch(':id/exclude')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Excluir permanentemente un contacto para que la IA no le responda jamás' })
+  async excludeConversation(@Param('id') id: string, @Body('label') label?: string) {
+    return this.conversationsService.excludeConversationPermanently(id, label);
+  }
+
+  @Patch(':id/unexclude')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Quitar exclusión permanente de un contacto y reactivar IA' })
+  async unexcludeConversation(@Param('id') id: string) {
+    return this.conversationsService.unexcludeConversation(id);
   }
 
   @Post(':id/send-message')

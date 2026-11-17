@@ -72,10 +72,27 @@ export class ReceptionistAgent {
           properties: {
             name: { type: 'string', description: 'Nombre del cliente' },
             phone: { type: 'string', description: 'Número de WhatsApp con código de país' },
-            service: { type: 'string', description: 'Servicio por el que mostró interés' },
+            service: { type: 'string', description: 'Servicio o producto por el que mostró interés' },
             notes: { type: 'string', description: 'Comentarios adicionales o preferencias' }
           },
           required: ['name', 'phone']
+        }
+      },
+      {
+        name: 'create_order',
+        description: 'Registra un pedido o compra confirmada de productos o servicios por parte del cliente y avisa al dueño para despachar o preparar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            customerName: { type: 'string', description: 'Nombre del cliente' },
+            customerPhone: { type: 'string', description: 'Teléfono del cliente' },
+            itemsSummary: { type: 'string', description: 'Detalle de los productos o servicios comprados y cantidades (ej. "2x Cloro Granulado + 1x Bomba 1HP")' },
+            totalAmount: { type: 'number', description: 'Monto total estimado de la compra' },
+            deliveryMethod: { type: 'string', description: 'Dirección de envío a domicilio o retiro en sucursal' },
+            paymentMethod: { type: 'string', description: 'Medio de pago elegido (transferencia, efectivo, tarjeta, etc.)' },
+            notes: { type: 'string', description: 'Notas adicionales del pedido' }
+          },
+          required: ['customerName', 'itemsSummary']
         }
       },
       {

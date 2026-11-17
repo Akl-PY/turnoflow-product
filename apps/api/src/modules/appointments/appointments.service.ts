@@ -67,6 +67,16 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
       if (this.profileRepo) {
         const prof = await this.profileRepo.findOne({ where: { organizationId: appt.organizationId } });
         if (prof?.businessName) businessName = prof.businessName;
+        if (prof?.specialInstructions) {
+          try {
+            const parsed = JSON.parse(prof.specialInstructions);
+            if (parsed?.automations?.appointmentReminders === false) {
+              continue;
+            }
+          } catch {
+            // Ignorar
+          }
+        }
       }
 
       const timeStr = new Date(appt.startTime).toLocaleTimeString('es-AR', {

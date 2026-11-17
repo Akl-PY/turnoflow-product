@@ -99,4 +99,70 @@ export class BusinessService {
     profile.services = services;
     return this.profileRepo.save(profile);
   }
+
+  private parseInstructions(profile: BusinessProfile): Record<string, any> {
+    if (!profile.specialInstructions) return {};
+    try {
+      return JSON.parse(profile.specialInstructions);
+    } catch {
+      return { customContext: profile.specialInstructions };
+    }
+  }
+
+  async getSalesOrders(organizationId: string): Promise<any[]> {
+    const profile = await this.getProfile(organizationId);
+    const parsed = this.parseInstructions(profile);
+    return Array.isArray(parsed.salesOrders) ? parsed.salesOrders : [];
+  }
+
+  async createSalesOrder(organizationId: string, orderData: any): Promise<any> {
+    const profile = await this.getProfile(organizationId);
+    const parsed = this.parseInstructions(profile);
+    const orders = Array.isArray(parsed.salesOrders) ? parsed.salesOrders : [];
+
+    const newOrder = {
+      id: `ord-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      customerName: orderData.customerName || 'Cliente',
+      customerPhone: orderData.customerPhone || '',
+      itemsSummary: orderData.itemsSummary || 'Pedido General',
+      totalAmount: Number(orderData.totalAmount) || 0,
+      currency: orderData.currency || profile.currency || 'USD',
+      deliveryMethod: orderData.deliveryMethod || 'A coordinar',
+      paymentMethod: orderData.paymentMethod || 'Transferencia / Efectivo',
+      status: orderData.status || 'PENDIENTE',
+      notes: orderData.notes || '',
+      createdAt: new Date().toISOString()
+    };
+
+    orders.unshift(newOrder);
+    parsed.salesOrders = orders;
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+    return newOrder;
+  }
+
+  async updateSalesOrderStatus(organizationId: string, orderId: string, status: string): Promise<any> {
+    const profile = await this.getProfile(organizationId);
+    const parsed = this.parseInstructions(profile);
+    const orders: any[] = Array.isArray(parsed.salesOrders) ? parsed.salesOrders : [];
+    const target = orders.find((o) => o.id === orderId);
+    if (target) {
+      target.status = status;
+      target.updatedAt = new Date().toISOString();
+      parsed.salesOrders = orders;
+      profile.specialInstructions = JSON.stringify(parsed);
+      await this.profileRepo.save(profile);
+    }
+    return target;
+  }
+
+  async deleteSalesOrder(organizationId: string, orderId: string): Promise<{ deleted: boolean }> {
+    const profile = await this.getProfile(organizationId);
+    const parsed = this.parseInstructions(profile);
+    const orders: any[] = Array.isArray(parsed.salesOrders) ? parsed.salesOrders : [];
+    parsed.salesOrders = orders.filter((o) => o.id !== orderId);
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+    return { deleted: true };
+  }
 }

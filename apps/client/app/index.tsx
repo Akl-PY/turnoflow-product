@@ -28,7 +28,7 @@ import {
 } from 'lucide-react-native';
 import { Header } from '../src/components/Header';
 import { MetricCard } from '../src/components/MetricCard';
-import { apiClient, INITIAL_METRICS } from '../src/lib/api';
+import { apiClient, INITIAL_METRICS, sendDailySummaryToOwner } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
 export default function DashboardScreen() {
@@ -37,6 +37,26 @@ export default function DashboardScreen() {
   const queryClient = useQueryClient();
   const [resetting, setResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [sendingSummary, setSendingSummary] = useState(false);
+  const [summaryPreview, setSummaryPreview] = useState<string | null>(null);
+
+  const handleSendDailySummary = async () => {
+    setSendingSummary(true);
+    try {
+      const res = await sendDailySummaryToOwner();
+      setSummaryPreview(res.summaryText || 'Resumen generado.');
+      setResetSuccess(
+        res.sent
+          ? `📲 ¡Resumen ejecutivo enviado al WhatsApp del administrador (${res.targetPhone || 'registrado'})!`
+          : '📊 Resumen ejecutivo generado (puedes configurar tu teléfono de dueño en Configuración para recibirlo en WhatsApp o enviar /resumen).'
+      );
+      setTimeout(() => setResetSuccess(null), 6000);
+    } catch {
+      alert('No se pudo generar el resumen en este momento.');
+    } finally {
+      setSendingSummary(false);
+    }
+  };
 
   // Consulta de estadísticas reales (0 si no hay datos)
   const { data: metrics = INITIAL_METRICS, refetch: refetchMetrics } = useQuery({
@@ -191,6 +211,21 @@ export default function DashboardScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={styles.btnSecondary}
+                onPress={handleSendDailySummary}
+                disabled={sendingSummary}
+              >
+                {sendingSummary ? (
+                  <ActivityIndicator size="small" color="#1a73e8" style={{ marginRight: 6 }} />
+                ) : (
+                  <Sparkles size={14} color="#1a73e8" style={{ marginRight: 6 }} />
+                )}
+                <Text style={styles.btnSecondaryText}>
+                  {sendingSummary ? 'Enviando...' : '📊 Resumen a mi WhatsApp'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.btnGuide}
                 onPress={() => router.push('/guide')}
               >
@@ -252,7 +287,7 @@ export default function DashboardScreen() {
           {/* Barra Inferior Limpia */}
           <View style={styles.hubFooterBar}>
             <Text style={styles.hubFooterNote}>
-              💡 Las ventas, turnos confirmados y consultas de tus clientes aparecerán acá en tiempo real.
+              💡 También podés pedir el resumen del día desde tu celular enviando <Text style={{ fontWeight: '700' }}>/resumen</Text> al WhatsApp del negocio.
             </Text>
 
             <TouchableOpacity
@@ -271,6 +306,31 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {summaryPreview && (
+          <View
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderWidth: 1,
+              borderColor: '#BFDBFE',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 20
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E3A8A' }}>
+                📊 Vista Previa del Resumen Ejecutivo
+              </Text>
+              <TouchableOpacity onPress={() => setSummaryPreview(null)}>
+                <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600' }}>Cerrar ✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 13, color: '#0F172A', lineHeight: 20 }}>
+              {summaryPreview}
+            </Text>
+          </View>
+        )}
 
         {/* 5 Métricas Principales (Google Material 3 Cards) */}
         <Text style={styles.sectionTitle}>MÉTRICAS DEL NEGOCIO</Text>

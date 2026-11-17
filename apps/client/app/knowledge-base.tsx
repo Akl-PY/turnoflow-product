@@ -28,8 +28,18 @@ export default function KnowledgeBaseScreen() {
   const { user } = useAuth();
   const [services, setServices] = useState<any[]>([]);
   const [faqs, setFaqs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'services' | 'faqs' | 'context'>('services');
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'services' | 'orders' | 'context' | 'faqs'>('services');
   const [loading, setLoading] = useState(true);
+
+  // Form para pedido manual
+  const [showAddOrderModal, setShowAddOrderModal] = useState(false);
+  const [orderCustomerName, setOrderCustomerName] = useState('');
+  const [orderCustomerPhone, setOrderCustomerPhone] = useState('');
+  const [orderItemsSummary, setOrderItemsSummary] = useState('');
+  const [orderTotalAmount, setOrderTotalAmount] = useState('');
+  const [orderDeliveryMethod, setOrderDeliveryMethod] = useState('');
+  const [submittingOrder, setSubmittingOrder] = useState(false);
 
   // Form para nuevo servicio o producto
   const [showAddModal, setShowAddModal] = useState(false);
@@ -77,6 +87,7 @@ export default function KnowledgeBaseScreen() {
               if (parsed.customContext) setCustomContext(parsed.customContext);
               if (parsed.paymentInfo) setPaymentInfo(parsed.paymentInfo);
               if (parsed.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
+              if (Array.isArray(parsed.salesOrders)) setSalesOrders(parsed.salesOrders);
             } catch {
               setCustomContext(res.data.specialInstructions);
             }
@@ -91,6 +102,53 @@ export default function KnowledgeBaseScreen() {
     };
     fetchBusiness();
   }, [user?.organizationId]);
+
+  const handleCreateOrder = async () => {
+    if (!orderCustomerName.trim() || !orderItemsSummary.trim()) return;
+    setSubmittingOrder(true);
+    try {
+      const res = await apiClient.post('/business/sales-orders', {
+        customerName: orderCustomerName.trim(),
+        customerPhone: orderCustomerPhone.trim(),
+        itemsSummary: orderItemsSummary.trim(),
+        totalAmount: parseFloat(orderTotalAmount) || 0,
+        deliveryMethod: orderDeliveryMethod.trim() || 'Retiro / Envío a coordinar'
+      });
+      if (res.data) {
+        setSalesOrders((prev) => [res.data, ...prev]);
+      }
+      setOrderCustomerName('');
+      setOrderCustomerPhone('');
+      setOrderItemsSummary('');
+      setOrderTotalAmount('');
+      setOrderDeliveryMethod('');
+      setShowAddOrderModal(false);
+    } catch {
+      // ignore
+    } finally {
+      setSubmittingOrder(false);
+    }
+  };
+
+  const handleChangeOrderStatus = async (orderId: string, nextStatus: string) => {
+    setSalesOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o))
+    );
+    try {
+      await apiClient.patch(`/business/sales-orders/${orderId}`, { status: nextStatus });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    setSalesOrders((prev) => prev.filter((o) => o.id !== orderId));
+    try {
+      await apiClient.delete(`/business/sales-orders/${orderId}`);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleSaveAiContext = async () => {
     setSavingContext(true);
@@ -204,7 +262,7 @@ export default function KnowledgeBaseScreen() {
       />
 
       {/* Tabs */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { flexWrap: 'wrap' }]}>
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'services' && styles.tabButtonActive]}
           onPress={() => setActiveTab('services')}
@@ -212,6 +270,16 @@ export default function KnowledgeBaseScreen() {
           <Tag size={16} color={activeTab === 'services' ? '#1A73E8' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'services' && styles.tabTextActive]}>
             Productos & Servicios ({services.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'orders' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('orders')}
+        >
+          <DollarSign size={16} color={activeTab === 'orders' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'orders' && styles.tabTextActive]}>
+            🛍️ Pedidos & Ventas ({salesOrders.length})
           </Text>
         </TouchableOpacity>
 
@@ -423,6 +491,207 @@ export default function KnowledgeBaseScreen() {
                     </View>
                   </View>
                 ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA: PEDIDOS & VENTAS REGISTRADAS */}
+        {/* ======================================================== */}
+        {activeTab === 'orders' && (
+          <View>
+            <View style={styles.topToolbar}>
+              <View style={styles.infoBanner}>
+                <DollarSign size={16} color="#1A73E8" style={{ marginRight: 8 }} />
+                <Text style={styles.infoBannerText}>
+                  Cuando un cliente confirma una compra por WhatsApp, la IA registra automáticamente el pedido aquí y te envía una alerta a tu celular.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => setShowAddOrderModal(!showAddOrderModal)}
+              >
+                <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.primaryBtnText}>Registrar Pedido Manual</Text>
+              </TouchableOpacity>
+            </View>
+
+            {showAddOrderModal && (
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>Registrar Nuevo Pedido / Venta</Text>
+                <View style={styles.formGrid}>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Nombre del Cliente</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. Carlos Gómez"
+                      placeholderTextColor="#94A3B8"
+                      value={orderCustomerName}
+                      onChangeText={setOrderCustomerName}
+                    />
+                  </View>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Teléfono WhatsApp</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. +5491122334455"
+                      placeholderTextColor="#94A3B8"
+                      value={orderCustomerPhone}
+                      onChangeText={setOrderCustomerPhone}
+                    />
+                  </View>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Detalle de Productos / Ítems</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. 1x Bomba 1HP + 2x Cloro 5kg"
+                      placeholderTextColor="#94A3B8"
+                      value={orderItemsSummary}
+                      onChangeText={setOrderItemsSummary}
+                    />
+                  </View>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Monto Total ($)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. 120"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric"
+                      value={orderTotalAmount}
+                      onChangeText={setOrderTotalAmount}
+                    />
+                  </View>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Dirección de Envío o Retiro</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. Envío a Av. Libertador 1400 / Retira en local"
+                      placeholderTextColor="#94A3B8"
+                      value={orderDeliveryMethod}
+                      onChangeText={setOrderDeliveryMethod}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.formActions}>
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => setShowAddOrderModal(false)}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.saveBtn}
+                    onPress={handleCreateOrder}
+                    disabled={submittingOrder}
+                  >
+                    {submittingOrder ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.saveBtnText}>Guardar Pedido</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {salesOrders.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <DollarSign size={44} color="#94A3B8" />
+                <Text style={styles.emptyTitle}>No hay pedidos registrados aún</Text>
+                <Text style={styles.emptySub}>
+                  Cuando tus clientes compren productos o cierren un pedido por WhatsApp, el asistente lo registrará automáticamente en esta lista.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.faqList}>
+                {salesOrders.map((ord) => {
+                  const statusColor =
+                    ord.status === 'ENTREGADO'
+                      ? '#16A34A'
+                      : ord.status === 'PAGADO'
+                      ? '#0284C7'
+                      : ord.status === 'EN_CAMINO'
+                      ? '#7C3AED'
+                      : '#D97706';
+                  return (
+                    <View key={ord.id} style={styles.faqCard}>
+                      <View style={styles.faqHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.faqQuestion}>
+                            🛍️ {ord.customerName} {ord.customerPhone ? `(${ord.customerPhone})` : ''}
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#1A73E8', marginTop: 4 }}>
+                            {ord.itemsSummary} — ${ord.totalAmount || 0} {ord.currency || 'USD'}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <View
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                              backgroundColor: '#F8FAFC',
+                              borderWidth: 1,
+                              borderColor: statusColor
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: statusColor }}>
+                              {ord.status || 'PENDIENTE'}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => handleDeleteOrder(ord.id)}
+                            style={styles.deleteBtn}
+                          >
+                            <Trash2 size={14} color="#94A3B8" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <Text style={[styles.faqAnswer, { marginTop: 6 }]}>
+                        📍 Entrega: {ord.deliveryMethod || 'A coordinar'} | 💳 Pago: {ord.paymentMethod || 'A confirmar'}
+                      </Text>
+
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                        {[
+                          { code: 'PENDIENTE', label: '⏳ Pendiente' },
+                          { code: 'PAGADO', label: '💳 Pagado' },
+                          { code: 'EN_CAMINO', label: '🚚 En Camino' },
+                          { code: 'ENTREGADO', label: '✅ Entregado' }
+                        ].map((st) => (
+                          <TouchableOpacity
+                            key={st.code}
+                            onPress={() => handleChangeOrderStatus(ord.id, st.code)}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 6,
+                              borderRadius: 6,
+                              backgroundColor: ord.status === st.code ? '#EFF6FF' : '#F8FAFC',
+                              borderWidth: 1,
+                              borderColor: ord.status === st.code ? '#1A73E8' : '#E2E8F0'
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: '700',
+                                color: ord.status === st.code ? '#1A73E8' : '#475569'
+                              }}
+                            >
+                              {st.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>
