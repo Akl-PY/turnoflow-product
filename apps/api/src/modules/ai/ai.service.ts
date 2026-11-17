@@ -2137,45 +2137,14 @@ ${bookingDirective}
   private async createDefaultProfile(organizationId: string): Promise<BusinessProfile> {
     const profile = this.businessProfileRepo.create({
       organizationId,
-      businessName: 'TurnoFlow Beauty Studio',
-      description: 'Centro de estética integral y cuidado personal',
-      location: 'Av. Santa Fe 2450, Piso 3, Recoleta, Buenos Aires',
-      contactPhone: '+5491133445566',
-      contactEmail: 'contacto@turnoflowstudio.com',
+      businessName: 'Mi Negocio',
+      description: 'Atención al cliente, ventas y gestión de turnos',
+      location: 'Dirección a configurar',
+      contactPhone: '',
+      contactEmail: '',
       currency: 'USD',
-      cancellationPolicy: 'Cancelaciones con al menos 24 horas de antelación sin cargo.',
-      services: [
-        {
-          id: 'srv-001',
-          name: 'Limpieza Facial Profunda',
-          category: 'Facial',
-          description: 'Higiene con punta de diamante extracción e hidratación profunda',
-          price: 45,
-          currency: 'USD',
-          durationMinutes: 60,
-          isActive: true
-        },
-        {
-          id: 'srv-002',
-          name: 'Lifting de Pestañas + Tinte',
-          category: 'Mirada',
-          description: 'Curvatura natural con keratina y tinte negro',
-          price: 35,
-          currency: 'USD',
-          durationMinutes: 50,
-          isActive: true
-        },
-        {
-          id: 'srv-004',
-          name: 'Manicura Rusa',
-          category: 'Uñas',
-          description: 'Tratamiento de cutículas torno y esmaltado premium',
-          price: 28,
-          currency: 'USD',
-          durationMinutes: 60,
-          isActive: true
-        }
-      ],
+      cancellationPolicy: 'Consultar políticas comerciales del negocio.',
+      services: [],
       businessHours: [
         { day: 'monday', open: '09:00', close: '19:00', isOpen: true },
         { day: 'tuesday', open: '09:00', close: '19:00', isOpen: true },

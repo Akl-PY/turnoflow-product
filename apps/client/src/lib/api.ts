@@ -352,58 +352,7 @@ export const DEMO_AGENTS = [
 
 export const DEMO_LEADS: any[] = [];
 
-export const DEMO_SERVICES = [
-  {
-    id: 'srv-001',
-    name: 'Limpieza Facial Profunda',
-    category: 'Facial',
-    description: 'Higiene con punta de diamante extracción e hidratación profunda',
-    price: 45,
-    currency: 'USD',
-    durationMinutes: 60,
-    isActive: true
-  },
-  {
-    id: 'srv-002',
-    name: 'Lifting de Pestañas + Tinte',
-    category: 'Mirada',
-    description: 'Curvatura natural de pestañas con keratina y tinte negro',
-    price: 35,
-    currency: 'USD',
-    durationMinutes: 50,
-    isActive: true
-  },
-  {
-    id: 'srv-003',
-    name: 'Perfilado y Laminado de Cejas',
-    category: 'Mirada',
-    description: 'Diseño según morfología facial fijación y nutrición botox',
-    price: 30,
-    currency: 'USD',
-    durationMinutes: 45,
-    isActive: true
-  },
-  {
-    id: 'srv-004',
-    name: 'Manicura Rusa con Semipermanente',
-    category: 'Uñas',
-    description: 'Tratamiento de cutículas torno y esmaltado premium larga duración',
-    price: 28,
-    currency: 'USD',
-    durationMinutes: 60,
-    isActive: true
-  },
-  {
-    id: 'srv-005',
-    name: 'Depilación Láser Diodo - Zona Completa',
-    category: 'Depilación',
-    description: 'Sesión piernas completas axilas y cavado sistema indoloro',
-    price: 85,
-    currency: 'USD',
-    durationMinutes: 45,
-    isActive: true
-  }
-];
+export const DEMO_SERVICES: any[] = [];
 
 export const DEMO_AUTOMATIONS = [
   {

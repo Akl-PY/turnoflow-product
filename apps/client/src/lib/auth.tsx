@@ -69,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             role: profile.role || 'ADMIN',
             organizationId: profile.organizationId,
             organizationName:
-              profile.organizationName || savedUser?.organizationName || 'TurnoFlow Beauty Studio'
+              profile.organizationName || savedUser?.organizationName || 'Mi Negocio'
           };
           setUser(verifiedUser);
           setStoredUser(verifiedUser);

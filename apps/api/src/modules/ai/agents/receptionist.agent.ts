@@ -29,7 +29,7 @@ export class ReceptionistAgent {
           properties: {
             category: {
               type: 'string',
-              description: 'Categoría opcional (e.g. Facial, Uñas, Mirada, Corporal, Depilación)'
+              description: 'Categoría opcional del servicio o producto'
             }
           }
         }

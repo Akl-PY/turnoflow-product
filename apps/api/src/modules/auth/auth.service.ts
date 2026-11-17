@@ -54,13 +54,13 @@ export class AuthService implements OnModuleInit {
       const adminEmail = 'admin@turnoflow.com';
       const existingAdmin = await this.userRepo.findOne({ where: { email: adminEmail } });
       if (!existingAdmin) {
-        this.logger.log('🌱 Base de datos sin administrador inicial. Ejecutando auto-seed de TurnoFlow Beauty Studio...');
+        this.logger.log('🌱 Base de datos sin administrador inicial. Ejecutando auto-seed inicial...');
 
-        let org = await this.orgRepo.findOne({ where: { slug: 'turnoflow-beauty-studio' } });
+        let org = await this.orgRepo.findOne({ where: { slug: 'mi-negocio' } });
         if (!org) {
           org = this.orgRepo.create({
-            name: 'TurnoFlow Beauty Studio',
-            slug: 'turnoflow-beauty-studio'
+            name: 'Mi Negocio',
+            slug: 'mi-negocio'
           });
           org = await this.orgRepo.save(org);
         }
@@ -78,13 +78,13 @@ export class AuthService implements OnModuleInit {
         });
         await this.userRepo.save(adminUser);
 
-        await this.provisionOrganizationResources(org.id, 'TurnoFlow Beauty Studio', false);
+        await this.provisionOrganizationResources(org.id, 'Mi Negocio', false);
         this.logger.log(`✅ Auto-seed completado: ${adminEmail} (${org.name})`);
       } else {
         // Asegurar que la organización del admin tenga su perfil, agentes y automatizaciones sembradas
         await this.provisionOrganizationResources(
           existingAdmin.organizationId,
-          'TurnoFlow Beauty Studio',
+          'Mi Negocio',
           false
         );
       }
@@ -96,76 +96,23 @@ export class AuthService implements OnModuleInit {
   async provisionOrganizationResources(
     organizationId: string,
     businessName: string,
-    includeDemoData = true
+    includeDemoData = false
   ) {
-    // 1. Perfil de Negocio completo con 5 servicios, horarios IANA y FAQs
+    // 1. Perfil de Negocio limpio y universal (sin datos demo hardcodeados)
     let profile = await this.businessProfileRepo.findOne({ where: { organizationId } });
     if (!profile) {
       profile = this.businessProfileRepo.create({
         organizationId,
-        businessName,
-        description:
-          'Centro de estética integral especializado en cuidado facial, uñas y tratamientos de pestañas.',
-        vertical: BusinessVertical.BEAUTY_SALON,
-        location: 'Av. Santa Fe 2450, Piso 3, Recoleta, Buenos Aires',
+        businessName: businessName || 'Mi Negocio',
+        description: 'Atención al cliente, ventas y gestión de turnos',
+        vertical: BusinessVertical.OTHER,
+        location: 'Dirección a configurar',
         timezone: 'America/Argentina/Buenos_Aires',
-        contactPhone: '+5491133445566',
-        contactEmail: 'contacto@turnoflowstudio.com',
+        contactPhone: '',
+        contactEmail: '',
         currency: 'USD',
-        cancellationPolicy:
-          'Cancelaciones con al menos 24 horas de antelación sin cargo. Dentro de las 24 horas se retiene la seña.',
-        services: [
-          {
-            id: 'srv-001',
-            name: 'Limpieza Facial Profunda',
-            category: 'Facial',
-            description: 'Higiene con punta de diamante extracción e hidratación profunda',
-            price: 45,
-            currency: 'USD',
-            durationMinutes: 60,
-            isActive: true
-          },
-          {
-            id: 'srv-002',
-            name: 'Lifting de Pestañas + Tinte',
-            category: 'Mirada',
-            description: 'Curvatura natural de pestañas con keratina y tinte negro',
-            price: 35,
-            currency: 'USD',
-            durationMinutes: 50,
-            isActive: true
-          },
-          {
-            id: 'srv-003',
-            name: 'Perfilado y Laminado de Cejas',
-            category: 'Mirada',
-            description: 'Diseño según morfología facial fijación y nutrición botox',
-            price: 30,
-            currency: 'USD',
-            durationMinutes: 45,
-            isActive: true
-          },
-          {
-            id: 'srv-004',
-            name: 'Manicura Rusa con Esmaltado Semipermanente',
-            category: 'Uñas',
-            description: 'Tratamiento de cutículas torno y esmaltado premium larga duración',
-            price: 28,
-            currency: 'USD',
-            durationMinutes: 60,
-            isActive: true
-          },
-          {
-            id: 'srv-005',
-            name: 'Depilación Láser Definitiva Diodo - Zona Completa',
-            category: 'Depilación',
-            description: 'Sesión piernas completas axilas y cavado sistema indoloro',
-            price: 85,
-            currency: 'USD',
-            durationMinutes: 45,
-            isActive: true
-          }
-        ],
+        cancellationPolicy: 'Consultar políticas comerciales del negocio.',
+        services: [],
         businessHours: [
           { day: 'monday', open: '09:00', close: '19:00', isOpen: true },
           { day: 'tuesday', open: '09:00', close: '19:00', isOpen: true },
@@ -175,26 +122,7 @@ export class AuthService implements OnModuleInit {
           { day: 'saturday', open: '09:00', close: '18:00', isOpen: true },
           { day: 'sunday', open: '00:00', close: '00:00', isOpen: false }
         ],
-        faqs: [
-          {
-            id: 'faq-001',
-            question: '¿Cuáles son los medios de pago aceptados?',
-            answer:
-              'Efectivo, tarjetas de débito/crédito Visa y Mastercard, transferencias bancarias y Mercado Pago.'
-          },
-          {
-            id: 'faq-002',
-            question: '¿Tienen estacionamiento en la zona?',
-            answer:
-              'Sí, contamos con 50% de descuento en el garaje de Av. Santa Fe 2480 a solo 30 metros.'
-          },
-          {
-            id: 'faq-003',
-            question: '¿Se requiere seña previa para agendar turno?',
-            answer:
-              'Para tu primer turno solicitamos una seña del 30% del valor del servicio que se descuenta luego del total.'
-          }
-        ]
+        faqs: []
       });
       await this.businessProfileRepo.save(profile);
     }
