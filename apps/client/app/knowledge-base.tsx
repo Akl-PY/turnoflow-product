@@ -43,6 +43,7 @@ export default function KnowledgeBaseScreen() {
 
   // Form para nuevo servicio, turno/clase o producto
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [newItemCategory, setNewItemCategory] = useState<'Servicio' | 'Producto'>('Servicio');
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
@@ -53,23 +54,37 @@ export default function KnowledgeBaseScreen() {
   const [newServiceDesc, setNewServiceDesc] = useState('');
   const [submittingService, setSubmittingService] = useState(false);
 
-  // Form para nueva FAQ
+  // Form para nueva / editar / importar FAQs
   const [showAddFaqModal, setShowAddFaqModal] = useState(false);
+  const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
+  const [showBulkFaqModal, setShowBulkFaqModal] = useState(false);
+  const [bulkFaqText, setBulkFaqText] = useState('');
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
   const [submittingFaq, setSubmittingFaq] = useState(false);
 
-  // Contexto extendido, ventas IA y reglas de reenvío a grupos
+  // Contexto extendido, formulario, segmentos y reglas de reenvío a grupos
   const [businessMode, setBusinessMode] = useState<'HYBRID' | 'SALES' | 'BOOKING' | 'INFO'>('HYBRID');
   const [assistantName, setAssistantName] = useState('');
   const [assistantTone, setAssistantTone] = useState('Cercano, amable, resolutivo y profesional (voseo natural)');
   const [customContext, setCustomContext] = useState('');
+  const [enrollmentFormUrl, setEnrollmentFormUrl] = useState('');
+  const [afterFormAction, setAfterFormAction] = useState<'BOOK_TRIAL' | 'HANDOFF_HUMAN'>('BOOK_TRIAL');
   const [paymentInfo, setPaymentInfo] = useState('');
   const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
   const [newContactContext, setNewContactContext] = useState('');
   const [returningContactContext, setReturningContactContext] = useState('');
   const [existingCustomerContext, setExistingCustomerContext] = useState('');
   const [existingCustomerPhonesText, setExistingCustomerPhonesText] = useState('');
+  const [openContextSections, setOpenContextSections] = useState<Record<string, boolean>>({
+    identity: true,
+    form: true,
+    segments: true,
+    payments: false,
+    forwarding: false
+  });
+  const toggleContextSection = (key: string) =>
+    setOpenContextSections((prev) => ({ ...prev, [key]: !prev[key] }));
   const [customForwardingInstructions, setCustomForwardingInstructions] = useState('');
   const [forwardingRules, setForwardingRules] = useState<any[]>([]);
   const [availableGroups, setAvailableGroups] = useState<Array<{ id: string; subject: string; size?: number }>>([]);
@@ -104,6 +119,10 @@ export default function KnowledgeBaseScreen() {
               if (parsed.assistantName) setAssistantName(parsed.assistantName);
               if (parsed.assistantTone) setAssistantTone(parsed.assistantTone);
               if (parsed.customContext) setCustomContext(parsed.customContext);
+              if (parsed.enrollmentFormUrl) setEnrollmentFormUrl(parsed.enrollmentFormUrl);
+              if (parsed.afterFormAction === 'HANDOFF_HUMAN' || parsed.afterFormAction === 'BOOK_TRIAL') {
+                setAfterFormAction(parsed.afterFormAction);
+              }
               if (parsed.paymentInfo) setPaymentInfo(parsed.paymentInfo);
               if (parsed.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
               if (parsed.contactSegmentContexts) {
@@ -265,6 +284,8 @@ export default function KnowledgeBaseScreen() {
           assistantName: assistantName.trim() || undefined,
           assistantTone,
           customContext,
+          enrollmentFormUrl: enrollmentFormUrl.trim(),
+          afterFormAction,
           paymentInfo,
           shippingOrDeliveryInfo,
           contactSegmentContexts: {
@@ -285,6 +306,21 @@ export default function KnowledgeBaseScreen() {
     } finally {
       setSavingContext(false);
     }
+  };
+
+  const startEditService = (srv: any) => {
+    setEditingServiceId(srv.id);
+    setNewItemCategory(srv.category === 'Producto' ? 'Producto' : 'Servicio');
+    setNewServiceName(srv.name || '');
+    setNewServicePrice(String(srv.price ?? '0'));
+    setNewServiceDuration(String(srv.durationMinutes || 60));
+    setNewServiceCapacity(String(srv.maxCapacityPerSlot || 1));
+    setNewServiceSpecificSlots(
+      Array.isArray(srv.specificSlots) ? srv.specificSlots.join(', ') : ''
+    );
+    setNewServiceRequiresTrial(Boolean(srv.requiresTrialFirst));
+    setNewServiceDesc(srv.description || '');
+    setShowAddModal(true);
   };
 
   const handleAddService = async () => {
@@ -315,16 +351,27 @@ export default function KnowledgeBaseScreen() {
     };
 
     try {
-      const res = await apiClient.post('/business/services', item);
-      if (res.data?.services) {
-        setServices(res.data.services);
+      if (editingServiceId) {
+        const updated = services.map((s) =>
+          s.id === editingServiceId ? { ...s, ...item, id: editingServiceId } : s
+        );
+        setServices(updated);
+        await apiClient.put('/business', { services: updated });
       } else {
-        setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+        const res = await apiClient.post('/business/services', item);
+        if (res.data?.services) {
+          setServices(res.data.services);
+        } else {
+          setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+        }
       }
     } catch {
-      setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+      if (!editingServiceId) {
+        setServices([{ id: `srv-${Date.now()}`, ...item }, ...services]);
+      }
     } finally {
       setSubmittingService(false);
+      setEditingServiceId(null);
       setNewServiceName('');
       setNewServicePrice('');
       setNewServiceCapacity('1');
@@ -345,17 +392,31 @@ export default function KnowledgeBaseScreen() {
     }
   };
 
+  const startEditFaq = (faq: any) => {
+    setEditingFaqId(faq.id);
+    setNewFaqQuestion(faq.question || '');
+    setNewFaqAnswer(faq.answer || '');
+    setShowAddFaqModal(true);
+    setShowBulkFaqModal(false);
+  };
+
   const handleAddFaq = async () => {
     if (!newFaqQuestion.trim() || !newFaqAnswer.trim()) return;
     setSubmittingFaq(true);
-    const nextFaqs = [
-      ...faqs,
-      {
-        id: `faq-${Date.now()}`,
-        question: newFaqQuestion.trim(),
-        answer: newFaqAnswer.trim()
-      }
-    ];
+    const nextFaqs = editingFaqId
+      ? faqs.map((f) =>
+          f.id === editingFaqId
+            ? { ...f, question: newFaqQuestion.trim(), answer: newFaqAnswer.trim() }
+            : f
+        )
+      : [
+          ...faqs,
+          {
+            id: `faq-${Date.now()}`,
+            question: newFaqQuestion.trim(),
+            answer: newFaqAnswer.trim()
+          }
+        ];
     setFaqs(nextFaqs);
     try {
       await apiClient.put('/business', { faqs: nextFaqs });
@@ -363,9 +424,76 @@ export default function KnowledgeBaseScreen() {
       // offline fallback
     } finally {
       setSubmittingFaq(false);
+      setEditingFaqId(null);
       setNewFaqQuestion('');
       setNewFaqAnswer('');
       setShowAddFaqModal(false);
+    }
+  };
+
+  const handleBulkImportFaqs = async () => {
+    const raw = bulkFaqText.trim();
+    if (!raw) return;
+    setSubmittingFaq(true);
+
+    const parsedItems: Array<{ id: string; question: string; answer: string }> = [];
+    const lines = raw.split(/\r?\n/).map((l) => l.trim());
+    let currentQ = '';
+    let currentA: string[] = [];
+
+    const flush = () => {
+      if (currentQ.trim() && currentA.join(' ').trim()) {
+        parsedItems.push({
+          id: `faq-${Date.now()}-${parsedItems.length + 1}`,
+          question: currentQ.trim(),
+          answer: currentA.join(' ').trim()
+        });
+      }
+      currentQ = '';
+      currentA = [];
+    };
+
+    for (const line of lines) {
+      if (!line || line.startsWith('#') || line === '---') continue;
+      if (line.includes('|') && !currentQ) {
+        const [qPart, ...aParts] = line.split('|');
+        if (qPart.trim() && aParts.join('|').trim()) {
+          parsedItems.push({
+            id: `faq-${Date.now()}-${parsedItems.length + 1}`,
+            question: qPart.trim(),
+            answer: aParts.join('|').trim()
+          });
+          continue;
+        }
+      }
+      const cleaned = line.replace(/^\*+|\*+$/g, '').replace(/^\d+[.)]\s*/, '').trim();
+      const isQuestionLine =
+        cleaned.endsWith('?') || /^¿/.test(cleaned) || /^(P:|Pregunta:)/i.test(cleaned);
+      if (isQuestionLine) {
+        flush();
+        currentQ = cleaned.replace(/^(P:|Pregunta:)\s*/i, '').trim();
+      } else if (currentQ) {
+        currentA.push(cleaned.replace(/^(R:|Respuesta:)\s*/i, '').trim());
+      }
+    }
+    flush();
+
+    if (parsedItems.length === 0) {
+      alert('No se detectaron pares Pregunta/Respuesta. Asegurate de que cada pregunta termine en "?" o use "Pregunta | Respuesta".');
+      setSubmittingFaq(false);
+      return;
+    }
+
+    const nextFaqs = [...faqs, ...parsedItems];
+    setFaqs(nextFaqs);
+    try {
+      await apiClient.put('/business', { faqs: nextFaqs });
+    } catch {
+      // offline fallback
+    } finally {
+      setSubmittingFaq(false);
+      setBulkFaqText('');
+      setShowBulkFaqModal(false);
     }
   };
 
@@ -657,12 +785,29 @@ export default function KnowledgeBaseScreen() {
                   <View key={srv.id} style={styles.serviceCard}>
                     <View style={styles.serviceHeader}>
                       <Text style={styles.serviceName}>{srv.name}</Text>
-                      <TouchableOpacity
-                        onPress={() => handleDeleteService(srv.id)}
-                        style={styles.deleteBtn}
-                      >
-                        <Trash2 size={14} color="#94A3B8" />
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <TouchableOpacity
+                          onPress={() => startEditService(srv)}
+                          style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            backgroundColor: '#EFF6FF',
+                            borderWidth: 1,
+                            borderColor: '#BFDBFE'
+                          }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                            ✏️ Editar
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleDeleteService(srv.id)}
+                          style={styles.deleteBtn}
+                        >
+                          <Trash2 size={14} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
 
                     <Text style={styles.servicePrice}>
@@ -1029,33 +1174,144 @@ export default function KnowledgeBaseScreen() {
               />
             </View>
 
-            <View style={[styles.formField, { marginTop: 12 }]}>
-              <Text style={styles.fieldLabel}>
-                Medios de Pago, Alias / CBU y Condiciones de Compra
-              </Text>
-              <TextInput
-                style={[styles.formInput, { height: 80, textAlignVertical: 'top' }]}
-                multiline
-                placeholder="Ej. Alias: MI.NEGOCIO.MP (Banco / Billetera), efectivo con descuento, link de pago..."
-                placeholderTextColor="#94A3B8"
-                value={paymentInfo}
-                onChangeText={setPaymentInfo}
-              />
+            {/* ======================================================== */}
+            {/* FORMULARIO DE INGRESO / INSCRIPCIÓN DEDICADO */}
+            {/* ======================================================== */}
+            <View
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 10,
+                backgroundColor: '#F8FAFC',
+                borderWidth: 1,
+                borderColor: '#CBD5E1'
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => toggleContextSection('form')}
+                style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>
+                  🔗 Link de Formulario de Ingreso / Inscripción (Opcional)
+                </Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#1A73E8' }}>
+                  {openContextSections.form ? '▲ Ocultar' : '▼ Editar'}
+                </Text>
+              </TouchableOpacity>
+
+              {openContextSections.form && (
+                <View style={{ marginTop: 12, gap: 10 }}>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>
+                      URL exacta del Formulario (Google Forms, Typeform, web, etc.)
+                    </Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="https://forms.gle/..."
+                      placeholderTextColor="#94A3B8"
+                      value={enrollmentFormUrl}
+                      onChangeText={setEnrollmentFormUrl}
+                    />
+                  </View>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>
+                      ¿Qué hace la IA apenas el alumno/cliente avisa que ya completó el formulario?
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                      {[
+                        {
+                          id: 'BOOK_TRIAL' as const,
+                          label: '📅 Agendar Clase de Prueba / Turno automático'
+                        },
+                        {
+                          id: 'HANDOFF_HUMAN' as const,
+                          label: '👤 Avisar a un humano para revisar'
+                        }
+                      ].map((opt) => (
+                        <TouchableOpacity
+                          key={opt.id}
+                          onPress={() => setAfterFormAction(opt.id)}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            backgroundColor: afterFormAction === opt.id ? '#EFF6FF' : '#FFFFFF',
+                            borderWidth: 1.5,
+                            borderColor: afterFormAction === opt.id ? '#1A73E8' : '#CBD5E1'
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: '700',
+                              color: afterFormAction === opt.id ? '#1A73E8' : '#475569'
+                            }}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              )}
             </View>
 
-            <View style={[styles.formField, { marginTop: 12 }]}>
-              <Text style={styles.fieldLabel}>
-                Envíos, Entregas, Visitas a Domicilio o Retiro en Local
+            {/* Sección colapsable de Pagos & Envíos */}
+            <TouchableOpacity
+              onPress={() => toggleContextSection('payments')}
+              style={{
+                marginTop: 18,
+                paddingVertical: 10,
+                paddingHorizontal: 14,
+                borderRadius: 10,
+                backgroundColor: '#F8FAFC',
+                borderWidth: 1,
+                borderColor: '#E2E8F0',
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>
+                💳 Medios de Pago, Alias / CBU y Envíos / Retiros
               </Text>
-              <TextInput
-                style={[styles.formInput, { height: 70, textAlignVertical: 'top' }]}
-                multiline
-                placeholder="Ej. Envíos a domicilio en el día, retiro por sucursal sin cargo, visitas técnicas..."
-                placeholderTextColor="#94A3B8"
-                value={shippingOrDeliveryInfo}
-                onChangeText={setShippingOrDeliveryInfo}
-              />
-            </View>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#1A73E8' }}>
+                {openContextSections.payments ? '▲ Ocultar' : '▼ Ver / Editar'}
+              </Text>
+            </TouchableOpacity>
+
+            {openContextSections.payments && (
+              <View>
+                <View style={[styles.formField, { marginTop: 12 }]}>
+                  <Text style={styles.fieldLabel}>
+                    Medios de Pago, Alias / CBU y Condiciones de Compra
+                  </Text>
+                  <TextInput
+                    style={[styles.formInput, { height: 80, textAlignVertical: 'top' }]}
+                    multiline
+                    placeholder="Ej. Alias: MI.NEGOCIO.MP (Banco / Billetera), efectivo con descuento, link de pago..."
+                    placeholderTextColor="#94A3B8"
+                    value={paymentInfo}
+                    onChangeText={setPaymentInfo}
+                  />
+                </View>
+
+                <View style={[styles.formField, { marginTop: 12 }]}>
+                  <Text style={styles.fieldLabel}>
+                    Envíos, Entregas, Visitas a Domicilio o Retiro en Local
+                  </Text>
+                  <TextInput
+                    style={[styles.formInput, { height: 70, textAlignVertical: 'top' }]}
+                    multiline
+                    placeholder="Ej. Envíos a domicilio en el día, retiro por sucursal sin cargo, visitas técnicas..."
+                    placeholderTextColor="#94A3B8"
+                    value={shippingOrDeliveryInfo}
+                    onChangeText={setShippingOrDeliveryInfo}
+                  />
+                </View>
+              </View>
+            )}
 
             {/* ======================================================== */}
             {/* REGLAS DE CONTEXTO SEGÚN TIPO DE NÚMERO (NUEVO / YA ESCRIBIÓ / CLIENTE-ESTUDIANTE) */}
@@ -1405,19 +1661,83 @@ export default function KnowledgeBaseScreen() {
                 </Text>
               </View>
 
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => setShowAddFaqModal(!showAddFaqModal)}
-              >
-                <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>Nueva Pregunta</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: '#EFF6FF',
+                    borderWidth: 1,
+                    borderColor: '#BFDBFE',
+                    borderRadius: 8,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10
+                  }}
+                  onPress={() => {
+                    setShowBulkFaqModal(!showBulkFaqModal);
+                    setShowAddFaqModal(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#1D4ED8' }}>
+                    📋 Importar en Bloque
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={() => {
+                    setEditingFaqId(null);
+                    setNewFaqQuestion('');
+                    setNewFaqAnswer('');
+                    setShowAddFaqModal(!showAddFaqModal);
+                    setShowBulkFaqModal(false);
+                  }}
+                >
+                  <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.primaryBtnText}>Nueva Pregunta</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Formulario Nueva FAQ */}
+            {/* Importar FAQs en Bloque */}
+            {showBulkFaqModal && (
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>📋 Importar Múltiples Preguntas en Bloque</Text>
+                <Text style={[styles.emptySub, { textAlign: 'left', marginBottom: 10 }]}>
+                  Pegá todas tus preguntas y respuestas juntas (por ejemplo numeradas con "¿...?" arriba y la respuesta abajo, o usando "Pregunta | Respuesta"). El sistema las separa y guarda todas en un clic.
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 150, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder={'1. ¿Dónde queda la escuela?\nEstamos en Liniers 269, Alta Gracia.\n\n2. ¿Qué horarios tienen?\nDe lunes a jueves según categoría.'}
+                  placeholderTextColor="#94A3B8"
+                  value={bulkFaqText}
+                  onChangeText={setBulkFaqText}
+                />
+                <View style={styles.formActions}>
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => setShowBulkFaqModal(false)}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.saveBtn}
+                    onPress={handleBulkImportFaqs}
+                    disabled={submittingFaq}
+                  >
+                    <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.saveBtnText}>Importar y Guardar Todas</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Formulario Nueva / Editar FAQ */}
             {showAddFaqModal && (
               <View style={styles.formCard}>
-                <Text style={styles.formTitle}>Agregar Pregunta & Respuesta</Text>
+                <Text style={styles.formTitle}>
+                  {editingFaqId ? '✏️ Editar Pregunta & Respuesta' : 'Agregar Pregunta & Respuesta'}
+                </Text>
                 <View style={styles.formField}>
                   <Text style={styles.fieldLabel}>Pregunta del cliente</Text>
                   <TextInput
@@ -1480,12 +1800,29 @@ export default function KnowledgeBaseScreen() {
                   <View key={faq.id} style={styles.faqCard}>
                     <View style={styles.faqHeader}>
                       <Text style={styles.faqQuestion}>{faq.question}</Text>
-                      <TouchableOpacity
-                        onPress={() => handleDeleteFaq(faq.id)}
-                        style={styles.deleteBtn}
-                      >
-                        <Trash2 size={14} color="#94A3B8" />
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <TouchableOpacity
+                          onPress={() => startEditFaq(faq)}
+                          style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            backgroundColor: '#EFF6FF',
+                            borderWidth: 1,
+                            borderColor: '#BFDBFE'
+                          }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                            ✏️ Editar
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleDeleteFaq(faq.id)}
+                          style={styles.deleteBtn}
+                        >
+                          <Trash2 size={14} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     <Text style={styles.faqAnswer}>{faq.answer}</Text>
                   </View>

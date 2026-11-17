@@ -521,6 +521,8 @@ Si ninguna regla aplica, devuelve [].`;
     shippingOrDeliveryInfo: string;
     customForwardingInstructions: string;
     forwardingRules: any[];
+    enrollmentFormUrl: string;
+    afterFormAction: 'BOOK_TRIAL' | 'HANDOFF_HUMAN';
     contactSegmentContexts: {
       newContactContext: string;
       returningContactContext: string;
@@ -538,6 +540,8 @@ Si ninguna regla aplica, devuelve [].`;
       shippingOrDeliveryInfo: '',
       customForwardingInstructions: '',
       forwardingRules: [] as any[],
+      enrollmentFormUrl: '',
+      afterFormAction: 'BOOK_TRIAL' as const,
       contactSegmentContexts: {
         newContactContext: '',
         returningContactContext: '',
@@ -560,6 +564,8 @@ Si ninguna regla aplica, devuelve [].`;
           shippingOrDeliveryInfo: parsed.shippingOrDeliveryInfo || '',
           customForwardingInstructions: parsed.customForwardingInstructions || '',
           forwardingRules: Array.isArray(parsed.forwardingRules) ? parsed.forwardingRules : [],
+          enrollmentFormUrl: parsed.enrollmentFormUrl || '',
+          afterFormAction: parsed.afterFormAction === 'HANDOFF_HUMAN' ? 'HANDOFF_HUMAN' : 'BOOK_TRIAL',
           contactSegmentContexts: {
             newContactContext: seg.newContactContext || '',
             returningContactContext: seg.returningContactContext || '',
@@ -922,6 +928,14 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
       currentSegmentMeta.ruleText ? currentSegmentMeta.ruleText : currentSegmentMeta.defaultHint
     }\n`;
 
+    const enrollmentFormSection = customAi.enrollmentFormUrl
+      ? `\nFORMULARIO OFICIAL DE INGRESO / INSCRIPCIÓN (PRIORIDAD ALTA):\nLink del Formulario: ${customAi.enrollmentFormUrl}\nAcción configurada: ${
+          customAi.afterFormAction === 'BOOK_TRIAL'
+            ? '1) Para alumnos/clientes nuevos, comparte DIRECTAMENTE ese link (nunca digas que un humano se los va a mandar). 2) Apenas avisen que lo completaron, NO derives a humano: consultá inmediatamente la disponibilidad en agenda con check_availability y confirmá su turno / Clase de Prueba con confirm_appointment.'
+            : '1) Comparte DIRECTAMENTE ese link (nunca digas que un humano se los va a mandar). 2) Apenas avisen que lo completaron, utiliza handoff_to_human para que el equipo revise y confirme.'
+        }\n`
+      : '';
+
     const systemPrompt = `Eres "${customAi.assistantName}", el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
 Tono y Personalidad: ${customAi.assistantTone}.
 Modo de Operación: ${modeLabelMap[customAi.businessMode] || modeLabelMap.HYBRID}.
@@ -933,7 +947,7 @@ FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
 Política Comercial / Garantías / Cancelaciones: ${profile.cancellationPolicy}.
 Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
-${contactSegmentSection}${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
+${contactSegmentSection}${enrollmentFormSection}${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
 Catálogo de Productos y Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}

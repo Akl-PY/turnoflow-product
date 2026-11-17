@@ -844,6 +844,23 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     return saved;
   }
 
+  async resetConversationHistory(conversationId: string): Promise<{ success: boolean }> {
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    if (!conv) {
+      throw new BadRequestException('Conversación no encontrada.');
+    }
+    await this.messageRepo.delete({ conversationId });
+    conv.messagesCount = 0;
+    conv.lastMessagePreview = '';
+    conv.status = ConversationStatus.AI_HANDLED;
+    if ((conv.assignedAgent as any) === 'EXCLUDED_PERMANENT') {
+      conv.assignedAgent = AgentRoleType.RECEPTIONIST;
+    }
+    conv.updatedAt = new Date();
+    await this.conversationRepo.save(conv);
+    return { success: true };
+  }
+
   async excludeConversationPermanently(conversationId: string, label?: string): Promise<Conversation> {
     const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
     if (!conv) {

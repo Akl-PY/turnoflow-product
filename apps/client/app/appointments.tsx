@@ -65,6 +65,7 @@ export default function AppointmentsScreen() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [servicesCatalog, setServicesCatalog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Formulario de Nuevo Turno
   const [showAddForm, setShowAddForm] = useState(false);
@@ -231,6 +232,128 @@ export default function AppointmentsScreen() {
             <Text style={styles.newAptBtnText}>Agendar Turno Manualmente</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Resumen Visual de Cupos por Turno del Día */}
+        {(() => {
+          const capacityServices = servicesCatalog.filter(
+            (s) =>
+              (Number(s.maxCapacityPerSlot) || 1) > 1 ||
+              (Array.isArray(s.specificSlots) && s.specificSlots.length > 0)
+          );
+          if (capacityServices.length === 0) return null;
+          const primarySrv = capacityServices[0];
+          const slotsList: string[] =
+            Array.isArray(primarySrv.specificSlots) && primarySrv.specificSlots.length > 0
+              ? primarySrv.specificSlots
+              : ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+          const maxCap = Math.max(1, Number(primarySrv.maxCapacityPerSlot) || 1);
+          const todayIso = new Date().toISOString().split('T')[0];
+          const tomorrowIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+          return (
+            <View
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderWidth: 1,
+                borderColor: '#E2E8F0',
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 16
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: 10
+                }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                  📊 Ocupación de Cupos — {primarySrv.name} ({summaryDate})
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                  {[
+                    { label: 'Hoy', val: todayIso },
+                    { label: 'Mañana', val: tomorrowIso }
+                  ].map((d) => (
+                    <TouchableOpacity
+                      key={d.label}
+                      onPress={() => setSummaryDate(d.val)}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: summaryDate === d.val ? '#EFF6FF' : '#F8FAFC',
+                        borderWidth: 1,
+                        borderColor: summaryDate === d.val ? '#1A73E8' : '#CBD5E1'
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: '700',
+                          color: summaryDate === d.val ? '#1A73E8' : '#475569'
+                        }}
+                      >
+                        {d.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TextInput
+                    style={{
+                      borderWidth: 1,
+                      borderColor: '#CBD5E1',
+                      borderRadius: 6,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      fontSize: 11,
+                      width: 96,
+                      color: '#0F172A'
+                    }}
+                    value={summaryDate}
+                    onChangeText={setSummaryDate}
+                    placeholder="AAAA-MM-DD"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {slotsList.map((slot) => {
+                  const key = `${summaryDate}_${slot}`;
+                  const count = appointments.filter(
+                    (a) => a.status === 'CONFIRMED' && a.slotKey === key
+                  ).length;
+                  const isFull = count >= maxCap;
+                  return (
+                    <View
+                      key={slot}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: isFull ? '#FEF2F2' : count > 0 ? '#FEFCE8' : '#F0FDF4',
+                        borderWidth: 1,
+                        borderColor: isFull ? '#FECACA' : count > 0 ? '#FDE68A' : '#BBF7D0'
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: isFull ? '#DC2626' : count > 0 ? '#B45309' : '#15803D'
+                        }}
+                      >
+                        🕒 {slot} hs • {count}/{maxCap} {isFull ? 'COMPLETO' : 'libre(s)'}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })()}
 
         {/* Formulario de Cita Manual */}
         {showAddForm && (

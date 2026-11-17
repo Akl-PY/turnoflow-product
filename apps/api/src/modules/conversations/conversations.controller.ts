@@ -251,6 +251,24 @@ export class ConversationsController {
 
     const autoFlags = await this.conversationsService.getAutomationFlags(resolvedOrgId);
 
+    // Transcripción Real de Notas de Voz / Audios con Gemini Multimodal
+    if (isAudio && !key.fromMe && this.aiService) {
+      const audioMime = message.audioMessage?.mimetype || 'audio/ogg';
+      let audioBase64 = data.base64 || data.message?.base64 || body.base64 || null;
+      if (!audioBase64 && instanceFromWebhook && (key.id || data.id)) {
+        audioBase64 = await this.integrationsService.getEvolutionMediaBase64(
+          instanceFromWebhook,
+          key.id || data.id
+        );
+      }
+      if (audioBase64) {
+        const transcript = await this.aiService.transcribeAudioBase64(audioBase64, audioMime);
+        if (transcript && transcript.trim()) {
+          rawText = `[Audio transcripto]: ${transcript.trim()}`;
+        }
+      }
+    }
+
     // Lectura Multimodal de Imágenes y Comprobantes de Pago por WhatsApp
     if (isImage && !key.fromMe && autoFlags.visionReceipts) {
       const captionText = message.imageMessage?.caption || '';
@@ -910,6 +928,14 @@ export class ConversationsController {
   @ApiOperation({ summary: 'Quitar exclusión permanente de un contacto y reactivar IA' })
   async unexcludeConversation(@Param('id') id: string) {
     return this.conversationsService.unexcludeConversation(id);
+  }
+
+  @Post(':id/reset-history')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Limpiar mensajes de una conversación para probar desde cero' })
+  async resetConversationHistory(@Param('id') id: string) {
+    return this.conversationsService.resetConversationHistory(id);
   }
 
   @Post(':id/send-message')

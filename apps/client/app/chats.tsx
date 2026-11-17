@@ -66,6 +66,7 @@ export default function ChatsScreen() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'LIST' | 'DETAIL'>('LIST');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'AI_HANDLED' | 'HUMAN_TAKEOVER' | 'EXCLUDED'>('ALL');
+  const [filterSegment, setFilterSegment] = useState<'ALL' | 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [manualMessageText, setManualMessageText] = useState('');
@@ -296,6 +297,7 @@ export default function ChatsScreen() {
     if (filterStatus === 'AI_HANDLED' && (c.status !== 'AI_HANDLED' || isExcluded)) return false;
     if (filterStatus === 'HUMAN_TAKEOVER' && (c.status !== 'HUMAN_TAKEOVER' || isExcluded)) return false;
     if (filterStatus === 'EXCLUDED' && !isExcluded) return false;
+    if (filterSegment !== 'ALL' && (c as any).contactSegment !== filterSegment) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const phoneMatch = (c.channelConversationId || '').toLowerCase().includes(q);
@@ -341,6 +343,22 @@ export default function ChatsScreen() {
       await refetch();
     } catch {
       // Ignorar si falla
+    }
+  };
+
+  const handleResetChatHistory = async (conversationId: string) => {
+    const proceed =
+      Platform.OS === 'web'
+        ? window.confirm('¿Reiniciar este historial para volver a probar la conversación desde cero?')
+        : true;
+    if (!proceed) return;
+    try {
+      await apiClient.post(`/conversations/${conversationId}/reset-history`);
+      setActionNotice('🧹 Historial reiniciado. El próximo mensaje de este número empezará desde cero.');
+      setTimeout(() => setActionNotice(null), 4000);
+      await Promise.all([refetch(), refetchMessages()]);
+    } catch {
+      setActionNotice('⚠️ No se pudo reiniciar el historial.');
     }
   };
 
@@ -430,6 +448,39 @@ export default function ChatsScreen() {
             🚫 Excluidos ({excludedCount})
           </Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Filtros por Segmento de Contacto */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, paddingBottom: 8 }}>
+        {[
+          { id: 'ALL' as const, label: 'Todos' },
+          { id: 'NEW_CONTACT' as const, label: '🆕 Nuevos' },
+          { id: 'RETURNING_CONTACT' as const, label: '💬 Ya escribió' },
+          { id: 'EXISTING_CUSTOMER' as const, label: '⭐ Clientes / Alumnos' }
+        ].map((seg) => (
+          <TouchableOpacity
+            key={seg.id}
+            onPress={() => setFilterSegment(seg.id)}
+            style={{
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 6,
+              backgroundColor: filterSegment === seg.id ? '#EFF6FF' : '#F8FAFC',
+              borderWidth: 1,
+              borderColor: filterSegment === seg.id ? '#1A73E8' : '#E2E8F0'
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '700',
+                color: filterSegment === seg.id ? '#1A73E8' : '#64748B'
+              }}
+            >
+              {seg.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Gestor Rápido de Números Excluidos (Proveedores / Familiares) */}
@@ -772,6 +823,21 @@ export default function ChatsScreen() {
                   {(selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
                     ? '⭐ Cliente / Alumno Actual'
                     : '☆ Marcar Cliente / Alumno'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {!isExcluded && (
+              <TouchableOpacity
+                style={[
+                  styles.whatsappDirectButton,
+                  { backgroundColor: '#F8FAFC', borderColor: '#CBD5E1' }
+                ]}
+                onPress={() => handleResetChatHistory(selectedChat.id)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>
+                  🧹 Reiniciar Chat
                 </Text>
               </TouchableOpacity>
             )}
