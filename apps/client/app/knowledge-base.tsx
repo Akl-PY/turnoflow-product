@@ -28,11 +28,12 @@ export default function KnowledgeBaseScreen() {
   const { user } = useAuth();
   const [services, setServices] = useState<any[]>([]);
   const [faqs, setFaqs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'services' | 'faqs'>('services');
+  const [activeTab, setActiveTab] = useState<'services' | 'faqs' | 'context'>('services');
   const [loading, setLoading] = useState(true);
 
-  // Form para nuevo servicio
+  // Form para nuevo servicio o producto
   const [showAddModal, setShowAddModal] = useState(false);
+  const [newItemCategory, setNewItemCategory] = useState<'Servicio' | 'Producto'>('Servicio');
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
   const [newServiceDuration, setNewServiceDuration] = useState('60');
@@ -44,6 +45,16 @@ export default function KnowledgeBaseScreen() {
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
   const [submittingFaq, setSubmittingFaq] = useState(false);
+
+  // Contexto extendido y ventas IA
+  const [businessMode, setBusinessMode] = useState<'HYBRID' | 'SALES' | 'BOOKING' | 'INFO'>('HYBRID');
+  const [assistantName, setAssistantName] = useState('');
+  const [assistantTone, setAssistantTone] = useState('Cercano, amable, resolutivo y profesional (voseo natural)');
+  const [customContext, setCustomContext] = useState('');
+  const [paymentInfo, setPaymentInfo] = useState('');
+  const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
+  const [savingContext, setSavingContext] = useState(false);
+  const [contextSaved, setContextSaved] = useState(false);
 
   useEffect(() => {
     const fetchBusiness = async () => {
@@ -57,6 +68,19 @@ export default function KnowledgeBaseScreen() {
           if (Array.isArray(res.data.faqs)) {
             setFaqs(res.data.faqs);
           }
+          if (res.data.specialInstructions) {
+            try {
+              const parsed = JSON.parse(res.data.specialInstructions);
+              if (parsed.businessMode) setBusinessMode(parsed.businessMode);
+              if (parsed.assistantName) setAssistantName(parsed.assistantName);
+              if (parsed.assistantTone) setAssistantTone(parsed.assistantTone);
+              if (parsed.customContext) setCustomContext(parsed.customContext);
+              if (parsed.paymentInfo) setPaymentInfo(parsed.paymentInfo);
+              if (parsed.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
+            } catch {
+              setCustomContext(res.data.specialInstructions);
+            }
+          }
         }
       } catch {
         setServices([]);
@@ -68,16 +92,45 @@ export default function KnowledgeBaseScreen() {
     fetchBusiness();
   }, [user?.organizationId]);
 
+  const handleSaveAiContext = async () => {
+    setSavingContext(true);
+    setContextSaved(false);
+    try {
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          bookingEnabled: businessMode === 'SALES' || businessMode === 'INFO' ? false : true,
+          businessMode,
+          assistantName: assistantName.trim() || undefined,
+          assistantTone,
+          customContext,
+          paymentInfo,
+          shippingOrDeliveryInfo,
+          updatedAt: new Date().toISOString()
+        })
+      });
+      setContextSaved(true);
+      setTimeout(() => setContextSaved(false), 3500);
+    } catch {
+      alert('No se pudo guardar el contexto del negocio.');
+    } finally {
+      setSavingContext(false);
+    }
+  };
+
   const handleAddService = async () => {
     if (!newServiceName.trim() || !newServicePrice.trim()) return;
     setSubmittingService(true);
     const item = {
       name: newServiceName.trim(),
-      category: 'General',
-      description: newServiceDesc.trim() || 'Servicio profesional de nuestro negocio',
+      category: newItemCategory,
+      description:
+        newServiceDesc.trim() ||
+        (newItemCategory === 'Producto'
+          ? 'Producto disponible para compra'
+          : 'Servicio profesional de nuestro negocio'),
       price: parseFloat(newServicePrice) || 30,
       currency: 'USD',
-      durationMinutes: parseInt(newServiceDuration, 10) || 60,
+      durationMinutes: newItemCategory === 'Producto' ? 15 : parseInt(newServiceDuration, 10) || 60,
       isActive: true
     };
 
@@ -146,8 +199,8 @@ export default function KnowledgeBaseScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Servicios, Tarifas & Preguntas"
-        subtitle="Administra los precios, tiempos de atención y respuestas automáticas del Asistente de IA"
+        title="Catálogo, Ventas & Contexto IA"
+        subtitle="Administra tus productos, servicios, preguntas frecuentes y entrena al asistente sobre tu negocio"
       />
 
       {/* Tabs */}
@@ -158,7 +211,17 @@ export default function KnowledgeBaseScreen() {
         >
           <Tag size={16} color={activeTab === 'services' ? '#1A73E8' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'services' && styles.tabTextActive]}>
-            Servicios & Tarifas ({services.length})
+            Productos & Servicios ({services.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'context' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('context')}
+        >
+          <Sparkles size={16} color={activeTab === 'context' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'context' && styles.tabTextActive]}>
+            Contexto & Ventas IA
           </Text>
         </TouchableOpacity>
 
@@ -175,7 +238,7 @@ export default function KnowledgeBaseScreen() {
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* ======================================================== */}
-        {/* PESTAÑA: SERVICIOS */}
+        {/* PESTAÑA: PRODUCTOS & SERVICIOS */}
         {/* ======================================================== */}
         {activeTab === 'services' && (
           <View>
@@ -183,7 +246,7 @@ export default function KnowledgeBaseScreen() {
               <View style={styles.infoBanner}>
                 <BookOpen size={16} color="#1A73E8" style={{ marginRight: 8 }} />
                 <Text style={styles.infoBannerText}>
-                  Si no tienes Scalinky vinculado, el asistente utiliza esta lista para cotizar, responder consultas y coordinar turnos por WhatsApp.
+                  Carga aquí los productos que vendes o los servicios que ofreces para que el asistente informe precios, arme presupuestos, tome pedidos o coordine turnos por WhatsApp.
                 </Text>
               </View>
 
@@ -192,52 +255,92 @@ export default function KnowledgeBaseScreen() {
                 onPress={() => setShowAddModal(!showAddModal)}
               >
                 <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>Nuevo Servicio</Text>
+                <Text style={styles.primaryBtnText}>Agregar Ítem al Catálogo</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Modal / Formulario Agregar Servicio */}
+            {/* Modal / Formulario Agregar Producto o Servicio */}
             {showAddModal && (
               <View style={styles.formCard}>
-                <Text style={styles.formTitle}>Dar de Alta Nuevo Servicio o Prestación</Text>
+                <Text style={styles.formTitle}>Dar de Alta Producto o Servicio</Text>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                  {(['Servicio', 'Producto'] as const).map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      onPress={() => setNewItemCategory(cat)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        backgroundColor: newItemCategory === cat ? '#EFF6FF' : '#F8FAFC',
+                        borderWidth: 1.5,
+                        borderColor: newItemCategory === cat ? '#1A73E8' : '#CBD5E1'
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: newItemCategory === cat ? '#1A73E8' : '#475569'
+                        }}
+                      >
+                        {cat === 'Producto' ? '📦 Producto en Venta' : '🛠️ Servicio / Prestación'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
                 <View style={styles.formGrid}>
                   <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Nombre del Servicio / Producto</Text>
+                    <Text style={styles.fieldLabel}>
+                      {newItemCategory === 'Producto' ? 'Nombre del Producto / Artículo' : 'Nombre del Servicio'}
+                    </Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. Mantenimiento Mensual, Consulta General, Reparación..."
+                      placeholder={
+                        newItemCategory === 'Producto'
+                          ? 'Ej. Bomba Autocebante 1HP, Kit de Cloro, Repuesto...'
+                          : 'Ej. Mantenimiento Mensual, Visita Técnica, Consulta...'
+                      }
                       placeholderTextColor="#94A3B8"
                       value={newServiceName}
                       onChangeText={setNewServiceName}
                     />
                   </View>
                   <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Precio Estimado ($ USD o moneda local)</Text>
+                    <Text style={styles.fieldLabel}>Precio ($ USD o moneda local)</Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. 35"
+                      placeholder="Ej. 45"
                       placeholderTextColor="#94A3B8"
                       keyboardType="numeric"
                       value={newServicePrice}
                       onChangeText={setNewServicePrice}
                     />
                   </View>
+                  {newItemCategory === 'Servicio' && (
+                    <View style={styles.formField}>
+                      <Text style={styles.fieldLabel}>Duración Estimada (Minutos)</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        placeholder="Ej. 60"
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="numeric"
+                        value={newServiceDuration}
+                        onChangeText={setNewServiceDuration}
+                      />
+                    </View>
+                  )}
                   <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Duración Estimada (Minutos)</Text>
+                    <Text style={styles.fieldLabel}>Detalles, Stock o Descripción</Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. 60"
-                      placeholderTextColor="#94A3B8"
-                      keyboardType="numeric"
-                      value={newServiceDuration}
-                      onChangeText={setNewServiceDuration}
-                    />
-                  </View>
-                  <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Descripción Breve</Text>
-                    <TextInput
-                      style={styles.formInput}
-                      placeholder="Ej. Incluye revisión técnica, insumos y garantía"
+                      placeholder={
+                        newItemCategory === 'Producto'
+                          ? 'Ej. En stock para entrega inmediata, garantía de 1 año'
+                          : 'Ej. Incluye revisión completa, insumos y asesoramiento'
+                      }
                       placeholderTextColor="#94A3B8"
                       value={newServiceDesc}
                       onChangeText={setNewServiceDesc}
@@ -262,7 +365,9 @@ export default function KnowledgeBaseScreen() {
                     ) : (
                       <>
                         <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                        <Text style={styles.saveBtnText}>Guardar Servicio</Text>
+                        <Text style={styles.saveBtnText}>
+                          Guardar {newItemCategory}
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -307,7 +412,9 @@ export default function KnowledgeBaseScreen() {
                     <View style={styles.serviceFooter}>
                       <View style={styles.durationRow}>
                         <Clock size={13} color="#64748B" style={{ marginRight: 5 }} />
-                        <Text style={styles.durationText}>{srv.durationMinutes || 45} min</Text>
+                        <Text style={styles.durationText}>
+                          {srv.category === 'Producto' ? '📦 Producto en venta' : `${srv.durationMinutes || 45} min`}
+                        </Text>
                       </View>
                       <View style={styles.verifiedTag}>
                         <Check size={11} color="#16A34A" style={{ marginRight: 4 }} />
@@ -322,6 +429,141 @@ export default function KnowledgeBaseScreen() {
         )}
 
         {/* ======================================================== */}
+        {/* PESTAÑA: CONTEXTO, VENTAS Y PERSONALIDAD IA */}
+        {/* ======================================================== */}
+        {activeTab === 'context' && (
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>🧠 Entrenamiento, Ventas y Contexto Libre del Negocio</Text>
+            <Text style={[styles.emptySub, { textAlign: 'left', marginBottom: 16 }]}>
+              Aquí puedes darle todo el contexto que quieras a tu asistente para que venda productos, tome pedidos, pase tu Alias/CBU o responda sobre tu empresa sin depender únicamente de turnos.
+            </Text>
+
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>Modo Principal de Operación</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 12 }}>
+                {[
+                  { id: 'HYBRID' as const, label: '🔄 Híbrido (Ventas, Consultas y Turnos)' },
+                  { id: 'SALES' as const, label: '🛒 Solo Ventas, Pedidos y Presupuestos' },
+                  { id: 'INFO' as const, label: '💬 Atención al Cliente e Info del Negocio' },
+                  { id: 'BOOKING' as const, label: '📅 Foco en Reserva de Turnos' }
+                ].map((m) => (
+                  <TouchableOpacity
+                    key={m.id}
+                    onPress={() => setBusinessMode(m.id)}
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 9,
+                      borderRadius: 8,
+                      backgroundColor: businessMode === m.id ? '#EFF6FF' : '#F8FAFC',
+                      borderWidth: 1.5,
+                      borderColor: businessMode === m.id ? '#1A73E8' : '#CBD5E1'
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: '700',
+                        color: businessMode === m.id ? '#1A73E8' : '#475569'
+                      }}
+                    >
+                      {m.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.formGrid}>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Nombre del Asistente</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Asistente Comercial o Sofi"
+                  placeholderTextColor="#94A3B8"
+                  value={assistantName}
+                  onChangeText={setAssistantName}
+                />
+              </View>
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Tono y Estilo de Comunicación</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Ej. Cercano y amigable (voseo), Vendedor proactivo, Técnico..."
+                  placeholderTextColor="#94A3B8"
+                  value={assistantTone}
+                  onChangeText={setAssistantTone}
+                />
+              </View>
+            </View>
+
+            <View style={[styles.formField, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>
+                Contexto Completo del Negocio, Cómo Vender y Reglas Personalizadas
+              </Text>
+              <TextInput
+                style={[styles.formInput, { height: 130, textAlignVertical: 'top' }]}
+                multiline
+                placeholder="Escribe todo sobre tu negocio: qué venden, cómo cotizar, qué datos pedir al cliente para cerrar una compra o envío, garantías, marcas, promociones..."
+                placeholderTextColor="#94A3B8"
+                value={customContext}
+                onChangeText={setCustomContext}
+              />
+            </View>
+
+            <View style={[styles.formField, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>
+                Medios de Pago, Alias / CBU y Condiciones de Compra
+              </Text>
+              <TextInput
+                style={[styles.formInput, { height: 80, textAlignVertical: 'top' }]}
+                multiline
+                placeholder="Ej. Alias: MI.NEGOCIO.MP (Banco / Billetera), efectivo con descuento, link de pago..."
+                placeholderTextColor="#94A3B8"
+                value={paymentInfo}
+                onChangeText={setPaymentInfo}
+              />
+            </View>
+
+            <View style={[styles.formField, { marginTop: 12 }]}>
+              <Text style={styles.fieldLabel}>
+                Envíos, Entregas, Visitas a Domicilio o Retiro en Local
+              </Text>
+              <TextInput
+                style={[styles.formInput, { height: 70, textAlignVertical: 'top' }]}
+                multiline
+                placeholder="Ej. Envíos a domicilio en el día, retiro por sucursal sin cargo, visitas técnicas..."
+                placeholderTextColor="#94A3B8"
+                value={shippingOrDeliveryInfo}
+                onChangeText={setShippingOrDeliveryInfo}
+              />
+            </View>
+
+            <View style={[styles.formActions, { marginTop: 16 }]}>
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleSaveAiContext}
+                disabled={savingContext}
+              >
+                {savingContext ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.saveBtnText}>Guardar Contexto y Reglas IA</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {contextSaved && (
+              <Text style={{ color: '#15803D', fontSize: 13, fontWeight: '700', marginTop: 10 }}>
+                ✅ ¡Contexto guardado! El asistente ya responde y vende con esta configuración.
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* ======================================================== */}
         {/* PESTAÑA: PREGUNTAS FRECUENTES (FAQ) */}
         {/* ======================================================== */}
         {activeTab === 'faqs' && (
@@ -330,7 +572,7 @@ export default function KnowledgeBaseScreen() {
               <View style={styles.infoBanner}>
                 <HelpCircle size={16} color="#1A73E8" style={{ marginRight: 8 }} />
                 <Text style={styles.infoBannerText}>
-                  El asistente consulta estas respuestas ante dudas sobre métodos de pago, señas, ubicación o preparación previa.
+                  El asistente consulta estas respuestas ante dudas sobre métodos de pago, envíos, ubicación o garantías.
                 </Text>
               </View>
 
@@ -348,7 +590,7 @@ export default function KnowledgeBaseScreen() {
               <View style={styles.formCard}>
                 <Text style={styles.formTitle}>Agregar Pregunta & Respuesta</Text>
                 <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>Pregunta de la clienta</Text>
+                  <Text style={styles.fieldLabel}>Pregunta del cliente</Text>
                   <TextInput
                     style={styles.formInput}
                     placeholder="Ej. ¿Qué formas de pago aceptan?"

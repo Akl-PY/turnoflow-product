@@ -152,7 +152,7 @@ export default function DashboardScreen() {
     <View style={styles.container}>
       <Header
         title="Panel de Control"
-        subtitle={`Recepción inteligente 24/7 — ${user?.organizationName || 'Mi Salón'}`}
+        subtitle={`Recepción y Ventas Inteligentes 24/7 — ${user?.organizationName || 'Mi Negocio'}`}
       />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -176,8 +176,8 @@ export default function DashboardScreen() {
               </View>
               <Text style={styles.hubSubtitle}>
                 {isWhatsAppConnected
-                  ? `WhatsApp enlazado correctamente (${connectedPhone || 'Móvil vinculado'}). Respondiendo preguntas y agendando turnos.`
-                  : 'Vinculá tu WhatsApp escaneando el código QR para que la IA atienda a tus clientas de forma automática.'}
+                  ? `WhatsApp enlazado correctamente (${connectedPhone || 'Móvil vinculado'}). Respondiendo consultas, ventas y turnos 24/7.`
+                  : 'Vinculá tu WhatsApp escaneando el código QR para que la IA atienda a tus clientes, venda productos y coordine turnos de forma automática.'}
               </Text>
             </View>
 
@@ -252,7 +252,7 @@ export default function DashboardScreen() {
           {/* Barra Inferior Limpia */}
           <View style={styles.hubFooterBar}>
             <Text style={styles.hubFooterNote}>
-              💡 Los turnos confirmados y las consultas de clientas aparecerán acá en tiempo real.
+              💡 Las ventas, turnos confirmados y consultas de tus clientes aparecerán acá en tiempo real.
             </Text>
 
             <TouchableOpacity
@@ -341,7 +341,7 @@ export default function DashboardScreen() {
               <Calendar size={36} color="#94a3b8" style={{ marginBottom: 12 }} />
               <Text style={styles.emptyTitle}>Tu panel está limpio y listo para empezar</Text>
               <Text style={styles.emptyDesc}>
-                Cuando tus clientas te escriban al WhatsApp, verás reflejados acá sus turnos y sus consultas de precios al instante.
+                Cuando tus clientes te escriban al WhatsApp, verás reflejados acá sus pedidos, turnos y consultas de precios al instante.
               </Text>
               <TouchableOpacity
                 style={styles.emptyActionBtn}

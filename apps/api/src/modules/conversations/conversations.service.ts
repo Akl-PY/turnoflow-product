@@ -5,9 +5,10 @@ import * as crypto from 'crypto';
 import { Conversation } from '../../entities/conversation.entity';
 import { Message } from '../../entities/message.entity';
 import { BusinessProfile } from '../../entities/business-profile.entity';
+import { Lead } from '../../entities/lead.entity';
 import { AiService } from '../ai/ai.service';
 import { IntegrationsService } from '../integrations/integrations.service';
-import { ConversationStatus, MessageSender } from '@turnoflow/shared';
+import { ConversationStatus, MessageSender, LeadStatus, LeadIntent, LeadPriority } from '@turnoflow/shared';
 
 @Injectable()
 export class ConversationsService {
@@ -26,7 +27,10 @@ export class ConversationsService {
     @Optional()
     private readonly aiService?: AiService,
     @Optional()
-    private readonly integrationsService?: IntegrationsService
+    private readonly integrationsService?: IntegrationsService,
+    @Optional()
+    @InjectRepository(Lead)
+    private readonly leadRepo?: Repository<Lead>
   ) {}
 
   getTenantVerifyToken(organizationId: string): string {
@@ -273,11 +277,143 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     }
     await this.conversationRepo.save(conversation);
 
+    // 4. Auto-captura y clasificación de Lead en CRM a partir de la interacción
+    await this.autoCaptureLeadFromMessage(
+      orgId,
+      params.senderPhone,
+      params.senderName,
+      params.messageText,
+      Boolean(aiResult.handoffToHuman),
+      aiResult.toolExecutions || []
+    );
+
     return {
       replyMessage: aiResult.replyText,
       handoffToHuman: aiResult.handoffToHuman,
       duplicate: false
     };
+  }
+
+  private async autoCaptureLeadFromMessage(
+    organizationId: string,
+    rawPhone: string,
+    senderName: string,
+    messageText: string,
+    handoffToHuman: boolean,
+    toolExecutions: any[]
+  ): Promise<void> {
+    if (!this.leadRepo) return;
+    try {
+      const cleanDigits = rawPhone.replace(/\D/g, '');
+      if (!cleanDigits || cleanDigits.length < 7) return;
+      const formattedPhone = `+${cleanDigits}`;
+      const textLower = (messageText || '').toLowerCase();
+
+      // Clasificar intención y temperatura automáticamente
+      let intent = LeadIntent.INFORMATIONAL;
+      let priority = LeadPriority.WARM;
+      let status = LeadStatus.NEW;
+
+      const isUrgentOrHuman =
+        handoffToHuman ||
+        textLower.includes('urgente') ||
+        textLower.includes('rompi') ||
+        textLower.includes('roto') ||
+        textLower.includes('reclamo') ||
+        textLower.includes('problema') ||
+        textLower.includes('humano') ||
+        textLower.includes('persona');
+
+      const isBuyingOrBooking =
+        textLower.includes('comprar') ||
+        textLower.includes('precio') ||
+        textLower.includes('cuanto') ||
+        textLower.includes('cuánto') ||
+        textLower.includes('presupuesto') ||
+        textLower.includes('turno') ||
+        textLower.includes('reservar') ||
+        textLower.includes('agendar') ||
+        textLower.includes('comprobante_detectado') ||
+        textLower.includes('transferencia') ||
+        textLower.includes('quiero');
+
+      const bookedAppointment = toolExecutions.some(
+        (t) => t.toolName === 'confirm_appointment' && t.success
+      );
+
+      if (bookedAppointment || textLower.includes('comprobante_detectado')) {
+        intent = LeadIntent.HIGH;
+        priority = LeadPriority.HOT;
+        status = LeadStatus.BOOKED;
+      } else if (isUrgentOrHuman) {
+        intent = LeadIntent.URGENT;
+        priority = LeadPriority.HOT;
+        status = LeadStatus.PENDING;
+      } else if (isBuyingOrBooking) {
+        intent = LeadIntent.HIGH;
+        priority = LeadPriority.HOT;
+        status = LeadStatus.INTERESTED;
+      }
+
+      // Detectar si mencionó algún servicio o producto del catálogo
+      let detectedItem: string | undefined;
+      if (this.profileRepo) {
+        const profile = await this.profileRepo.findOne({ where: { organizationId } });
+        if (profile && Array.isArray(profile.services)) {
+          const matched = profile.services.find((s) =>
+            textLower.includes(s.name.toLowerCase())
+          );
+          if (matched) {
+            detectedItem = matched.name;
+          }
+        }
+      }
+
+      const existing = await this.leadRepo.findOne({
+        where: [
+          { organizationId, phone: formattedPhone },
+          { organizationId, phone: cleanDigits },
+          { organizationId, phone: rawPhone }
+        ]
+      });
+
+      if (!existing) {
+        const newLead = this.leadRepo.create({
+          organizationId,
+          name: senderName && senderName !== 'Cliente' ? senderName : `Contacto ${formattedPhone}`,
+          phone: formattedPhone,
+          requestedService: detectedItem || 'Consulta General / WhatsApp',
+          intent,
+          priority,
+          status,
+          source: 'whatsapp',
+          notes: messageText.substring(0, 200),
+          lastInteractionAt: new Date()
+        });
+        await this.leadRepo.save(newLead);
+      } else {
+        if (senderName && senderName !== 'Cliente' && existing.name.startsWith('Contacto ')) {
+          existing.name = senderName;
+        }
+        if (detectedItem) {
+          existing.requestedService = detectedItem;
+        }
+        if (priority === LeadPriority.HOT) {
+          existing.priority = LeadPriority.HOT;
+        }
+        if (intent === LeadIntent.URGENT || intent === LeadIntent.HIGH) {
+          existing.intent = intent;
+        }
+        if (status === LeadStatus.BOOKED) {
+          existing.status = LeadStatus.BOOKED;
+        }
+        existing.notes = messageText.substring(0, 200);
+        existing.lastInteractionAt = new Date();
+        await this.leadRepo.save(existing);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Auto-captura de lead omitida: ${err.message}`);
+    }
   }
 
   async findAll(organizationId: string): Promise<Conversation[]> {

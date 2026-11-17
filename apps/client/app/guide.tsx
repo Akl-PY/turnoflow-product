@@ -41,7 +41,7 @@ export default function GuideScreen() {
     <View style={styles.container}>
       <Header
         title="Guía de Uso & Funcionamiento"
-        subtitle="Aprende en 5 simples pasos cómo opera TurnoFlow AI para automatizar los turnos de tu salón"
+        subtitle="Aprende en 5 simples pasos cómo opera TurnoFlow AI para automatizar las ventas, consultas y turnos de tu negocio"
       />
 
       {/* Top Banner de Descarga */}
@@ -49,7 +49,7 @@ export default function GuideScreen() {
         <View style={{ flex: 1 }}>
           <Text style={styles.downloadHeroTitle}>Manual Visual de Implementación Rápida</Text>
           <Text style={styles.downloadHeroSub}>
-            Guía ilustrada sin lenguaje técnico para dueños de salones de belleza, estéticas y spas.
+            Guía ilustrada paso a paso para cualquier comercio, empresa de servicios, consultorio o profesional.
           </Text>
         </View>
         <TouchableOpacity style={styles.downloadBtn} onPress={openManualPdf}>

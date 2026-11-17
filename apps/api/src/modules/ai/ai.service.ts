@@ -273,6 +273,119 @@ export class AiService {
     return null;
   }
 
+  async analyzeImageBase64(
+    base64Data: string,
+    mimeType = 'image/jpeg',
+    caption = '',
+    businessName = 'nuestro negocio'
+  ): Promise<{
+    analysisText: string;
+    isPaymentReceipt: boolean;
+    receiptSummary?: string;
+  } | null> {
+    const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    const cleanKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
+    const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '').trim();
+
+    if (!cleanBase64 || !cleanKey) return null;
+
+    const promptText = `Analiza esta imagen enviada por un cliente por WhatsApp a "${businessName}".${
+      caption ? ` El cliente acompañó la imagen con el mensaje: "${caption}".` : ''
+    }
+Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
+- Si ES un comprobante de pago o transferencia, responde comenzando EXACTAMENTE con la etiqueta "[COMPROBANTE]" seguida de los datos extraídos: Monto, Fecha/Hora, Emisor/Destinatario, Banco/Billetera y Número de operación.
+- Si NO es un comprobante (por ejemplo: foto de un producto que busca comprar, un equipo o instalación rota, una consulta técnica o visual), responde comenzando con "[CONSULTA_VISUAL]" y describe con precisión qué se observa en la imagen para que el asistente comercial pueda asesorar al cliente.`;
+
+    const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+    for (const model of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+        const res = await axios.post(
+          url,
+          {
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: promptText },
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: cleanBase64
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 18000
+          }
+        );
+
+        const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (text) {
+          const isReceipt = text.startsWith('[COMPROBANTE]') || text.toLowerCase().includes('comprobante de');
+          const cleanAnalysis = text
+            .replace(/^\[COMPROBANTE\]\s*/i, '')
+            .replace(/^\[CONSULTA_VISUAL\]\s*/i, '')
+            .trim();
+          this.logger.log(`[IMAGEN ANALIZADA CON ${model}] Comprobante=${isReceipt}: "${cleanAnalysis.substring(0, 120)}"`);
+          return {
+            analysisText: cleanAnalysis,
+            isPaymentReceipt: isReceipt,
+            receiptSummary: isReceipt ? cleanAnalysis : undefined
+          };
+        }
+      } catch (err: any) {
+        this.logger.warn(`Análisis de imagen con Gemini ${model} falló: ${err?.message}`);
+      }
+    }
+
+    return null;
+  }
+
+  private extractCustomAiSettings(profile: BusinessProfile): {
+    businessMode: 'HYBRID' | 'SALES' | 'BOOKING' | 'INFO';
+    assistantName: string;
+    assistantTone: string;
+    customContext: string;
+    paymentInfo: string;
+    shippingOrDeliveryInfo: string;
+  } {
+    const defaults = {
+      businessMode: 'HYBRID' as const,
+      assistantName: `Asistente de ${profile.businessName}`,
+      assistantTone: 'Cercano, amable, resolutivo y profesional (voseo natural)',
+      customContext: '',
+      paymentInfo: '',
+      shippingOrDeliveryInfo: ''
+    };
+
+    if (profile?.specialInstructions) {
+      try {
+        const parsed = JSON.parse(profile.specialInstructions);
+        return {
+          businessMode: parsed.businessMode || (parsed.bookingEnabled === false ? 'SALES' : 'HYBRID'),
+          assistantName: parsed.assistantName || defaults.assistantName,
+          assistantTone: parsed.assistantTone || defaults.assistantTone,
+          customContext: parsed.customContext || '',
+          paymentInfo: parsed.paymentInfo || '',
+          shippingOrDeliveryInfo: parsed.shippingOrDeliveryInfo || ''
+        };
+      } catch {
+        // Si specialInstructions era texto plano libre, usarlo como customContext
+        return {
+          ...defaults,
+          customContext: profile.specialInstructions
+        };
+      }
+    }
+
+    return defaults;
+  }
+
   async getDefaultProfile(): Promise<BusinessProfile | null> {
     return this.businessProfileRepo.findOne({ where: {} });
   }
@@ -418,30 +531,54 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
     }
     const isoDate = now.toISOString().split('T')[0];
 
-    const bookingDirective = bookingEnabled
-      ? `4. CONSULTA DE DISPONIBILIDAD Y TURNOS: La agenda está HABILITADA. Para verificar turnos libres, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD), el nombre/ID del servicio y opcionalmente el nombre del empleado.`
-      : `4. AGENDA DESHABILITADA: Este negocio tiene DESHABILITADA la toma automática de turnos por calendario. Responde todas las consultas sobre servicios, precios, presupuestos, horarios de atención y ubicación. Si el cliente quiere contratar un servicio, coordinar una visita o reservar, regístralo o utiliza 'handoff_to_human' e indícale que ya avisaste a un asesor del equipo para coordinarlo personalmente.`;
+    const customAi = this.extractCustomAiSettings(profile);
+    const modeLabelMap: Record<string, string> = {
+      HYBRID: 'Híbrido (Ventas de Productos/Servicios, Presupuestos, Consultas y Turnos)',
+      SALES: 'Ventas, Toma de Pedidos, Presupuestos y Atención Comercial (Sin Turnos)',
+      BOOKING: 'Gestión de Turnos, Citas y Atención al Cliente',
+      INFO: 'Asesoramiento, Información del Negocio y Soporte al Cliente'
+    };
 
-    const systemPrompt = `Eres el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
-Descripción del Negocio: ${profile.description || 'Atención comercial y servicios profesionales'}.
+    const bookingDirective = bookingEnabled && customAi.businessMode !== 'SALES' && customAi.businessMode !== 'INFO'
+      ? `4. CONSULTA DE DISPONIBILIDAD Y TURNOS: La agenda está HABILITADA. Si el cliente busca un turno o visita, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD), el nombre/ID del servicio y opcionalmente el nombre del empleado. Si el cliente solo quiere comprar un producto o hacer una consulta general, asesóralo y bríndale los medios de pago o detalles sin forzar un turno.`
+      : `4. MODO VENTAS Y ATENCIÓN (SIN AGENDA DE CALENDARIO): Este negocio opera sin agenda automática de calendario. Tu objetivo es asesorar sobre productos y servicios, informar precios, explicar cómo comprar, brindar los datos de pago/envío y responder cualquier duda sobre el negocio. Cuando el cliente confirme que quiere comprar, encargar o coordinar con el equipo, registra sus datos con 'create_lead' o utiliza 'handoff_to_human' e indícale que ya avisaste a un asesor para finalizar su pedido.`;
+
+    const customContextSection = customAi.customContext
+      ? `\nCONTEXTO DETALLADO, REGLAS E INFORMACIÓN PROPIA DEL NEGOCIO:\n${customAi.customContext}\n`
+      : '';
+
+    const paymentSection = customAi.paymentInfo
+      ? `\nMEDIOS DE PAGO, ALIAS / CBU Y CONDICIONES DE COMPRA:\n${customAi.paymentInfo}\n`
+      : '';
+
+    const shippingSection = customAi.shippingOrDeliveryInfo
+      ? `\nENVÍOS, ENTREGAS Y MODALIDAD DE ATENCIÓN:\n${customAi.shippingOrDeliveryInfo}\n`
+      : '';
+
+    const systemPrompt = `Eres "${customAi.assistantName}", el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
+Tono y Personalidad: ${customAi.assistantTone}.
+Modo de Operación: ${modeLabelMap[customAi.businessMode] || modeLabelMap.HYBRID}.
+Descripción del Negocio: ${profile.description || 'Atención comercial, venta de productos y servicios profesionales'}.
 Ubicación / Cobertura: ${profile.location}.
 Horarios de Atención del Negocio: ${hoursList}.
 Zona Horaria: ${timeZone}.
 FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
-Política Comercial / Cancelaciones: ${profile.cancellationPolicy}.
+Política Comercial / Garantías / Cancelaciones: ${profile.cancellationPolicy}.
 Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
-Catálogo Propio del Negocio:
+${customContextSection}${paymentSection}${shippingSection}
+Catálogo de Productos y Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
 
 REGLAS ESTRICTAS DE CONVERSACIÓN:
-1. ADÁPTATE AL RUBRO REAL DEL NEGOCIO: Responde acorde a la actividad de "${profile.businessName}" (${profile.description || 'servicios generales'}). Nunca asumas un rubro distinto al descripto en el catálogo.
-2. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un servicio o producto específico en mensajes anteriores, NO le vuelvas a preguntar qué servicio necesita.
+1. ADÁPTATE AL RUBRO Y CONTEXTO REAL DEL NEGOCIO: Responde acorde a la actividad de "${profile.businessName}" y aplica toda la información del CONTEXTO DETALLADO de arriba. Puedes vender productos, armar presupuestos, explicar cómo trabaja el negocio o coordinar servicios.
+2. MANTÉN EL HILO DE LA CONVERSACIÓN: Si el cliente ya mencionó o preguntó por un producto o servicio específico en mensajes anteriores, NO le vuelvas a preguntar qué busca.
 3. CÁLCULO DE FECHAS Y CONCISIÓN: Cuando el cliente diga "mañana", "hoy", "este viernes", calcula la fecha exacta en base a la FECHA ACTUAL (${isoDate}). Si la conversación ya está en curso, NO vuelvas a saludar con "¡Hola!"; responde de forma directa, natural y empática.
 ${bookingDirective}
-5. NO INVENTES: No inventes precios, empleados, horarios ni servicios que no figuren en el catálogo.
-6. ATENCIÓN HUMANA: Si el cliente solicita hablar con una persona, dueño o encargado, si hay una urgencia técnica o si la agenda arroja estado desincronizado: utiliza SIEMPRE la herramienta 'handoff_to_human' y confírmale que ya notificaste al equipo humano para que le atiendan a la brevedad.`;
+5. COMPRAS Y COMPROBANTES: Si el cliente quiere comprar o pagar y hay datos en MEDIOS DE PAGO, proporciónale esos datos claramente. Si el cliente envía una imagen de comprobante de pago ([COMPROBANTE_DETECTADO]), confírmale que recibiste el comprobante con los datos detectados y que ya notificaste a administración.
+6. NO INVENTES: No inventes precios, empleados, horarios ni condiciones que no figuren en el contexto o catálogo.
+7. ATENCIÓN HUMANA: Si el cliente solicita hablar con una persona, dueño o encargado, si quiere cerrar una compra especial, si hay una urgencia técnica o si la agenda arroja estado desincronizado: utiliza SIEMPRE la herramienta 'handoff_to_human' y confírmale que ya notificaste al equipo humano para que le atiendan a la brevedad.`;
 
     const historyMessages: ChatMessage[] = [];
 

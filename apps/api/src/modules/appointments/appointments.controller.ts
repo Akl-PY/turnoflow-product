@@ -66,4 +66,13 @@ export class AppointmentsController {
     const orgId = req.user.organizationId;
     return this.appointmentsService.cancelAppointment(orgId, id, reason);
   }
+
+  @Post(':id/send-reminder')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enviar recordatorio por WhatsApp a un turno específico' })
+  async sendReminder(@Request() req: any, @Param('id') id: string) {
+    const orgId = req.user.organizationId;
+    return this.appointmentsService.sendManualReminder(orgId, id);
+  }
 }

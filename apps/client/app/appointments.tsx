@@ -65,11 +65,12 @@ export default function AppointmentsScreen() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [serviceName, setServiceName] = useState('Tratamiento Capilar');
+  const [serviceName, setServiceName] = useState('Servicio / Visita General');
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [bookingTime, setBookingTime] = useState('16:00');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAppointments = async () => {
@@ -88,6 +89,18 @@ export default function AppointmentsScreen() {
     fetchAppointments();
   }, [user?.organizationId]);
 
+  const handleSendReminder = async (id: string) => {
+    setReminderFeedback(null);
+    try {
+      const res = await apiClient.post(`/appointments/${id}/send-reminder`);
+      setReminderFeedback(res.data?.message || '🔔 Recordatorio enviado por WhatsApp.');
+      setTimeout(() => setReminderFeedback(null), 4000);
+    } catch {
+      setReminderFeedback('⚠️ No se pudo enviar el recordatorio. Verifica la conexión QR de WhatsApp.');
+      setTimeout(() => setReminderFeedback(null), 4000);
+    }
+  };
+
   const handleCreateAppointment = async () => {
     if (!customerName.trim() || !customerPhone.trim()) return;
     setSubmitting(true);
@@ -95,6 +108,7 @@ export default function AppointmentsScreen() {
     const payload = {
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
+      serviceId: serviceName.trim(),
       serviceName: serviceName.trim(),
       startTime: startIso,
       organizationId: user?.organizationId,
@@ -102,7 +116,7 @@ export default function AppointmentsScreen() {
     };
 
     try {
-      const res = await apiClient.post('/appointments', payload);
+      const res = await apiClient.post('/appointments/confirm-booking', payload);
       setAppointments((prev) => [formatAppointmentItem(res.data), ...prev]);
     } catch {
       const fallbackItem = {
@@ -130,7 +144,7 @@ export default function AppointmentsScreen() {
       setAppointments((prev) =>
         prev.map((apt) => (apt.id === id ? { ...apt, status: 'CANCELLED' } : apt))
       );
-      apiClient.delete(`/appointments/${id}`).catch(() => {});
+      apiClient.patch(`/appointments/${id}/cancel`).catch(() => {});
     };
 
     if (Platform.OS === 'web') {
@@ -145,11 +159,47 @@ export default function AppointmentsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Agenda & Citas del Salón"
-        subtitle="Visualiza los turnos confirmados por el asistente de WhatsApp y agenda nuevas visitas"
+        title="Agenda & Citas del Negocio"
+        subtitle="Visualiza los turnos confirmados por el asistente de WhatsApp, envía recordatorios y agenda visitas"
       />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Aviso de Recordatorios Automáticos */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#EFF6FF',
+            borderWidth: 1,
+            borderColor: '#BFDBFE',
+            borderRadius: 10,
+            padding: 12,
+            marginBottom: 16
+          }}
+        >
+          <Sparkles size={16} color="#1D4ED8" style={{ marginRight: 8 }} />
+          <Text style={{ fontSize: 12, color: '#1E3A8A', flex: 1 }}>
+            🔔 <Text style={{ fontWeight: '700' }}>Recordatorios Automáticos Activos:</Text> El sistema envía un aviso automático por WhatsApp a tus clientes <Text style={{ fontWeight: '700' }}>24 hs antes y 2 hs antes</Text> de cada turno confirmado. También puedes enviar un recordatorio manual desde cada tarjeta.
+          </Text>
+        </View>
+
+        {reminderFeedback && (
+          <View
+            style={{
+              backgroundColor: '#F0FDF4',
+              borderWidth: 1,
+              borderColor: '#BBF7D0',
+              borderRadius: 8,
+              padding: 10,
+              marginBottom: 14
+            }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D' }}>
+              {reminderFeedback}
+            </Text>
+          </View>
+        )}
+
         {/* Barra Superior */}
         <View style={styles.topToolbar}>
           <View style={styles.statsSummary}>
@@ -177,10 +227,10 @@ export default function AppointmentsScreen() {
             <Text style={styles.formTitle}>Nuevo Turno en Agenda</Text>
             <View style={styles.formGrid}>
               <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>Nombre de la Clienta</Text>
+                <Text style={styles.fieldLabel}>Nombre del Cliente</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Camila Benítez"
+                  placeholder="Ej. Juan Pérez"
                   placeholderTextColor="#94A3B8"
                   value={customerName}
                   onChangeText={setCustomerName}
@@ -197,10 +247,10 @@ export default function AppointmentsScreen() {
                 />
               </View>
               <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>Tratamiento / Servicio</Text>
+                <Text style={styles.fieldLabel}>Servicio / Motivo</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Balayage & Brushing"
+                  placeholder="Ej. Mantenimiento Mensual, Revisión, Consulta..."
                   placeholderTextColor="#94A3B8"
                   value={serviceName}
                   onChangeText={setServiceName}
@@ -210,7 +260,7 @@ export default function AppointmentsScreen() {
                 <Text style={styles.fieldLabel}>Fecha (AAAA-MM-DD)</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="2026-11-15"
+                  placeholder="2026-11-20"
                   placeholderTextColor="#94A3B8"
                   value={bookingDate}
                   onChangeText={setBookingDate}
@@ -230,7 +280,7 @@ export default function AppointmentsScreen() {
                 <Text style={styles.fieldLabel}>Notas adicionales</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Recordatorio de traer pelo lavado"
+                  placeholder="Ej. Dirección o detalles del servicio"
                   placeholderTextColor="#94A3B8"
                   value={notes}
                   onChangeText={setNotes}
@@ -275,7 +325,7 @@ export default function AppointmentsScreen() {
               <Calendar size={44} color="#94A3B8" />
               <Text style={styles.emptyTitle}>No hay citas agendadas aún</Text>
               <Text style={styles.emptySub}>
-                Cuando tus clientas coordinen un turno por WhatsApp, el Asistente de IA lo confirmará y aparecerá inmediatamente en esta lista.
+                Cuando tus clientes coordinen un turno o visita por WhatsApp, el Asistente de IA lo confirmará y aparecerá inmediatamente en esta lista.
               </Text>
             </View>
           ) : (
@@ -289,7 +339,7 @@ export default function AppointmentsScreen() {
                     <Text style={styles.dateText}>{apt.date}</Text>
                   </View>
 
-                  {/* Detalle Clienta y Servicio */}
+                  {/* Detalle Cliente y Servicio */}
                   <View style={styles.detailBlock}>
                     <Text style={styles.customerName}>{apt.customerName}</Text>
                     <View style={styles.phoneRow}>
@@ -317,12 +367,30 @@ export default function AppointmentsScreen() {
                     )}
 
                     {isConfirmed && (
-                      <TouchableOpacity
-                        style={styles.cancelAptBtn}
-                        onPress={() => handleCancelAppointment(apt.id)}
-                      >
-                        <Text style={styles.cancelAptBtnText}>Cancelar turno</Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                        <TouchableOpacity
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            backgroundColor: '#EFF6FF',
+                            borderWidth: 1,
+                            borderColor: '#BFDBFE'
+                          }}
+                          onPress={() => handleSendReminder(apt.id)}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                            🔔 Recordatorio WhatsApp
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.cancelAptBtn}
+                          onPress={() => handleCancelAppointment(apt.id)}
+                        >
+                          <Text style={styles.cancelAptBtnText}>Cancelar turno</Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
                   </View>
                 </View>

@@ -62,17 +62,23 @@ export default function OnboardingScreen() {
   const [showOwnerAuth, setShowOwnerAuth] = useState(false);
   const [ownerVerified, setOwnerVerified] = useState(false);
 
-  // Datos Comerciales & Horarios
+  // Datos Comerciales, Personalización IA & Horarios
   const [businessName, setBusinessName] = useState(
     user?.organizationName || 'Mi Negocio'
   );
-  const [description, setDescription] = useState('Atención comercial y coordinación de servicios');
+  const [description, setDescription] = useState('Atención comercial, venta de productos y coordinación de servicios');
   const [location, setLocation] = useState('Av. Principal 123, Ciudad');
   const [timezone, setTimezone] = useState('America/Argentina/Buenos_Aires');
   const [phone, setPhone] = useState('+5491133445566');
   const [cancellationPolicy, setCancellationPolicy] = useState(
     'Cancelaciones o reprogramaciones con al menos 24 horas de antelación.'
   );
+  const [businessMode, setBusinessMode] = useState<'HYBRID' | 'SALES' | 'BOOKING' | 'INFO'>('HYBRID');
+  const [assistantName, setAssistantName] = useState('');
+  const [assistantTone, setAssistantTone] = useState('Cercano, amable, resolutivo y profesional (voseo natural)');
+  const [customContext, setCustomContext] = useState('');
+  const [paymentInfo, setPaymentInfo] = useState('');
+  const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
   const [businessHours, setBusinessHours] = useState<
     Array<{ day: string; open: string; close: string; isOpen: boolean }>
   >([
@@ -175,13 +181,19 @@ export default function OnboardingScreen() {
             setBusinessHours(res.data.businessHours);
           }
 
-          // Revisar si existe configuración de agenda y Scalinky en specialInstructions
+          // Revisar si existe configuración de agenda, contexto y Scalinky en specialInstructions
           if (res.data.specialInstructions) {
             try {
               const parsed = JSON.parse(res.data.specialInstructions);
               if (typeof parsed?.bookingEnabled === 'boolean') {
                 setBookingEnabled(parsed.bookingEnabled);
               }
+              if (parsed?.businessMode) setBusinessMode(parsed.businessMode);
+              if (parsed?.assistantName) setAssistantName(parsed.assistantName);
+              if (parsed?.assistantTone) setAssistantTone(parsed.assistantTone);
+              if (parsed?.customContext) setCustomContext(parsed.customContext);
+              if (parsed?.paymentInfo) setPaymentInfo(parsed.paymentInfo);
+              if (parsed?.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
               if (parsed?.scalinkySlug) {
                 setScalinkySlug(parsed.scalinkySlug);
                 setIsScalinkyLinked(true);
@@ -190,7 +202,8 @@ export default function OnboardingScreen() {
                 if (parsed.scalinkyCache) setScalinkyCache(parsed.scalinkyCache);
               }
             } catch {
-              // no es JSON
+              // Si era texto plano, tomarlo como contexto personalizado
+              setCustomContext(res.data.specialInstructions);
             }
           }
         }
@@ -449,7 +462,7 @@ export default function OnboardingScreen() {
     );
   };
 
-  // Guardar datos comerciales y horarios del negocio
+  // Guardar datos comerciales, contexto personalizado y horarios del negocio
   const handleSaveBusiness = async () => {
     setSavingBusiness(true);
     setBusinessSuccess(false);
@@ -461,10 +474,23 @@ export default function OnboardingScreen() {
         timezone,
         contactPhone: phone,
         cancellationPolicy,
-        businessHours
+        businessHours,
+        specialInstructions: JSON.stringify({
+          bookingEnabled: businessMode === 'SALES' || businessMode === 'INFO' ? false : bookingEnabled,
+          businessMode,
+          assistantName: assistantName.trim() || `Asistente de ${businessName}`,
+          assistantTone,
+          customContext,
+          paymentInfo,
+          shippingOrDeliveryInfo,
+          updatedAt: new Date().toISOString()
+        })
       });
+      if (businessMode === 'SALES' || businessMode === 'INFO') {
+        setBookingEnabled(false);
+      }
       setBusinessSuccess(true);
-      setTimeout(() => setBusinessSuccess(false), 3000);
+      setTimeout(() => setBusinessSuccess(false), 3500);
     } catch {
       alert('Error al guardar los datos y horarios del negocio. Verifica que las horas tengan formato HH:MM (ej. 09:00).');
     } finally {
@@ -1070,9 +1096,141 @@ export default function OnboardingScreen() {
                   multiline
                   value={cancellationPolicy}
                   onChangeText={setCancellationPolicy}
-                  placeholder="Ej. Cancelaciones o reprogramaciones con al menos 24 hs de anticipación sin cargo."
+                  placeholder="Ej. Garantía de 30 días en reparaciones. Cancelaciones con 24 hs de anticipación."
                   placeholderTextColor="#94A3B8"
                 />
+              </View>
+
+              {/* Personalización Profunda: Modo de Negocio, Ventas, Pagos y Contexto IA */}
+              <View style={[styles.dualModeExplanation, { marginTop: 12, marginBottom: 12 }]}>
+                <Text style={styles.dualTitle}>🧠 Modo de Operación, Ventas y Contexto del Negocio</Text>
+                <Text style={styles.inputHelper}>
+                  Configura a tu asistente para que no solo gestione turnos, sino que también pueda vender productos, tomar pedidos, pasar datos de pago y responder cualquier consulta sobre tu negocio.
+                </Text>
+
+                {/* Selector de Modo Principal */}
+                <Text style={[styles.inputLabel, { marginTop: 8 }]}>1. ¿Cómo quieres que opere tu Asistente de IA?</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 16 }}>
+                  {[
+                    {
+                      id: 'HYBRID' as const,
+                      label: '🔄 Híbrido (Ventas, Consultas y Turnos)'
+                    },
+                    {
+                      id: 'SALES' as const,
+                      label: '🛒 Solo Ventas, Pedidos y Presupuestos'
+                    },
+                    {
+                      id: 'INFO' as const,
+                      label: '💬 Atención al Cliente e Info del Negocio'
+                    },
+                    {
+                      id: 'BOOKING' as const,
+                      label: '📅 Foco en Reserva de Turnos'
+                    }
+                  ].map((m) => {
+                    const selected = businessMode === m.id;
+                    return (
+                      <TouchableOpacity
+                        key={m.id}
+                        onPress={() => setBusinessMode(m.id)}
+                        style={{
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                          backgroundColor: selected ? '#EFF6FF' : '#F8FAFC',
+                          borderWidth: 1.5,
+                          borderColor: selected ? '#1A73E8' : '#CBD5E1'
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: '700',
+                            color: selected ? '#1A73E8' : '#475569'
+                          }}
+                        >
+                          {m.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Nombre y Tono del Asistente */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+                  <View style={{ flex: 1, minWidth: 220 }}>
+                    <Text style={styles.inputLabel}>2. Nombre del Asistente Virtual</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={assistantName}
+                      onChangeText={setAssistantName}
+                      placeholder={`Ej. Asistente de ${businessName || 'mi negocio'} o Sofi`}
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 220 }}>
+                    <Text style={styles.inputLabel}>3. Tono y Estilo de Comunicación</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={assistantTone}
+                      onChangeText={setAssistantTone}
+                      placeholder="Ej. Cercano y amigable (voseo), Vendedor proactivo, Técnico y directo..."
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                </View>
+
+                {/* Contexto Libre del Negocio */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>
+                    4. Contexto Completo del Negocio, Cómo Vender y Reglas Personalizadas
+                  </Text>
+                  <Text style={styles.inputHelper}>
+                    Escribe aquí todo lo que quieras que el bot sepa: historia del negocio, qué productos o servicios venden, cómo armar un presupuesto, qué datos pedirle al cliente para comprar, promociones, marcas que trabajan, etc.
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { height: 120, textAlignVertical: 'top' }]}
+                    multiline
+                    value={customContext}
+                    onChangeText={setCustomContext}
+                    placeholder="Ej. Somos especialistas en piscinas y bombas. Vendemos bombas autocebantes, filtros, cloro y repuestos. Si un cliente quiere comprar un repuesto o pedir servicio técnico, pregúntale medidas de la pileta o marca de la bomba y de qué localidad es..."
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
+
+                {/* Medios de Pago y Alias/CBU */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>
+                    5. Medios de Pago, Alias / CBU y Condiciones de Compra
+                  </Text>
+                  <Text style={styles.inputHelper}>
+                    Si el cliente quiere comprar o señar, el bot le pasará estos datos. Además, cuando el cliente envíe la foto del comprobante por WhatsApp, la IA lo leerá automáticamente y te avisará.
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { height: 75, textAlignVertical: 'top' }]}
+                    multiline
+                    value={paymentInfo}
+                    onChangeText={setPaymentInfo}
+                    placeholder="Ej. Aceptamos transferencia bancaria (Alias: MI.NEGOCIO.MP / Titular: Juan Pérez), MercadoPago, efectivo con 10% de descuento y tarjetas en 3 cuotas."
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
+
+                {/* Envíos, Entregas o Modalidad de Visita */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>
+                    6. Envíos, Entregas, Visitas a Domicilio o Retiro en Local
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { height: 65, textAlignVertical: 'top' }]}
+                    multiline
+                    value={shippingOrDeliveryInfo}
+                    onChangeText={setShippingOrDeliveryInfo}
+                    placeholder="Ej. Realizamos envíos en el día en toda la zona o retiro sin cargo por nuestro local. Visitas técnicas a domicilio de lunes a sábados."
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
               </View>
 
               {/* Editor Visual de Horarios de Atención del Negocio */}

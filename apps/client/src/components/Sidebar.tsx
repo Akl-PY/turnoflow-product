@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import {
@@ -17,6 +17,7 @@ import {
   MessageSquare
 } from 'lucide-react-native';
 import { useAuth } from '../lib/auth';
+import { apiClient } from '../lib/api';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
@@ -24,17 +25,31 @@ const NAV_ITEMS = [
   { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
-  { path: '/knowledge-base', label: 'Servicios & Tarifas', icon: BookOpen },
+  { path: '/knowledge-base', label: 'Catálogo & Contexto IA', icon: BookOpen },
   { path: '/agents', label: 'Agentes de IA', icon: Bot },
   { path: '/automations', label: 'Automatizaciones', icon: Workflow },
   { path: '/playground', label: 'Simulador en Vivo', icon: Sparkles },
-  { path: '/onboarding', label: 'WhatsApp & Scalinky', icon: Smartphone }
+  { path: '/onboarding', label: 'Configuración & Canales', icon: Smartphone }
 ];
 
 export const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const [liveBusinessName, setLiveBusinessName] = useState<string>('');
+
+  useEffect(() => {
+    apiClient
+      .get('/business')
+      .then((res) => {
+        if (res.data?.businessName) {
+          setLiveBusinessName(res.data.businessName);
+        }
+      })
+      .catch(() => null);
+  }, [pathname]);
+
+  const displayedOrgName = liveBusinessName || user?.organizationName || 'Atención IA 24/7';
 
   return (
     <View style={styles.container}>
@@ -46,14 +61,14 @@ export const Sidebar: React.FC = () => {
         <View style={{ flex: 1 }}>
           <Text style={styles.brandTitle}>TurnoFlow AI</Text>
           <Text style={styles.brandSubtitle} numberOfLines={1}>
-            {user?.organizationName || 'Recepción 24/7'}
+            {displayedOrgName}
           </Text>
         </View>
       </View>
 
       {/* Nav Menu */}
       <ScrollView style={styles.menuContainer} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionHeader}>GESTIÓN DEL SALÓN</Text>
+        <Text style={styles.sectionHeader}>GESTIÓN DEL NEGOCIO</Text>
         {NAV_ITEMS.map((item) => {
           const isActive =
             pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path));
@@ -90,7 +105,7 @@ export const Sidebar: React.FC = () => {
             <View style={styles.userHeader}>
               <Building2 size={13} color="#1a73e8" style={{ marginRight: 6 }} />
               <Text style={styles.orgNameText} numberOfLines={1}>
-                {user.organizationName}
+                {displayedOrgName}
               </Text>
             </View>
             <Text style={styles.userEmailText} numberOfLines={1}>

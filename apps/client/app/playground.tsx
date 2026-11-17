@@ -28,28 +28,28 @@ import { useAuth } from '../src/lib/auth';
 const SCENARIOS = [
   {
     id: 's1',
-    label: 'Consulta de Precios',
-    text: '¡Hola! ¿Cuánto sale el corte y nutrición y cuánto dura el turno?'
+    label: 'Consulta de Precios y Catálogo',
+    text: '¡Hola! ¿Qué servicios o productos tienen disponibles y cuáles son los precios?'
   },
   {
     id: 's2',
-    label: 'Solicitud de Turno',
-    text: 'Quiero agendar turno para este viernes a las 16:00 hs por favor.'
+    label: 'Comprar / Coordinar Turno',
+    text: 'Quiero coordinar para este viernes o saber cómo puedo comprar y pagar.'
   },
   {
     id: 's3',
-    label: 'Intento de Regateo',
-    text: 'En otro lugar me cobran la mitad, ¿me hacés un descuento?'
+    label: 'Medios de Pago y Envíos',
+    text: '¿Qué medios de pago aceptan y cómo trabajan con entregas o visitas?'
   },
   {
     id: 's4',
     label: 'Ubicación y Horarios',
-    text: '¿Dónde queda el local y hasta qué hora atienden hoy?'
+    text: '¿Dónde están ubicados y en qué días y horarios atienden?'
   },
   {
     id: 's5',
     label: 'Hablar con Humano',
-    text: 'Necesito hablar con la encargada por un reclamo importante.'
+    text: 'Necesito hablar con el encargado por una consulta urgente.'
   }
 ];
 
@@ -67,7 +67,7 @@ export default function PlaygroundScreen() {
     {
       id: 'm-welcome',
       sender: 'assistant',
-      text: '¡Hola! 👋 Soy tu Asistente Virtual de WhatsApp de TurnoFlow AI. Puedes escribirme como si fueras una clienta para probar cómo respondo y cómo consulto tus precios y turnos.'
+      text: '¡Hola! 👋 Soy tu Asistente Virtual de WhatsApp de TurnoFlow AI. Puedes escribirme como si fueras un cliente para probar cómo respondo sobre tu negocio, tus precios, medios de pago y turnos.'
     }
   ]);
   const [inputText, setInputText] = useState('');
@@ -99,19 +99,19 @@ export default function PlaygroundScreen() {
         id: `a-${Date.now()}`,
         sender: 'assistant',
         text: res.data?.response || 'Estoy a tu disposición para ayudarte.',
-        toolCalls: res.data?.toolCalls || [],
+        toolCalls: res.data?.toolExecutions || res.data?.toolCalls || [],
         handoffToHuman: res.data?.handoffToHuman
       };
 
       setMessages((prev) => [...prev, botMsg]);
-      if (res.data?.toolCalls && res.data.toolCalls.length > 0) {
-        setSelectedToolTrace(res.data.toolCalls);
+      if ((res.data?.toolExecutions || res.data?.toolCalls)?.length > 0) {
+        setSelectedToolTrace(res.data.toolExecutions || res.data.toolCalls);
       }
     } catch {
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         sender: 'assistant',
-        text: '¡Hola! En este momento estoy consultando el catálogo de tratamientos y horarios disponibles de tu salón. ¿En qué servicio estás interesada?'
+        text: '¡Hola! En este momento estoy consultando el catálogo de productos, servicios y horarios de tu negocio. ¿En qué te puedo ayudar?'
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -134,7 +134,7 @@ export default function PlaygroundScreen() {
     <View style={styles.container}>
       <Header
         title="Simulador en Vivo del Asistente"
-        subtitle="Prueba cómo responderá tu bot ante consultas reales de tus clientas por WhatsApp"
+        subtitle="Prueba cómo responderá tu bot ante consultas de ventas, información o turnos de tus clientes por WhatsApp"
       />
 
       {/* Escenarios de Prueba Rápida */}

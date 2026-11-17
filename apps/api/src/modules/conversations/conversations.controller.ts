@@ -202,6 +202,12 @@ export class ConversationsController {
       messageType === 'audio' ||
       data?.messageType === 'audioMessage';
 
+    const isImage =
+      !!message.imageMessage ||
+      messageType === 'imageMessage' ||
+      messageType === 'image' ||
+      data?.messageType === 'imageMessage';
+
     let rawText =
       message.conversation ||
       message.extendedTextMessage?.text ||
@@ -214,6 +220,9 @@ export class ConversationsController {
     if (!rawText && isAudio) {
       rawText = '[Nota de voz / Audio]';
     }
+    if (!rawText && isImage) {
+      rawText = '[Imagen recibida]';
+    }
 
     const senderPhone = bestJid
       .replace('@s.whatsapp.net', '')
@@ -224,6 +233,52 @@ export class ConversationsController {
     const digitsOnly = senderPhone.replace(/\D/g, '');
     if (!senderPhone || digitsOnly.startsWith('120363') || digitsOnly.length > 15 || digitsOnly.length < 8) {
       return { status: 'ignored_group_or_invalid_phone', senderPhone };
+    }
+
+    // Lectura Multimodal de Imágenes y Comprobantes de Pago por WhatsApp
+    if (isImage && !key.fromMe) {
+      const captionText = message.imageMessage?.caption || '';
+      const imageMime = message.imageMessage?.mimetype || 'image/jpeg';
+      let imageBase64 = data.base64 || data.message?.base64 || body.base64 || null;
+
+      if (!imageBase64 && instanceFromWebhook && (key.id || data.id)) {
+        imageBase64 = await this.integrationsService.getEvolutionMediaBase64(
+          instanceFromWebhook,
+          key.id || data.id
+        );
+      }
+
+      if (imageBase64 && this.aiService) {
+        const profile = await this.profileRepo.findOne({ where: { organizationId: resolvedOrgId } });
+        const analysis = await this.aiService.analyzeImageBase64(
+          imageBase64,
+          imageMime,
+          captionText,
+          profile?.businessName || 'nuestro negocio'
+        );
+
+        if (analysis) {
+          if (analysis.isPaymentReceipt) {
+            rawText = `[COMPROBANTE_DETECTADO] El cliente envió una imagen de comprobante de pago${
+              captionText ? ` con el comentario "${captionText}"` : ''
+            }. Datos extraídos del comprobante: ${analysis.analysisText}`;
+
+            // Notificar al dueño/administrador por WhatsApp con el resumen del comprobante
+            const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
+            if (adminPhone && adminPhone.replace(/\D/g, '') !== digitsOnly) {
+              const senderName = data.pushName || body.pushName || 'Cliente';
+              const receiptAlert = `💳 *[Comprobante de Pago Recibido]*\nEl cliente *${senderName}* (+${digitsOnly}) envió un comprobante por WhatsApp.\n\n*Detalle detectado por IA:*\n${analysis.analysisText}`;
+              await this.integrationsService
+                .sendQRWhatsAppMessage(resolvedOrgId, adminPhone, receiptAlert, instanceFromWebhook)
+                .catch(() => null);
+            }
+          } else {
+            rawText = `[Imagen enviada por el cliente${
+              captionText ? `: "${captionText}"` : ''
+            } — Análisis visual de la foto: ${analysis.analysisText}]`;
+          }
+        }
+      }
     }
 
     // Regla de Audios: < 15 segundos se transcriben y se responden; >= 15 segundos se delegan a atención humana

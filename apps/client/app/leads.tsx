@@ -25,11 +25,11 @@ import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 
 const STATUS_FILTERS = [
-  { key: 'TODOS', label: 'Todas las Clientas' },
+  { key: 'TODOS', label: 'Todos los Clientes' },
   { key: 'NEW', label: 'Nuevas Consultas' },
-  { key: 'CONTACTED', label: 'Contactadas' },
-  { key: 'INTERESTED', label: 'Interesadas' },
-  { key: 'BOOKED', label: 'Turno Agendado' }
+  { key: 'CONTACTED', label: 'En Conversación' },
+  { key: 'INTERESTED', label: '🔥 Interesados' },
+  { key: 'BOOKED', label: '✅ Compra / Turno' }
 ];
 
 const STATUS_CYCLE = ['NEW', 'CONTACTED', 'INTERESTED', 'BOOKED'];
@@ -41,12 +41,24 @@ function getStatusBadge(status: string) {
     case 'CONTACTED':
       return { label: 'En Conversación', bg: '#FEF3C7', text: '#D97706', border: '#FDE68A' };
     case 'INTERESTED':
-      return { label: 'Interesada', bg: '#EDE9FE', text: '#4F46E5', border: '#DDD6FE' };
+      return { label: '🔥 Interesado', bg: '#EDE9FE', text: '#4F46E5', border: '#DDD6FE' };
+    case 'PENDING':
+      return { label: '🚨 Requiere Humano', bg: '#FEE2E2', text: '#DC2626', border: '#FECACA' };
     case 'BOOKED':
-      return { label: 'Turno Confirmado', bg: '#DCFCE7', text: '#16A34A', border: '#BBF7D0' };
+      return { label: '✅ Confirmado / Venta', bg: '#DCFCE7', text: '#16A34A', border: '#BBF7D0' };
     default:
       return { label: status, bg: '#F1F5F9', text: '#475569', border: '#E2E8F0' };
   }
+}
+
+function getIntentBadge(intent?: string, priority?: string) {
+  if (intent === 'URGENT') {
+    return { label: '🚨 Urgencia / Reclamo', color: '#DC2626' };
+  }
+  if (intent === 'HIGH' || priority === 'HOT') {
+    return { label: '🔥 Alta Intención', color: '#EA580C' };
+  }
+  return { label: '💬 Consulta', color: '#64748B' };
 }
 
 export default function LeadsScreen() {
@@ -156,8 +168,8 @@ export default function LeadsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Directorio de Clientas"
-        subtitle="Registro de consultas, historial de turnos y estado de atención en WhatsApp"
+        title="Directorio de Clientes & Leads"
+        subtitle="Auto-captura de contactos de WhatsApp, temperatura de compra e historial de consultas"
       />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
@@ -167,7 +179,7 @@ export default function LeadsScreen() {
             <Search size={16} color="#64748B" style={{ marginRight: 8 }} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar por nombre, teléfono o tratamiento..."
+              placeholder="Buscar por nombre, teléfono, producto o servicio..."
               placeholderTextColor="#94A3B8"
               value={search}
               onChangeText={setSearch}
@@ -179,7 +191,7 @@ export default function LeadsScreen() {
             onPress={() => setShowAddForm(!showAddForm)}
           >
             <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-            <Text style={styles.newLeadBtnText}>Registrar Clienta</Text>
+            <Text style={styles.newLeadBtnText}>Registrar Cliente</Text>
           </TouchableOpacity>
         </View>
 
@@ -209,13 +221,13 @@ export default function LeadsScreen() {
         {/* Formulario de Alta Rápida */}
         {showAddForm && (
           <View style={styles.formCard}>
-            <Text style={styles.formTitle}>Registrar Nueva Clienta</Text>
+            <Text style={styles.formTitle}>Registrar Nuevo Cliente</Text>
             <View style={styles.formGrid}>
               <View style={styles.formField}>
                 <Text style={styles.fieldLabel}>Nombre y Apellido</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Sofía Martínez"
+                  placeholder="Ej. Martín Gómez"
                   placeholderTextColor="#94A3B8"
                   value={newName}
                   onChangeText={setNewName}
@@ -232,10 +244,10 @@ export default function LeadsScreen() {
                 />
               </View>
               <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>Tratamiento Solicitado</Text>
+                <Text style={styles.fieldLabel}>Producto o Servicio de Interés</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Alisado de Keratina"
+                  placeholder="Ej. Mantenimiento Mensual, Compra de Bomba, Consulta..."
                   placeholderTextColor="#94A3B8"
                   value={newService}
                   onChangeText={setNewService}
@@ -245,7 +257,7 @@ export default function LeadsScreen() {
                 <Text style={styles.fieldLabel}>Notas o Preferencias</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Ej. Prefiere turno por la tarde"
+                  placeholder="Ej. Solicita presupuesto con envío"
                   placeholderTextColor="#94A3B8"
                   value={newNotes}
                   onChangeText={setNewNotes}
@@ -270,7 +282,7 @@ export default function LeadsScreen() {
                 ) : (
                   <>
                     <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={styles.saveBtnText}>Guardar Clienta</Text>
+                    <Text style={styles.saveBtnText}>Guardar Cliente</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -283,19 +295,20 @@ export default function LeadsScreen() {
           {loading ? (
             <View style={styles.loadingBox}>
               <ActivityIndicator color="#1A73E8" size="large" />
-              <Text style={styles.loadingText}>Cargando directorio de clientas...</Text>
+              <Text style={styles.loadingText}>Cargando directorio de clientes...</Text>
             </View>
           ) : filteredLeads.length === 0 ? (
             <View style={styles.emptyBox}>
               <Users size={40} color="#94A3B8" />
-              <Text style={styles.emptyTitle}>No hay clientas registradas aún</Text>
+              <Text style={styles.emptyTitle}>No hay clientes registrados aún</Text>
               <Text style={styles.emptySub}>
-                Cuando las clientas te escriban a tu número de WhatsApp conectado, aparecerán automáticamente en esta lista junto con su tratamiento de interés.
+                Cada vez que una persona te escriba a tu número de WhatsApp conectado, se registrará automáticamente en esta lista con su nombre, teléfono e intención detectada.
               </Text>
             </View>
           ) : (
             filteredLeads.map((item) => {
               const badge = getStatusBadge(item.status);
+              const intentInfo = getIntentBadge(item.intent, item.priority);
               return (
                 <View key={item.id} style={styles.leadRow}>
                   <View style={styles.clientInfo}>
@@ -307,11 +320,16 @@ export default function LeadsScreen() {
                   </View>
 
                   <View style={styles.serviceInfo}>
-                    <Text style={styles.serviceName}>
-                      {item.requestedService || 'Consulta General'}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Text style={styles.serviceName}>
+                        {item.requestedService || 'Consulta General'}
+                      </Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: intentInfo.color }}>
+                        {intentInfo.label}
+                      </Text>
+                    </View>
                     <Text style={styles.notesText} numberOfLines={1}>
-                      {item.notes || 'Atendida por el Asistente de IA'}
+                      {item.notes || 'Atendido por el Asistente de IA'}
                     </Text>
                   </View>
 
