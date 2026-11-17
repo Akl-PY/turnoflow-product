@@ -73,6 +73,12 @@ export default function LeadsScreen() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+
+  // Importación en bloque de Clientes / Alumnos
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkImportText, setBulkImportText] = useState('');
+  const [bulkMarkAsCustomer, setBulkMarkAsCustomer] = useState(true);
+  const [importingBulk, setImportingBulk] = useState(false);
   const [newService, setNewService] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -156,6 +162,43 @@ export default function LeadsScreen() {
     }
   };
 
+  const handleBulkImport = async () => {
+    const raw = bulkImportText.trim();
+    if (!raw || importingBulk) return;
+    setImportingBulk(true);
+    try {
+      const items = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const parts = line.split(/[,;\t]+/).map((p) => p.trim());
+          if (parts.length >= 2) {
+            const firstIsPhone = /^\+?\d[\d\s-]{6,}$/.test(parts[0]);
+            return firstIsPhone
+              ? { phone: parts[0], name: parts[1] }
+              : { name: parts[0], phone: parts[1] };
+          }
+          return { phone: parts[0], name: '' };
+        });
+
+      await apiClient.post('/leads/bulk-import', {
+        items,
+        markAsCustomer: bulkMarkAsCustomer
+      });
+      const res = await apiClient.get('/leads');
+      if (Array.isArray(res.data)) {
+        setLeads(res.data);
+      }
+      setBulkImportText('');
+      setShowBulkImport(false);
+    } catch {
+      alert('No se pudo importar la lista. Revisá el formato e intentá nuevamente.');
+    } finally {
+      setImportingBulk(false);
+    }
+  };
+
   const filteredLeads = leads.filter((l) => {
     const matchesSearch =
       (l.name && l.name.toLowerCase().includes(search.toLowerCase())) ||
@@ -186,6 +229,25 @@ export default function LeadsScreen() {
               onChangeText={setSearch}
             />
           </View>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#EFF6FF',
+              borderWidth: 1,
+              borderColor: '#BFDBFE',
+              borderRadius: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 10
+            }}
+            onPress={() => {
+              setShowBulkImport(!showBulkImport);
+              setShowAddForm(false);
+            }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>
+              📋 Importar Lista
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={{
@@ -240,6 +302,61 @@ export default function LeadsScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Tarjeta de Importación en Bloque */}
+        {showBulkImport && (
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>📋 Importar Clientes o Alumnos Actuales en Bloque</Text>
+            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 10 }}>
+              Pegá una línea por contacto (formato: "Nombre, +549..." o solo el teléfono). Al marcarlos como actuales, la IA los reconocerá automáticamente y no les ofrecerá clase de prueba inicial.
+            </Text>
+            <TextInput
+              style={[styles.formInput, { height: 110, textAlignVertical: 'top', marginBottom: 10 }]}
+              multiline
+              placeholder={'Daniel Galetto, +5493547464266\nSofía Pérez, +5491122334455'}
+              placeholderTextColor="#94A3B8"
+              value={bulkImportText}
+              onChangeText={setBulkImportText}
+            />
+            <TouchableOpacity
+              onPress={() => setBulkMarkAsCustomer(!bulkMarkAsCustomer)}
+              style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
+            >
+              <View
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 5,
+                  backgroundColor: bulkMarkAsCustomer ? '#1A73E8' : '#FFFFFF',
+                  borderWidth: 1.5,
+                  borderColor: bulkMarkAsCustomer ? '#1A73E8' : '#94A3B8',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                {bulkMarkAsCustomer && <Check size={12} color="#FFFFFF" />}
+              </View>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F172A' }}>
+                ⭐ Marcar todos como Clientes / Estudiantes Actuales
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.formActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowBulkImport(false)}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleBulkImport}
+                disabled={importingBulk}
+              >
+                <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.saveBtnText}>
+                  {importingBulk ? 'Importando...' : 'Importar y Guardar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Formulario de Alta Rápida */}
         {showAddForm && (

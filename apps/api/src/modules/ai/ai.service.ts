@@ -1918,6 +1918,19 @@ ${bookingDirective}
     return trialOrCapacityService || services[0];
   }
 
+  private extractBlockedDates(profile?: BusinessProfile): string[] {
+    if (!profile?.specialInstructions) return [];
+    try {
+      const parsed = JSON.parse(profile.specialInstructions);
+      if (Array.isArray(parsed.blockedDates)) {
+        return parsed.blockedDates.map((d: any) => String(d).trim()).filter(Boolean);
+      }
+    } catch {
+      // Ignorar
+    }
+    return [];
+  }
+
   public async evaluateDayCapacityAndSlots(
     organizationId: string,
     dateStr: string,
@@ -1941,6 +1954,20 @@ ${bookingDirective}
   }> {
     const matchedService = this.resolveTargetService(profile, requestedServiceRaw);
     const maxCapacityPerSlot = Math.max(1, Number(matchedService?.maxCapacityPerSlot) || 1);
+
+    // Si la fecha está marcada como feriado / día bloqueado sin atención, devolver sin turnos
+    const blockedDates = this.extractBlockedDates(profile);
+    if (blockedDates.includes(dateStr)) {
+      return {
+        matchedService,
+        maxCapacityPerSlot,
+        candidateSlots: [],
+        availableSlots: [],
+        fullSlots: [],
+        bookedCountBySlot: {},
+        slotDetails: []
+      };
+    }
 
     const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const parsedDate = new Date(`${dateStr}T12:00:00Z`);

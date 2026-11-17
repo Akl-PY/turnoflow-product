@@ -92,6 +92,8 @@ export default function OnboardingScreen() {
     { day: 'saturday', open: '09:00', close: '13:00', isOpen: true },
     { day: 'sunday', open: '09:00', close: '13:00', isOpen: false }
   ]);
+  const [blockedDates, setBlockedDates] = useState<string[]>([]);
+  const [newBlockedDate, setNewBlockedDate] = useState('');
 
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [businessSuccess, setBusinessSuccess] = useState(false);
@@ -224,6 +226,9 @@ export default function OnboardingScreen() {
               if (parsed?.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
               if (parsed?.customForwardingInstructions) {
                 setCustomForwardingInstructions(parsed.customForwardingInstructions);
+              }
+              if (Array.isArray(parsed?.blockedDates)) {
+                setBlockedDates(parsed.blockedDates);
               }
               if (parsed?.scalinkySlug) {
                 setScalinkySlug(parsed.scalinkySlug);
@@ -515,6 +520,7 @@ export default function OnboardingScreen() {
           paymentInfo,
           shippingOrDeliveryInfo,
           customForwardingInstructions,
+          blockedDates,
           updatedAt: new Date().toISOString()
         })
       });
@@ -1390,6 +1396,67 @@ export default function OnboardingScreen() {
                     </View>
                   );
                 })}
+              </View>
+
+              <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#E2E8F0', marginBottom: 14 }}>
+                <Text style={styles.inputLabel}>
+                  🗓️ Feriados o Días Bloqueados (sin atención / sin clases)
+                </Text>
+                <Text style={styles.inputHelper}>
+                  Si agregás una fecha puntual (AAAA-MM-DD), la IA no ofrecerá turnos ni clases de prueba ese día.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 6 }}>
+                  <TextInput
+                    style={[styles.textInput, { width: 140, flex: 0, paddingVertical: 7 }]}
+                    placeholder="2026-11-20"
+                    placeholderTextColor="#94A3B8"
+                    value={newBlockedDate}
+                    onChangeText={setNewBlockedDate}
+                  />
+                  <TouchableOpacity
+                    onPress={() => {
+                      const d = newBlockedDate.trim();
+                      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !blockedDates.includes(d)) {
+                        setBlockedDates([...blockedDates, d].sort());
+                        setNewBlockedDate('');
+                      }
+                    }}
+                    style={{
+                      backgroundColor: '#EFF6FF',
+                      borderWidth: 1,
+                      borderColor: '#BFDBFE',
+                      borderRadius: 8,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>
+                      + Bloquear Fecha
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {blockedDates.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                    {blockedDates.map((bd) => (
+                      <TouchableOpacity
+                        key={bd}
+                        onPress={() => setBlockedDates(blockedDates.filter((x) => x !== bd))}
+                        style={{
+                          backgroundColor: '#FEF2F2',
+                          borderWidth: 1,
+                          borderColor: '#FECACA',
+                          borderRadius: 6,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
+                          🚫 {bd} ×
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity

@@ -1235,6 +1235,40 @@ export default function ChatsScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B' }}>Plantillas:</Text>
+                {[
+                  {
+                    label: '💳 Cuota (1 al 15)',
+                    text: '¡Hola! Te recordamos que del 1 al 15 del mes se abona la cuota mensual. Podés transferir y compartir tu comprobante. ¡Muchas gracias!'
+                  },
+                  {
+                    label: '📅 Feriado / Sin Clases',
+                    text: '¡Hola! Te avisamos que el próximo [DÍA] es feriado y no habrá actividad habitual. ¡Nos vemos en la próxima clase/turno!'
+                  },
+                  {
+                    label: '🏆 Torneo / Evento',
+                    text: '¡Hola! Queremos invitarte a nuestro próximo torneo/evento el día [FECHA]. Respondé a este mensaje si querés más información o confirmar asistencia.'
+                  }
+                ].map((tpl) => (
+                  <TouchableOpacity
+                    key={tpl.label}
+                    onPress={() => setBroadcastText(tpl.text)}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 6,
+                      backgroundColor: '#F1F5F9',
+                      borderWidth: 1,
+                      borderColor: '#CBD5E1'
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#334155' }}>
+                      {tpl.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TextInput
                 style={{
                   borderWidth: 1,

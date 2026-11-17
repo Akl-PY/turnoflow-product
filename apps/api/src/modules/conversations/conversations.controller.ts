@@ -301,6 +301,39 @@ export class ConversationsController {
               captionText ? ` con el comentario "${captionText}"` : ''
             }. Monto detectado: $${analysis.detectedAmount || 0}. Datos extraídos del comprobante: ${analysis.analysisText}`;
 
+            // Registrar automáticamente el comprobante/pago en Pedidos & Cobros del panel
+            if (profile) {
+              try {
+                let parsedInstr: Record<string, any> = {};
+                if (profile.specialInstructions) {
+                  try {
+                    parsedInstr = JSON.parse(profile.specialInstructions);
+                  } catch {
+                    parsedInstr = { customContext: profile.specialInstructions };
+                  }
+                }
+                const orders = Array.isArray(parsedInstr.salesOrders) ? parsedInstr.salesOrders : [];
+                orders.unshift({
+                  id: `rcpt-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
+                  customerName: senderName,
+                  customerPhone: `+${digitsOnly}`,
+                  itemsSummary: `🧾 Comprobante recibido${captionText ? `: ${captionText}` : ''}`,
+                  totalAmount: Number(analysis.detectedAmount) || 0,
+                  currency: profile.currency || 'USD',
+                  deliveryMethod: 'Pago / Cuota registrado por WhatsApp',
+                  paymentMethod: 'Comprobante WhatsApp (IA Visión)',
+                  status: 'COMPROBANTE_RECIBIDO',
+                  notes: (analysis.analysisText || '').substring(0, 220),
+                  createdAt: new Date().toISOString()
+                });
+                parsedInstr.salesOrders = orders;
+                profile.specialInstructions = JSON.stringify(parsedInstr);
+                await this.profileRepo.save(profile);
+              } catch {
+                // Ignorar error al guardar comprobante
+              }
+            }
+
             // Obtener contexto reciente del chat con este cliente para saber qué producto/servicio estaba pagando
             let recentChatContext = captionText || '';
             try {

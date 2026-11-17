@@ -58,6 +58,26 @@ export class LeadsController {
     return this.leadsService.create(orgId, body);
   }
 
+  @Post('bulk-import')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Importar clientes o alumnos actuales en bloque' })
+  async bulkImport(
+    @Request() req: any,
+    @Body()
+    body: {
+      items: Array<{ name?: string; phone: string; notes?: string }>;
+      markAsCustomer?: boolean;
+    }
+  ) {
+    const orgId = req.user.organizationId;
+    return this.leadsService.bulkImport(
+      orgId,
+      Array.isArray(body.items) ? body.items : [],
+      body.markAsCustomer !== false
+    );
+  }
+
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
