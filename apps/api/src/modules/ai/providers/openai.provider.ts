@@ -61,10 +61,16 @@ export class OpenAiProvider implements AiProviderInterface {
 
     if (openRouterKey) {
       configs.push({
-        label: 'openrouter',
+        label: 'openrouter-free',
         apiKey: openRouterKey,
         baseURL: 'https://openrouter.ai/api/v1',
-        model: safeOptModel || 'meta-llama/llama-3.3-70b-instruct:free'
+        model: safeOptModel || 'openrouter/free'
+      });
+      configs.push({
+        label: 'openrouter-llama',
+        apiKey: openRouterKey,
+        baseURL: 'https://openrouter.ai/api/v1',
+        model: safeOptModel || 'meta-llama/llama-3.3-70b-instruct'
       });
     }
 

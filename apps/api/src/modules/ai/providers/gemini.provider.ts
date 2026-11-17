@@ -36,13 +36,12 @@ export class GeminiProvider implements AiProviderInterface {
     const rawRequested = options?.model || this.defaultModel;
     const primaryModel = rawRequested.replace(/^['"]|['"]$/g, '').trim();
 
-    // Lista de modelos ordenados para fallback automático si el principal está deprecated, sobrecargado o agota cuota
+    // Lista de modelos ordenados para fallback automático si el principal agota cuota o demora
     const modelsToTry = [
       primaryModel,
-      'gemini-2.5-flash-lite',
-      'gemini-2.0-flash',
-      'gemini-3.5-flash',
       'gemini-3.5-flash-lite',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
       'gemini-2.5-flash'
     ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
@@ -138,7 +137,7 @@ export class GeminiProvider implements AiProviderInterface {
           headers: {
             'Content-Type': 'application/json'
           },
-          timeout: 25000
+          timeout: 12000
         });
 
         const candidate = response.data.candidates?.[0];
