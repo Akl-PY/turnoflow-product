@@ -860,6 +860,18 @@ export class ConversationsController {
     return this.conversationsService.removeExcludedPhone(orgId, phone);
   }
 
+  @Post('mark-customer')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Marcar o desmarcar un número como Cliente / Estudiante / Alumno actual' })
+  async markAsExistingCustomer(
+    @Request() req: any,
+    @Body() body: { phone: string; isCustomer: boolean }
+  ) {
+    const orgId = req?.user?.organizationId || 'default-org-id';
+    return this.conversationsService.setCustomerPhoneFlag(orgId, body.phone, Boolean(body.isCustomer));
+  }
+
   @Get(':id/messages')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()

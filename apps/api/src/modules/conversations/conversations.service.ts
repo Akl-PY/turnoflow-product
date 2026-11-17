@@ -229,6 +229,19 @@ export class ConversationsService {
       }
     }
 
+    // 2.1 Detectar ANTES de guardar/responder si es Gente Nueva, Ya se Comunicó o Cliente/Estudiante Actual
+    const hadPriorUserMessages = (conversation.messagesCount || 0) > 0;
+    const contactSegment = this.aiService
+      ? await this.aiService.resolveContactSegment({
+          organizationId: orgId,
+          senderPhone: params.senderPhone,
+          conversationId: conversation.id,
+          hadPriorUserMessages
+        })
+      : hadPriorUserMessages
+      ? 'RETURNING_CONTACT'
+      : 'NEW_CONTACT';
+
     // Guardar mensaje entrante del usuario
     const userMsg = this.messageRepo.create({
       conversationId: conversation.id,
@@ -245,13 +258,17 @@ export class ConversationsService {
         ? await this.aiService.processIncomingMessage({
             organizationId: orgId,
             conversationId: conversation.id,
-            userText: params.messageText
+            userText: params.messageText,
+            senderPhone: params.senderPhone,
+            contactSegment,
+            hadPriorUserMessages
           })
         : {
             replyText: 'Gracias por comunicarte con nosotros.',
             toolExecutions: [],
             handoffToHuman: false,
-            handoffReason: undefined
+            handoffReason: undefined,
+            contactSegment
           };
     } catch (err: any) {
       this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
@@ -396,8 +413,9 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     return {
       replyMessage: aiResult.replyText,
       handoffToHuman: aiResult.handoffToHuman,
-      duplicate: false
-    };
+      duplicate: false,
+      contactSegment
+    } as any;
   }
 
   async getAutomationFlags(organizationId: string): Promise<{
@@ -585,16 +603,80 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     }
 
     const seen = new Set<string>();
-    const deduplicated: Conversation[] = [];
+    const deduplicated: any[] = [];
     for (const c of list) {
       const cleanPhone = (c.channelConversationId || '').replace(/\D/g, '');
       const key = cleanPhone || c.id;
       if (!seen.has(key)) {
         seen.add(key);
-        deduplicated.push(c);
+        let segment: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER' =
+          (c.messagesCount || 0) > 1 ? 'RETURNING_CONTACT' : 'NEW_CONTACT';
+        if (this.aiService) {
+          try {
+            segment = await this.aiService.resolveContactSegment({
+              organizationId: c.organizationId || organizationId,
+              senderPhone: c.channelConversationId,
+              conversationId: c.id,
+              hadPriorUserMessages: (c.messagesCount || 0) > 1
+            });
+          } catch {
+            // Fallback por conteo de mensajes
+          }
+        }
+        deduplicated.push({
+          ...c,
+          contactSegment: segment
+        });
       }
     }
     return deduplicated;
+  }
+
+  async setCustomerPhoneFlag(
+    organizationId: string,
+    phone: string,
+    isCustomer: boolean
+  ): Promise<{ success: boolean; existingCustomerPhones: string[] }> {
+    if (!this.profileRepo) return { success: false, existingCustomerPhones: [] };
+    let profile = await this.profileRepo.findOne({ where: { organizationId } });
+    if (!profile) {
+      profile = await this.profileRepo.findOne({ where: {} });
+    }
+    if (!profile) return { success: false, existingCustomerPhones: [] };
+
+    let parsed: Record<string, any> = {};
+    if (profile.specialInstructions) {
+      try {
+        parsed = JSON.parse(profile.specialInstructions);
+      } catch {
+        parsed = { customContext: profile.specialInstructions };
+      }
+    }
+
+    const cleanDigits = (phone || '').replace(/\D/g, '');
+    const list: string[] = Array.isArray(parsed.existingCustomerPhones)
+      ? parsed.existingCustomerPhones.map((p: any) => String(p).trim()).filter(Boolean)
+      : [];
+
+    const filtered = list.filter((p) => {
+      const pDigits = p.replace(/\D/g, '');
+      if (!pDigits || !cleanDigits) return true;
+      return !(
+        pDigits === cleanDigits ||
+        (pDigits.length >= 8 && cleanDigits.length >= 8 && pDigits.slice(-8) === cleanDigits.slice(-8))
+      );
+    });
+
+    if (isCustomer && cleanDigits) {
+      const formatted = phone.startsWith('+') ? phone.trim() : `+${cleanDigits}`;
+      filtered.push(formatted);
+    }
+
+    parsed.existingCustomerPhones = filtered;
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+
+    return { success: true, existingCustomerPhones: filtered };
   }
 
   private async syncRecentChatsFromEvolution(organizationId: string): Promise<void> {

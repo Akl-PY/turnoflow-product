@@ -66,6 +66,10 @@ export default function KnowledgeBaseScreen() {
   const [customContext, setCustomContext] = useState('');
   const [paymentInfo, setPaymentInfo] = useState('');
   const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
+  const [newContactContext, setNewContactContext] = useState('');
+  const [returningContactContext, setReturningContactContext] = useState('');
+  const [existingCustomerContext, setExistingCustomerContext] = useState('');
+  const [existingCustomerPhonesText, setExistingCustomerPhonesText] = useState('');
   const [customForwardingInstructions, setCustomForwardingInstructions] = useState('');
   const [forwardingRules, setForwardingRules] = useState<any[]>([]);
   const [availableGroups, setAvailableGroups] = useState<Array<{ id: string; subject: string; size?: number }>>([]);
@@ -102,6 +106,14 @@ export default function KnowledgeBaseScreen() {
               if (parsed.customContext) setCustomContext(parsed.customContext);
               if (parsed.paymentInfo) setPaymentInfo(parsed.paymentInfo);
               if (parsed.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
+              if (parsed.contactSegmentContexts) {
+                setNewContactContext(parsed.contactSegmentContexts.newContactContext || '');
+                setReturningContactContext(parsed.contactSegmentContexts.returningContactContext || '');
+                setExistingCustomerContext(parsed.contactSegmentContexts.existingCustomerContext || '');
+              }
+              if (Array.isArray(parsed.existingCustomerPhones)) {
+                setExistingCustomerPhonesText(parsed.existingCustomerPhones.join(', '));
+              }
               if (parsed.customForwardingInstructions) {
                 setCustomForwardingInstructions(parsed.customForwardingInstructions);
               }
@@ -242,6 +254,10 @@ export default function KnowledgeBaseScreen() {
     setSavingContext(true);
     setContextSaved(false);
     try {
+      const parsedPhones = existingCustomerPhonesText
+        .split(/[\n,;]+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
       await apiClient.put('/business', {
         specialInstructions: JSON.stringify({
           bookingEnabled: businessMode === 'SALES' || businessMode === 'INFO' ? false : true,
@@ -251,6 +267,12 @@ export default function KnowledgeBaseScreen() {
           customContext,
           paymentInfo,
           shippingOrDeliveryInfo,
+          contactSegmentContexts: {
+            newContactContext,
+            returningContactContext,
+            existingCustomerContext
+          },
+          existingCustomerPhones: parsedPhones,
           customForwardingInstructions,
           forwardingRules,
           updatedAt: new Date().toISOString()
@@ -1033,6 +1055,81 @@ export default function KnowledgeBaseScreen() {
                 value={shippingOrDeliveryInfo}
                 onChangeText={setShippingOrDeliveryInfo}
               />
+            </View>
+
+            {/* ======================================================== */}
+            {/* REGLAS DE CONTEXTO SEGÚN TIPO DE NÚMERO (NUEVO / YA ESCRIBIÓ / CLIENTE-ESTUDIANTE) */}
+            {/* ======================================================== */}
+            <View
+              style={{
+                marginTop: 22,
+                paddingTop: 20,
+                borderTopWidth: 1,
+                borderTopColor: '#E2E8F0'
+              }}
+            >
+              <Text style={styles.formTitle}>
+                🎯 Reglas de Contexto según el Tipo de Número (Nuevo, Recurrente o Cliente/Estudiante)
+              </Text>
+              <Text style={[styles.emptySub, { textAlign: 'left', marginBottom: 14 }]}>
+                Antes de responder, el sistema revisa automáticamente si el número ya escribió antes o si ya es cliente/estudiante actual, y le aplica a la IA el contexto específico que definas acá:
+              </Text>
+
+              <View style={[styles.formField, { marginBottom: 12 }]}>
+                <Text style={styles.fieldLabel}>
+                  🆕 1. Contexto para Gente Nueva (Primer mensaje — nunca había escrito)
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 75, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder="Ej. Dale la bienvenida, explícale cómo funcionan las clases de prueba o nuestro catálogo, pídele su nombre y ofrécele el turno o producto inicial."
+                  placeholderTextColor="#94A3B8"
+                  value={newContactContext}
+                  onChangeText={setNewContactContext}
+                />
+              </View>
+
+              <View style={[styles.formField, { marginBottom: 12 }]}>
+                <Text style={styles.fieldLabel}>
+                  💬 2. Contexto para Números que Ya se Comunicaron (Ya enviaron mensajes antes)
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 75, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder="Ej. Ya nos consultó antes. No repitas la presentación completa; pregúntale si le quedó alguna duda sobre el presupuesto o la fecha que había mirado."
+                  placeholderTextColor="#94A3B8"
+                  value={returningContactContext}
+                  onChangeText={setReturningContactContext}
+                />
+              </View>
+
+              <View style={[styles.formField, { marginBottom: 12 }]}>
+                <Text style={styles.fieldLabel}>
+                  ⭐ 3. Contexto para Quienes Ya Son Clientes / Estudiantes Actuales
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 75, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder="Ej. Es alumno/cliente actual. No le ofrezcas clase de prueba inicial; ayúdalo con cuotas mensuales, cambios de horario regular, compras o soporte postventa."
+                  placeholderTextColor="#94A3B8"
+                  value={existingCustomerContext}
+                  onChangeText={setExistingCustomerContext}
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>
+                  📋 Teléfonos de Clientes / Estudiantes Actuales (separados por coma o enter — además se detectan solos por turnos, pedidos o desde Chats)
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 60, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder="Ej. +5491122334455, +5493516677889"
+                  placeholderTextColor="#94A3B8"
+                  value={existingCustomerPhonesText}
+                  onChangeText={setExistingCustomerPhonesText}
+                />
+              </View>
             </View>
 
             {/* ======================================================== */}

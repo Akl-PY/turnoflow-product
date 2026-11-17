@@ -30,6 +30,7 @@ import {
   Clock
 } from 'lucide-react-native';
 import {
+  apiClient,
   fetchConversations,
   fetchConversationMessages,
   resumeConversationAi,
@@ -330,6 +331,29 @@ export default function ChatsScreen() {
     }
   };
 
+  const handleToggleExistingCustomer = async (phone?: string, currentlyCustomer?: boolean) => {
+    if (!phone) return;
+    try {
+      await apiClient.post('/conversations/mark-customer', {
+        phone,
+        isCustomer: !currentlyCustomer
+      });
+      await refetch();
+    } catch {
+      // Ignorar si falla
+    }
+  };
+
+  const getSegmentBadge = (segment?: string) => {
+    if (segment === 'EXISTING_CUSTOMER') {
+      return { label: '⭐ Cliente / Alumno', bg: '#FEF3C7', border: '#FDE68A', text: '#B45309' };
+    }
+    if (segment === 'RETURNING_CONTACT') {
+      return { label: '💬 Ya se comunicó', bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8' };
+    }
+    return { label: '🆕 Nuevo', bg: '#F0FDF4', border: '#BBF7D0', text: '#15803D' };
+  };
+
   // ==========================================
   // Render: Componente de Lista de Chats
   // ==========================================
@@ -592,14 +616,35 @@ export default function ChatsScreen() {
                 </Text>
 
                 <View style={styles.chatFooter}>
-                  <Text style={styles.chatDate}>
-                    {conv.updatedAt
-                      ? new Date(conv.updatedAt).toLocaleTimeString('es-AR', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        }) + ' hs'
-                      : 'Reciente'}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.chatDate}>
+                      {conv.updatedAt
+                        ? new Date(conv.updatedAt).toLocaleTimeString('es-AR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          }) + ' hs'
+                        : 'Reciente'}
+                    </Text>
+                    {!isExcluded && (() => {
+                      const seg = getSegmentBadge((conv as any).contactSegment);
+                      return (
+                        <View
+                          style={{
+                            backgroundColor: seg.bg,
+                            borderWidth: 1,
+                            borderColor: seg.border,
+                            borderRadius: 5,
+                            paddingHorizontal: 6,
+                            paddingVertical: 2
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: seg.text }}>
+                            {seg.label}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
                   <Text style={styles.chatCount}>
                     {conv.messagesCount || 0} mensajes
                   </Text>
@@ -691,6 +736,46 @@ export default function ChatsScreen() {
 
           {/* Acciones Rápidas de Cabecera */}
           <View style={[styles.actionButtons, { flexWrap: 'wrap' }]}>
+            {!isExcluded && (
+              <TouchableOpacity
+                style={[
+                  styles.whatsappDirectButton,
+                  {
+                    backgroundColor:
+                      (selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
+                        ? '#FEF3C7'
+                        : '#F8FAFC',
+                    borderColor:
+                      (selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
+                        ? '#FDE68A'
+                        : '#CBD5E1'
+                  }
+                ]}
+                onPress={() =>
+                  handleToggleExistingCustomer(
+                    targetPhone,
+                    (selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
+                  )
+                }
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '700',
+                    color:
+                      (selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
+                        ? '#B45309'
+                        : '#475569'
+                  }}
+                >
+                  {(selectedChat as any).contactSegment === 'EXISTING_CUSTOMER'
+                    ? '⭐ Cliente / Alumno Actual'
+                    : '☆ Marcar Cliente / Alumno'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {/* Botón Abrir en WhatsApp */}
             <TouchableOpacity
               style={styles.whatsappDirectButton}

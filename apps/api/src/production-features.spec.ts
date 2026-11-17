@@ -489,4 +489,79 @@ describe('TurnoFlow AI — Suite de Producción (Anti-Ráfaga, Excluidos, Ventas
     expect(nextDates.byShift['18:00'][0].date).toBe('2026-11-19');
     expect(nextDates.byShift['18:00'][0].remainingSpots).toBe(2);
   });
+
+  it('7. [SEGMENTACIÓN PREVIA DE NÚMEROS] Separa Gente Nueva, Ya se Comunicó y Clientes/Estudiantes Actuales e inyecta su regla de contexto antes de responder', async () => {
+    // Configurar reglas de contexto diferenciadas en el perfil
+    await businessService.updateProfile(orgId, {
+      specialInstructions: JSON.stringify({
+        contactSegmentContexts: {
+          newContactContext: 'REGLA_NUEVO: Bienvenida + ofrecer clase de prueba inicial.',
+          returningContactContext: 'REGLA_RECURRENTE: Ya escribió antes, retomar consulta sin repetir todo.',
+          existingCustomerContext: 'REGLA_ALUMNO: Ya es estudiante actual, ayudarlo con cuota mensual o cambio de turno.'
+        },
+        existingCustomerPhones: ['+5491177776666']
+      })
+    });
+
+    const spyAiProcess = jest.spyOn(aiService, 'processIncomingMessage');
+
+    // A) Primer mensaje de un número completamente nuevo -> NEW_CONTACT
+    const res1: any = await conversationsService.handleIncomingMessage({
+      channel: 'whatsapp_qr',
+      senderPhone: '+5491155554444',
+      senderName: 'Lucas Nuevo',
+      messageText: 'Hola, quiero info de clases',
+      organizationId: orgId
+    });
+    expect(res1.contactSegment).toBe('NEW_CONTACT');
+    expect(spyAiProcess).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        senderPhone: '+5491155554444',
+        contactSegment: 'NEW_CONTACT',
+        hadPriorUserMessages: false
+      })
+    );
+
+    // B) Segundo mensaje del mismo número -> ya envió mensajes antes -> RETURNING_CONTACT
+    const res2: any = await conversationsService.handleIncomingMessage({
+      channel: 'whatsapp_qr',
+      senderPhone: '+5491155554444',
+      senderName: 'Lucas Nuevo',
+      messageText: 'Qué horarios tienen a la tarde?',
+      organizationId: orgId
+    });
+    expect(res2.contactSegment).toBe('RETURNING_CONTACT');
+    expect(spyAiProcess).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        senderPhone: '+5491155554444',
+        contactSegment: 'RETURNING_CONTACT',
+        hadPriorUserMessages: true
+      })
+    );
+
+    // C) Número que ya es estudiante/cliente actual -> EXISTING_CUSTOMER
+    const res3: any = await conversationsService.handleIncomingMessage({
+      channel: 'whatsapp_qr',
+      senderPhone: '+5491177776666',
+      senderName: 'Sofía Alumna',
+      messageText: 'Hola! Este mes puedo pasarme al turno de las 19:30?',
+      organizationId: orgId
+    });
+    expect(res3.contactSegment).toBe('EXISTING_CUSTOMER');
+
+    // D) Marcar dinámicamente a Lucas como Cliente/Estudiante desde Chats -> pasa a EXISTING_CUSTOMER
+    await conversationsService.setCustomerPhoneFlag(orgId, '+5491155554444', true);
+    const segmentAfterMark = await aiService.resolveContactSegment({
+      organizationId: orgId,
+      senderPhone: '+5491155554444',
+      hadPriorUserMessages: true
+    });
+    expect(segmentAfterMark).toBe('EXISTING_CUSTOMER');
+
+    // Verificar también que findAll devuelve la etiqueta contactSegment para la UI
+    const convsList: any[] = await conversationsService.findAll(orgId);
+    expect(convsList.every((c) => ['NEW_CONTACT', 'RETURNING_CONTACT', 'EXISTING_CUSTOMER'].includes(c.contactSegment))).toBe(true);
+
+    spyAiProcess.mockRestore();
+  });
 });

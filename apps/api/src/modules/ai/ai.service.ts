@@ -521,6 +521,13 @@ Si ninguna regla aplica, devuelve [].`;
     shippingOrDeliveryInfo: string;
     customForwardingInstructions: string;
     forwardingRules: any[];
+    contactSegmentContexts: {
+      newContactContext: string;
+      returningContactContext: string;
+      existingCustomerContext: string;
+    };
+    existingCustomerPhones: string[];
+    salesOrders: any[];
   } {
     const defaults = {
       businessMode: 'HYBRID' as const,
@@ -530,12 +537,20 @@ Si ninguna regla aplica, devuelve [].`;
       paymentInfo: '',
       shippingOrDeliveryInfo: '',
       customForwardingInstructions: '',
-      forwardingRules: [] as any[]
+      forwardingRules: [] as any[],
+      contactSegmentContexts: {
+        newContactContext: '',
+        returningContactContext: '',
+        existingCustomerContext: ''
+      },
+      existingCustomerPhones: [] as string[],
+      salesOrders: [] as any[]
     };
 
     if (profile?.specialInstructions) {
       try {
         const parsed = JSON.parse(profile.specialInstructions);
+        const seg = parsed.contactSegmentContexts || {};
         return {
           businessMode: parsed.businessMode || (parsed.bookingEnabled === false ? 'SALES' : 'HYBRID'),
           assistantName: parsed.assistantName || defaults.assistantName,
@@ -544,7 +559,16 @@ Si ninguna regla aplica, devuelve [].`;
           paymentInfo: parsed.paymentInfo || '',
           shippingOrDeliveryInfo: parsed.shippingOrDeliveryInfo || '',
           customForwardingInstructions: parsed.customForwardingInstructions || '',
-          forwardingRules: Array.isArray(parsed.forwardingRules) ? parsed.forwardingRules : []
+          forwardingRules: Array.isArray(parsed.forwardingRules) ? parsed.forwardingRules : [],
+          contactSegmentContexts: {
+            newContactContext: seg.newContactContext || '',
+            returningContactContext: seg.returningContactContext || '',
+            existingCustomerContext: seg.existingCustomerContext || ''
+          },
+          existingCustomerPhones: Array.isArray(parsed.existingCustomerPhones)
+            ? parsed.existingCustomerPhones.map((p: any) => String(p).trim()).filter(Boolean)
+            : [],
+          salesOrders: Array.isArray(parsed.salesOrders) ? parsed.salesOrders : []
         };
       } catch {
         // Si specialInstructions era texto plano libre, usarlo como customContext
@@ -558,6 +582,105 @@ Si ninguna regla aplica, devuelve [].`;
     return defaults;
   }
 
+  private normalizePhoneDigits(phone?: string): string {
+    return (phone || '').replace(/\D/g, '');
+  }
+
+  private phonesMatch(phoneA?: string, phoneB?: string): boolean {
+    const dA = this.normalizePhoneDigits(phoneA);
+    const dB = this.normalizePhoneDigits(phoneB);
+    if (!dA || !dB) return false;
+    if (dA === dB) return true;
+    if (dA.length >= 8 && dB.length >= 8) {
+      return dA.slice(-8) === dB.slice(-8);
+    }
+    return false;
+  }
+
+  public async resolveContactSegment(params: {
+    organizationId: string;
+    senderPhone?: string;
+    conversationId?: string;
+    profile?: BusinessProfile;
+    hadPriorUserMessages?: boolean;
+  }): Promise<'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER'> {
+    const { organizationId, conversationId, hadPriorUserMessages } = params;
+    let senderPhone = params.senderPhone;
+
+    let profile = params.profile;
+    if (!profile) {
+      profile = (await this.businessProfileRepo.findOne({ where: { organizationId } })) || undefined;
+    }
+
+    let convMessagesCount = 0;
+    if (!senderPhone && conversationId) {
+      const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+      if (conv) {
+        senderPhone = conv.channelConversationId;
+        convMessagesCount = conv.messagesCount || 0;
+      }
+    } else if (conversationId) {
+      const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+      if (conv) {
+        convMessagesCount = conv.messagesCount || 0;
+      }
+    }
+
+    // 1. Verificar si YA ES CLIENTE / ESTUDIANTE / ALUMNO ACTUAL
+    if (senderPhone && profile) {
+      const customAi = this.extractCustomAiSettings(profile);
+      if (customAi.existingCustomerPhones.some((p) => this.phonesMatch(p, senderPhone))) {
+        return 'EXISTING_CUSTOMER';
+      }
+      if (customAi.salesOrders.some((o: any) => this.phonesMatch(o?.customerPhone, senderPhone))) {
+        return 'EXISTING_CUSTOMER';
+      }
+    }
+
+    if (senderPhone) {
+      // ¿Tiene turnos confirmados o completados?
+      const appts = await this.appointmentRepo.find({ where: { organizationId } });
+      const hasAppointment = appts.some(
+        (a) =>
+          this.phonesMatch(a.customerPhone, senderPhone) &&
+          (a.status === AppointmentStatus.CONFIRMED || a.status === AppointmentStatus.COMPLETED)
+      );
+      if (hasAppointment) {
+        return 'EXISTING_CUSTOMER';
+      }
+
+      // ¿Tiene Lead marcado como BOOKED (cliente/alumno convertido)?
+      const leads = await this.leadRepo.find({ where: { organizationId } });
+      const isBookedLead = leads.some(
+        (l) => this.phonesMatch(l.phone, senderPhone) && l.status === LeadStatus.BOOKED
+      );
+      if (isBookedLead) {
+        return 'EXISTING_CUSTOMER';
+      }
+    }
+
+    // 2. Verificar si YA SE COMUNICÓ ANTES (envió mensajes previos)
+    if (hadPriorUserMessages === true) {
+      return 'RETURNING_CONTACT';
+    }
+    if (hadPriorUserMessages === undefined) {
+      if (convMessagesCount > 0) {
+        return 'RETURNING_CONTACT';
+      }
+      if (this.messageRepo && conversationId) {
+        const userMsgCount = await this.messageRepo.count({
+          where: { conversationId, sender: MessageSender.USER }
+        });
+        if (userMsgCount > 1) {
+          return 'RETURNING_CONTACT';
+        }
+      }
+    }
+
+    // 3. Caso contrario: GENTE NUEVA (primer mensaje)
+    return 'NEW_CONTACT';
+  }
+
   async getDefaultProfile(): Promise<BusinessProfile | null> {
     return this.businessProfileRepo.findOne({ where: {} });
   }
@@ -566,6 +689,9 @@ Si ninguna regla aplica, devuelve [].`;
     organizationId: string;
     conversationId: string;
     userText: string;
+    senderPhone?: string;
+    contactSegment?: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
+    hadPriorUserMessages?: boolean;
     overrideProvider?: AIProviderType;
     overrideModel?: string;
   }): Promise<{
@@ -573,6 +699,7 @@ Si ninguna regla aplica, devuelve [].`;
     toolExecutions: ToolExecutionRecord[];
     handoffToHuman: boolean;
     handoffReason?: string;
+    contactSegment?: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
   }> {
     const { organizationId, conversationId, userText, overrideProvider, overrideModel } = params;
 
@@ -746,6 +873,45 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
       ? `\nINSTRUCCIONES PERSONALIZADAS DE REENVÍO Y ENRUTAMIENTO A GRUPOS / CONTACTOS:\n${customAi.customForwardingInstructions}\n(Si se cumple alguna de estas condiciones durante la charla, ejecuta la herramienta 'forward_to_group_or_contact' indicando el grupo/número de destino y el resumen completo).\n`
       : '';
 
+    const resolvedSegment =
+      params.contactSegment ||
+      (await this.resolveContactSegment({
+        organizationId,
+        senderPhone: params.senderPhone,
+        conversationId,
+        profile,
+        hadPriorUserMessages: params.hadPriorUserMessages
+      }));
+
+    const segmentMetaMap: Record<
+      'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER',
+      { label: string; ruleText: string; defaultHint: string }
+    > = {
+      NEW_CONTACT: {
+        label: '🆕 GENTE NUEVA (Primer contacto — Nunca había enviado mensajes antes)',
+        ruleText: customAi.contactSegmentContexts.newContactContext,
+        defaultHint:
+          'Recíbelo con calidez, preséntale brevemente cómo trabaja el negocio y guíalo desde cero.'
+      },
+      RETURNING_CONTACT: {
+        label: '💬 NÚMERO QUE YA SE COMUNICÓ ANTES (Ya envió mensajes previamente, aún sin ser cliente/alumno confirmado)',
+        ruleText: customAi.contactSegmentContexts.returningContactContext,
+        defaultHint:
+          'Ten presente que ya habló anteriormente; no repitas presentaciones básicas innecesarias, retoma el hilo de su consulta y ayúdalo a dar el siguiente paso.'
+      },
+      EXISTING_CUSTOMER: {
+        label: '⭐ YA ES CLIENTE / ESTUDIANTE ACTUAL DEL NEGOCIO',
+        ruleText: customAi.contactSegmentContexts.existingCustomerContext,
+        defaultHint:
+          'Este contacto ya es cliente o alumno/estudiante activo del negocio. Trátalo con cercanía como parte de la comunidad y prioriza sus necesidades de cliente/alumno actual.'
+      }
+    };
+
+    const currentSegmentMeta = segmentMetaMap[resolvedSegment];
+    const contactSegmentSection = `\nPERFIL Y SEGMENTO DEL NÚMERO ACTUAL (DETECTADO ANTES DE RESPONDER):\nTipo de Contacto: ${currentSegmentMeta.label}\nInstrucción Obligatoria para este Segmento: ${
+      currentSegmentMeta.ruleText ? currentSegmentMeta.ruleText : currentSegmentMeta.defaultHint
+    }\n`;
+
     const systemPrompt = `Eres "${customAi.assistantName}", el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
 Tono y Personalidad: ${customAi.assistantTone}.
 Modo de Operación: ${modeLabelMap[customAi.businessMode] || modeLabelMap.HYBRID}.
@@ -757,7 +923,7 @@ FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
 Política Comercial / Garantías / Cancelaciones: ${profile.cancellationPolicy}.
 Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
-${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
+${contactSegmentSection}${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
 Catálogo de Productos y Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
@@ -929,7 +1095,8 @@ ${bookingDirective}
           replyText: finalContent,
           toolExecutions,
           handoffToHuman,
-          handoffReason
+          handoffReason,
+          contactSegment: resolvedSegment
         };
       }
 
@@ -970,7 +1137,8 @@ ${bookingDirective}
               'En este momento nuestra agenda se encuentra desincronizada. Ya le avisé a un miembro de nuestro equipo humano para que te atienda personalmente y coordine con vos a la brevedad.',
             toolExecutions,
             handoffToHuman: true,
-            handoffReason: result.data?.reason || 'Agenda Scalinky desincronizada'
+            handoffReason: result.data?.reason || 'Agenda Scalinky desincronizada',
+            contactSegment: resolvedSegment
           };
         }
 
@@ -987,7 +1155,8 @@ ${bookingDirective}
       replyText: 'He tomado nota de tu consulta. ¿En qué más te puedo ayudar?',
       toolExecutions,
       handoffToHuman,
-      handoffReason
+      handoffReason,
+      contactSegment: resolvedSegment
     };
   }
 
