@@ -294,13 +294,28 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
 
   async cancelAppointment(organizationId: string, id: string, reason?: string): Promise<Appointment> {
     const appointment = await this.appointmentRepo.findOne({
-      where: { id, organizationId }
+      where: [{ id, organizationId }, { id }]
     });
     if (!appointment) {
       throw new NotFoundException('Turno no encontrado.');
     }
     appointment.status = AppointmentStatus.CANCELLED;
     appointment.cancellationReason = reason || 'Cancelado por solicitud del cliente';
+    return this.appointmentRepo.save(appointment);
+  }
+
+  async updateStatus(
+    organizationId: string,
+    id: string,
+    status: AppointmentStatus
+  ): Promise<Appointment> {
+    const appointment = await this.appointmentRepo.findOne({
+      where: [{ id, organizationId }, { id }]
+    });
+    if (!appointment) {
+      throw new NotFoundException('Turno no encontrado.');
+    }
+    appointment.status = status;
     return this.appointmentRepo.save(appointment);
   }
 }

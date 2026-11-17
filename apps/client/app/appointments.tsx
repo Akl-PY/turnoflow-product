@@ -169,6 +169,30 @@ export default function AppointmentsScreen() {
     }
   };
 
+  const handleUpdateAttendance = async (id: string, status: 'COMPLETED' | 'NO_SHOW') => {
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    try {
+      await apiClient.patch(`/appointments/${id}/status`, { status });
+      setReminderFeedback(
+        status === 'COMPLETED' ? '✅ Asistencia registrada.' : '⚠️ Marcado como ausente.'
+      );
+      setTimeout(() => setReminderFeedback(null), 3000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handlePromoteToCustomer = async (phone?: string, name?: string) => {
+    if (!phone) return;
+    try {
+      await apiClient.post('/conversations/mark-customer', { phone, isCustomer: true });
+      setReminderFeedback(`⭐ ${name || phone} marcado como Cliente / Alumno Actual.`);
+      setTimeout(() => setReminderFeedback(null), 4000);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Header
@@ -557,10 +581,20 @@ export default function AppointmentsScreen() {
 
                   {/* Estado y Acciones */}
                   <View style={styles.actionBlock}>
-                    {isConfirmed ? (
+                    {apt.status === 'CONFIRMED' ? (
                       <View style={styles.badgeConfirmed}>
                         <CheckCircle2 size={13} color="#16A34A" style={{ marginRight: 5 }} />
                         <Text style={styles.badgeConfirmedText}>Confirmado</Text>
+                      </View>
+                    ) : apt.status === 'COMPLETED' ? (
+                      <View style={styles.badgeConfirmed}>
+                        <CheckCircle2 size={13} color="#16A34A" style={{ marginRight: 5 }} />
+                        <Text style={styles.badgeConfirmedText}>✅ Asistió</Text>
+                      </View>
+                    ) : apt.status === 'NO_SHOW' ? (
+                      <View style={[styles.badgeCancelled, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
+                        <AlertCircle size={13} color="#B45309" style={{ marginRight: 5 }} />
+                        <Text style={[styles.badgeCancelledText, { color: '#B45309' }]}>Ausente</Text>
                       </View>
                     ) : (
                       <View style={styles.badgeCancelled}>
@@ -570,11 +604,43 @@ export default function AppointmentsScreen() {
                     )}
 
                     {isConfirmed && (
-                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <TouchableOpacity
+                          style={{
+                            paddingHorizontal: 9,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            backgroundColor: '#F0FDF4',
+                            borderWidth: 1,
+                            borderColor: '#BBF7D0'
+                          }}
+                          onPress={() => handleUpdateAttendance(apt.id, 'COMPLETED')}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
+                            ✓ Asistió
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={{
+                            paddingHorizontal: 9,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            backgroundColor: '#FEFCE8',
+                            borderWidth: 1,
+                            borderColor: '#FDE68A'
+                          }}
+                          onPress={() => handleUpdateAttendance(apt.id, 'NO_SHOW')}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                            ✗ No vino
+                          </Text>
+                        </TouchableOpacity>
+
                         <TouchableOpacity
                           style={{
                             paddingHorizontal: 10,
-                            paddingVertical: 6,
+                            paddingVertical: 5,
                             borderRadius: 6,
                             backgroundColor: '#EFF6FF',
                             borderWidth: 1,
@@ -583,7 +649,7 @@ export default function AppointmentsScreen() {
                           onPress={() => handleSendReminder(apt.id)}
                         >
                           <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
-                            🔔 Recordatorio WhatsApp
+                            🔔 Recordatorio
                           </Text>
                         </TouchableOpacity>
 
@@ -591,9 +657,28 @@ export default function AppointmentsScreen() {
                           style={styles.cancelAptBtn}
                           onPress={() => handleCancelAppointment(apt.id)}
                         >
-                          <Text style={styles.cancelAptBtnText}>Cancelar turno</Text>
+                          <Text style={styles.cancelAptBtnText}>Cancelar</Text>
                         </TouchableOpacity>
                       </View>
+                    )}
+
+                    {apt.status === 'COMPLETED' && apt.customerPhone && (
+                      <TouchableOpacity
+                        style={{
+                          marginTop: 6,
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 6,
+                          backgroundColor: '#FEF3C7',
+                          borderWidth: 1,
+                          borderColor: '#FDE68A'
+                        }}
+                        onPress={() => handlePromoteToCustomer(apt.customerPhone, apt.customerName)}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                          ⭐ Pasar a Alumno / Cliente Actual
+                        </Text>
+                      </TouchableOpacity>
                     )}
                   </View>
                 </View>

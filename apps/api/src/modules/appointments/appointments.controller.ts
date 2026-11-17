@@ -67,6 +67,19 @@ export class AppointmentsController {
     return this.appointmentsService.cancelAppointment(orgId, id, reason);
   }
 
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Actualizar estado de asistencia del turno (COMPLETED, NO_SHOW, CONFIRMED, CANCELLED)' })
+  async updateStatus(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body('status') status: any
+  ) {
+    const orgId = req.user.organizationId;
+    return this.appointmentsService.updateStatus(orgId, id, status);
+  }
+
   @Post(':id/send-reminder')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

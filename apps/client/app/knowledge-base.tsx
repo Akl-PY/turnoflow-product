@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
+import { downloadCsv } from '../src/lib/csv';
 
 export default function KnowledgeBaseScreen() {
   const { user } = useAuth();
@@ -895,18 +896,134 @@ export default function KnowledgeBaseScreen() {
               <View style={styles.infoBanner}>
                 <DollarSign size={16} color="#1A73E8" style={{ marginRight: 8 }} />
                 <Text style={styles.infoBannerText}>
-                  Cuando un cliente confirma una compra por WhatsApp, la IA registra automáticamente el pedido aquí y te envía una alerta a tu celular.
+                  Los pedidos confirmados y los comprobantes de pago/cuota recibidos por WhatsApp se registran automáticamente aquí.
                 </Text>
               </View>
 
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => setShowAddOrderModal(!showAddOrderModal)}
-              >
-                <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.primaryBtnText}>Registrar Pedido Manual</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 8,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10
+                  }}
+                  onPress={() =>
+                    downloadCsv(
+                      `pedidos-cobros-${new Date().toISOString().split('T')[0]}.csv`,
+                      ['Fecha', 'Cliente', 'Teléfono', 'Detalle', 'Monto', 'Medio de Pago', 'Estado'],
+                      salesOrders.map((o) => [
+                        o.createdAt ? new Date(o.createdAt).toLocaleDateString('es-AR') : '',
+                        o.customerName,
+                        o.customerPhone,
+                        o.itemsSummary,
+                        o.totalAmount,
+                        o.paymentMethod,
+                        o.status
+                      ])
+                    )
+                  }
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#334155' }}>
+                    📥 Exportar CSV
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={() => setShowAddOrderModal(!showAddOrderModal)}
+                >
+                  <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.primaryBtnText}>Registrar Pedido Manual</Text>
+                </TouchableOpacity>
+              </View>
             </View>
+
+            {/* Resumen Mensual de Cobros y Comprobantes */}
+            {salesOrders.length > 0 && (() => {
+              const now = new Date();
+              const thisMonth = salesOrders.filter((o) => {
+                if (!o.createdAt) return true;
+                const d = new Date(o.createdAt);
+                return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+              });
+              const totalMonthAmount = thisMonth.reduce(
+                (acc, o) => acc + (Number(o.totalAmount) || 0),
+                0
+              );
+              const receiptsCount = thisMonth.filter(
+                (o) => o.status === 'COMPROBANTE_RECIBIDO' || o.status === 'PAGADO'
+              ).length;
+              const pendingCount = thisMonth.filter((o) => o.status === 'PENDIENTE').length;
+
+              return (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: 10,
+                    marginBottom: 16
+                  }}
+                >
+                  <View
+                    style={{
+                      flex: 1,
+                      minWidth: 160,
+                      backgroundColor: '#F0FDF4',
+                      borderWidth: 1,
+                      borderColor: '#BBF7D0',
+                      borderRadius: 10,
+                      padding: 12
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
+                      💰 Total del Mes
+                    </Text>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A', marginTop: 2 }}>
+                      ${totalMonthAmount.toLocaleString('es-AR')}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flex: 1,
+                      minWidth: 160,
+                      backgroundColor: '#EFF6FF',
+                      borderWidth: 1,
+                      borderColor: '#BFDBFE',
+                      borderRadius: 10,
+                      padding: 12
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                      🧾 Comprobantes / Pagos del Mes
+                    </Text>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A', marginTop: 2 }}>
+                      {receiptsCount}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flex: 1,
+                      minWidth: 160,
+                      backgroundColor: '#FEFCE8',
+                      borderWidth: 1,
+                      borderColor: '#FDE68A',
+                      borderRadius: 10,
+                      padding: 12
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                      ⏳ Pedidos Pendientes
+                    </Text>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A', marginTop: 2 }}>
+                      {pendingCount}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })()}
 
             {showAddOrderModal && (
               <View style={styles.formCard}>

@@ -870,7 +870,7 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
     };
 
     const bookingDirective = bookingEnabled && customAi.businessMode !== 'SALES' && customAi.businessMode !== 'INFO'
-      ? `4. CONSULTA DE DISPONIBILIDAD, CLASES DE PRUEBA Y CUPO POR TURNO: La agenda está HABILITADA. Si el cliente o alumno busca un turno, clase de prueba o comenzar en un horario determinado, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD) y el nombre/ID del servicio o turno. Si el turno tiene cupo máximo diario (ej. máximo 2 clases de prueba por turno por día) y en esa fecha ese turno figura completo ('fullSlots' o 'slotFull'), explicale amablemente que ya se completaron los cupos de prueba de ese turno en ese día y ofrécele inmediatamente las próximas fechas disponibles devueltas en 'nextAvailableDatesForFullShifts' / 'nextAvailableDates'.`
+      ? `4. CONSULTA DE DISPONIBILIDAD, CLASES DE PRUEBA Y CUPO POR TURNO: La agenda está HABILITADA. Si el cliente o alumno busca un turno, clase de prueba o comenzar en un horario determinado, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD) y el nombre/ID del servicio o turno. Si el turno tiene cupo máximo diario (ej. máximo 2 clases de prueba por turno por día) y en esa fecha ese turno figura completo ('fullSlots' o 'slotFull'), explicale amablemente que ya se completaron los cupos de prueba de ese turno en ese día y ofrécele inmediatamente las próximas fechas disponibles devueltas en 'nextAvailableDatesForFullShifts' / 'nextAvailableDates'. Si el cliente avisa que cancela o quiere reprogramar su turno ya confirmado, llamá a 'cancel_appointment' para liberar ese cupo en la agenda y, si pidió reprogramar, ofrecé las nuevas fechas disponibles.`
       : `4. MODO VENTAS Y ATENCIÓN (SIN AGENDA DE CALENDARIO): Este negocio opera sin agenda automática de calendario. Tu objetivo es asesorar sobre productos y servicios, informar precios, explicar cómo comprar, brindar los datos de pago/envío y responder cualquier duda sobre el negocio. Cuando el cliente confirme que quiere comprar, encargar o coordinar con el equipo, registra sus datos con 'create_lead' o utiliza 'handoff_to_human' e indícale que ya avisaste a un asesor para finalizar su pedido.`;
 
     const customContextSection = customAi.customContext
@@ -1143,7 +1143,7 @@ ${bookingDirective}
       });
 
       for (const tc of response.toolCalls) {
-        const result = await this.executeTool(organizationId, tc, profile);
+        const result = await this.executeTool(organizationId, tc, profile, params.senderPhone);
         toolExecutions.push({
           toolName: tc.name,
           arguments: tc.arguments,
@@ -1281,7 +1281,8 @@ ${bookingDirective}
   private async executeTool(
     organizationId: string,
     toolCall: ToolCall,
-    profile: BusinessProfile
+    profile: BusinessProfile,
+    senderPhone?: string
   ): Promise<{ success: boolean; data: any }> {
     const { name, arguments: args } = toolCall;
 
@@ -1837,6 +1838,54 @@ ${bookingDirective}
             serviceName: saved.serviceName,
             maxCapacityPerSlot: Math.max(1, Number(matchedNativeService?.maxCapacityPerSlot) || 1),
             scalinky: scalinkyBooking
+          }
+        };
+      }
+
+      case 'cancel_appointment': {
+        const apptIdArg = (args.appointmentId as string) || '';
+        const phoneArg = (args.customerPhone as string) || senderPhone || '';
+        const reasonArg = (args.reason as string) || 'Cancelado por solicitud del cliente vía WhatsApp';
+
+        const confirmedAppts = await this.appointmentRepo.find({
+          where: { organizationId, status: AppointmentStatus.CONFIRMED },
+          order: { startTime: 'ASC' }
+        });
+
+        let targetAppt = apptIdArg
+          ? confirmedAppts.find((a) => a.id === apptIdArg)
+          : undefined;
+
+        if (!targetAppt && phoneArg) {
+          targetAppt = confirmedAppts.find((a) => this.phonesMatch(a.customerPhone, phoneArg));
+        }
+
+        if (!targetAppt) {
+          return {
+            success: false,
+            data: {
+              notFound: true,
+              message: 'No se encontró un turno confirmado próximo asociado a este número para cancelar.'
+            }
+          };
+        }
+
+        targetAppt.status = AppointmentStatus.CANCELLED;
+        targetAppt.cancellationReason = reasonArg;
+        await this.appointmentRepo.save(targetAppt);
+
+        const d = new Date(targetAppt.startTime);
+        const freedDate = d.toISOString().split('T')[0];
+        const freedSlot = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+
+        return {
+          success: true,
+          data: {
+            cancelledAppointmentId: targetAppt.id,
+            serviceName: targetAppt.serviceName,
+            freedDate,
+            freedSlot,
+            message: `Turno de ${targetAppt.serviceName} el ${freedDate} a las ${freedSlot} hs cancelado. El cupo quedó liberado automáticamente.`
           }
         };
       }
