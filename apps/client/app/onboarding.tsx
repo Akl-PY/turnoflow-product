@@ -79,6 +79,7 @@ export default function OnboardingScreen() {
   const [customContext, setCustomContext] = useState('');
   const [paymentInfo, setPaymentInfo] = useState('');
   const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
+  const [customForwardingInstructions, setCustomForwardingInstructions] = useState('');
   const [businessHours, setBusinessHours] = useState<
     Array<{ day: string; open: string; close: string; isOpen: boolean }>
   >([
@@ -194,6 +195,9 @@ export default function OnboardingScreen() {
               if (parsed?.customContext) setCustomContext(parsed.customContext);
               if (parsed?.paymentInfo) setPaymentInfo(parsed.paymentInfo);
               if (parsed?.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
+              if (parsed?.customForwardingInstructions) {
+                setCustomForwardingInstructions(parsed.customForwardingInstructions);
+              }
               if (parsed?.scalinkySlug) {
                 setScalinkySlug(parsed.scalinkySlug);
                 setIsScalinkyLinked(true);
@@ -483,6 +487,7 @@ export default function OnboardingScreen() {
           customContext,
           paymentInfo,
           shippingOrDeliveryInfo,
+          customForwardingInstructions,
           updatedAt: new Date().toISOString()
         })
       });
@@ -1228,6 +1233,24 @@ export default function OnboardingScreen() {
                     value={shippingOrDeliveryInfo}
                     onChangeText={setShippingOrDeliveryInfo}
                     placeholder="Ej. Realizamos envíos en el día en toda la zona o retiro sin cargo por nuestro local. Visitas técnicas a domicilio de lunes a sábados."
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
+
+                {/* Instrucciones Personalizadas de Reenvío a Grupos y Contactos */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>
+                    7. Instrucciones Personalizadas de Reenvío de Comprobantes a Grupos de WhatsApp
+                  </Text>
+                  <Text style={styles.inputHelper}>
+                    Indica a qué grupos de WhatsApp se deben reenviar los comprobantes (con su foto, el nombre del contacto y su número). También puedes armar reglas visuales por monto y producto en "Catálogo & Contexto IA".
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { height: 90, textAlignVertical: 'top' }]}
+                    multiline
+                    value={customForwardingInstructions}
+                    onChangeText={setCustomForwardingInstructions}
+                    placeholder='Ej: "Todos los comprobantes se reenvíen al grupo Comprobantes con el nombre del contacto y su número. Y los comprobantes de más de $50000 o que sean de bombas se reenvíen al grupo Ventas Grandes."'
                     placeholderTextColor="#94A3B8"
                   />
                 </View>

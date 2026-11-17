@@ -56,13 +56,25 @@ export default function KnowledgeBaseScreen() {
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
   const [submittingFaq, setSubmittingFaq] = useState(false);
 
-  // Contexto extendido y ventas IA
+  // Contexto extendido, ventas IA y reglas de reenvío a grupos
   const [businessMode, setBusinessMode] = useState<'HYBRID' | 'SALES' | 'BOOKING' | 'INFO'>('HYBRID');
   const [assistantName, setAssistantName] = useState('');
   const [assistantTone, setAssistantTone] = useState('Cercano, amable, resolutivo y profesional (voseo natural)');
   const [customContext, setCustomContext] = useState('');
   const [paymentInfo, setPaymentInfo] = useState('');
   const [shippingOrDeliveryInfo, setShippingOrDeliveryInfo] = useState('');
+  const [customForwardingInstructions, setCustomForwardingInstructions] = useState('');
+  const [forwardingRules, setForwardingRules] = useState<any[]>([]);
+  const [availableGroups, setAvailableGroups] = useState<Array<{ id: string; subject: string; size?: number }>>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+
+  // Inputs para agregar regla estructurada de reenvío
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleTrigger, setNewRuleTrigger] = useState<'ALL_RECEIPTS' | 'RECEIPT_CONDITION'>('ALL_RECEIPTS');
+  const [newRuleMinAmount, setNewRuleMinAmount] = useState('');
+  const [newRuleKeyword, setNewRuleKeyword] = useState('');
+  const [newRuleTarget, setNewRuleTarget] = useState('');
+
   const [savingContext, setSavingContext] = useState(false);
   const [contextSaved, setContextSaved] = useState(false);
 
@@ -87,6 +99,12 @@ export default function KnowledgeBaseScreen() {
               if (parsed.customContext) setCustomContext(parsed.customContext);
               if (parsed.paymentInfo) setPaymentInfo(parsed.paymentInfo);
               if (parsed.shippingOrDeliveryInfo) setShippingOrDeliveryInfo(parsed.shippingOrDeliveryInfo);
+              if (parsed.customForwardingInstructions) {
+                setCustomForwardingInstructions(parsed.customForwardingInstructions);
+              }
+              if (Array.isArray(parsed.forwardingRules)) {
+                setForwardingRules(parsed.forwardingRules);
+              }
               if (Array.isArray(parsed.salesOrders)) setSalesOrders(parsed.salesOrders);
             } catch {
               setCustomContext(res.data.specialInstructions);
@@ -150,6 +168,73 @@ export default function KnowledgeBaseScreen() {
     }
   };
 
+  const handleLoadWhatsAppGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const res = await apiClient.get('/integrations/whatsapp-qr/groups');
+      if (Array.isArray(res.data)) {
+        setAvailableGroups(res.data);
+      }
+    } catch {
+      setAvailableGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const handleAddForwardingRule = async () => {
+    if (!newRuleTarget.trim()) return;
+    const rule = {
+      id: `rule-${Date.now().toString(36)}`,
+      name:
+        newRuleName.trim() ||
+        (newRuleTrigger === 'ALL_RECEIPTS'
+          ? 'Reenviar todos los comprobantes'
+          : `Comprobantes ${newRuleMinAmount ? `>= $${newRuleMinAmount}` : ''} ${
+              newRuleKeyword ? `(${newRuleKeyword})` : ''
+            }`.trim()),
+      triggerType: newRuleTrigger,
+      minAmount: parseFloat(newRuleMinAmount) || 0,
+      keyword: newRuleKeyword.trim(),
+      targetGroupOrPhone: newRuleTarget.trim(),
+      includeImage: true,
+      isActive: true
+    };
+    const updatedRules = [...forwardingRules, rule];
+    setForwardingRules(updatedRules);
+    setNewRuleName('');
+    setNewRuleMinAmount('');
+    setNewRuleKeyword('');
+    setNewRuleTarget('');
+
+    try {
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          forwardingRules: updatedRules,
+          customForwardingInstructions,
+          updatedAt: new Date().toISOString()
+        })
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRemoveForwardingRule = async (ruleId: string) => {
+    const updatedRules = forwardingRules.filter((r) => r.id !== ruleId);
+    setForwardingRules(updatedRules);
+    try {
+      await apiClient.put('/business', {
+        specialInstructions: JSON.stringify({
+          forwardingRules: updatedRules,
+          updatedAt: new Date().toISOString()
+        })
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   const handleSaveAiContext = async () => {
     setSavingContext(true);
     setContextSaved(false);
@@ -163,6 +248,8 @@ export default function KnowledgeBaseScreen() {
           customContext,
           paymentInfo,
           shippingOrDeliveryInfo,
+          customForwardingInstructions,
+          forwardingRules,
           updatedAt: new Date().toISOString()
         })
       });
@@ -807,6 +894,241 @@ export default function KnowledgeBaseScreen() {
               />
             </View>
 
+            {/* ======================================================== */}
+            {/* REGLAS PERSONALIZADAS DE REENVÍO A GRUPOS DE WHATSAPP */}
+            {/* ======================================================== */}
+            <View
+              style={{
+                marginTop: 22,
+                paddingTop: 20,
+                borderTopWidth: 1,
+                borderTopColor: '#E2E8F0'
+              }}
+            >
+              <Text style={styles.formTitle}>
+                📲 Instrucciones Personalizadas de Reenvío a Grupos y Contactos
+              </Text>
+              <Text style={[styles.emptySub, { textAlign: 'left', marginBottom: 14 }]}>
+                Define a qué grupo de WhatsApp (o número) se deben reenviar automáticamente los comprobantes de pago, incluyendo siempre la foto original del comprobante, el nombre del contacto y su número de teléfono.
+              </Text>
+
+              {/* 1. Instrucciones en Lenguaje Natural */}
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>
+                  Opción 1: Escribe tus instrucciones en lenguaje natural (la IA las interpreta en vivo)
+                </Text>
+                <TextInput
+                  style={[styles.formInput, { height: 95, textAlignVertical: 'top' }]}
+                  multiline
+                  placeholder='Ej: "Todos los comprobantes que entren reenviarlos al grupo Comprobantes con el nombre del contacto y el número que lo mandó. Y los comprobantes de más de $50000 o que sean de bombas reenviarlos también al grupo Ventas Grandes."'
+                  placeholderTextColor="#94A3B8"
+                  value={customForwardingInstructions}
+                  onChangeText={setCustomForwardingInstructions}
+                />
+              </View>
+
+              {/* 2. Constructor Visual de Reglas Condicionales por Monto / Producto / Grupo */}
+              <View
+                style={{
+                  backgroundColor: '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  borderRadius: 10,
+                  padding: 14,
+                  marginTop: 14
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    marginBottom: 10
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                    Opción 2: Crear Regla Directa por Monto / Producto ➡️ Grupo de WhatsApp
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleLoadWhatsAppGroups}
+                    disabled={loadingGroups}
+                    style={{
+                      backgroundColor: '#EFF6FF',
+                      borderWidth: 1,
+                      borderColor: '#BFDBFE',
+                      borderRadius: 6,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                      {loadingGroups ? 'Buscando grupos...' : '🔄 Cargar mis Grupos de WhatsApp'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {availableGroups.length > 0 && (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, color: '#475569', marginBottom: 6 }}>
+                      Toca uno de tus grupos de WhatsApp para elegirlo como destino:
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {availableGroups.map((g) => (
+                        <TouchableOpacity
+                          key={g.id}
+                          onPress={() => setNewRuleTarget(g.subject)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            backgroundColor: newRuleTarget === g.subject ? '#DCFCE7' : '#FFFFFF',
+                            borderWidth: 1,
+                            borderColor: newRuleTarget === g.subject ? '#16A34A' : '#CBD5E1'
+                          }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}>
+                            👥 {g.subject}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'ALL_RECEIPTS' as const, label: '🧾 Todos los Comprobantes' },
+                    { id: 'RECEIPT_CONDITION' as const, label: '💰 Comprobantes por Monto y/o Producto' }
+                  ].map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
+                      onPress={() => setNewRuleTrigger(t.id)}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        borderRadius: 6,
+                        backgroundColor: newRuleTrigger === t.id ? '#EFF6FF' : '#FFFFFF',
+                        borderWidth: 1,
+                        borderColor: newRuleTrigger === t.id ? '#1A73E8' : '#CBD5E1'
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: newRuleTrigger === t.id ? '#1A73E8' : '#475569'
+                        }}
+                      >
+                        {t.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={styles.formGrid}>
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Grupo de WhatsApp o Teléfono de Destino</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. Comprobantes o Ventas Grandes o +54911..."
+                      placeholderTextColor="#94A3B8"
+                      value={newRuleTarget}
+                      onChangeText={setNewRuleTarget}
+                    />
+                  </View>
+
+                  {newRuleTrigger === 'RECEIPT_CONDITION' && (
+                    <>
+                      <View style={styles.formField}>
+                        <Text style={styles.fieldLabel}>Monto Mínimo ($ opcional)</Text>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="Ej. 50000 (deja vacío para cualquier monto)"
+                          placeholderTextColor="#94A3B8"
+                          keyboardType="numeric"
+                          value={newRuleMinAmount}
+                          onChangeText={setNewRuleMinAmount}
+                        />
+                      </View>
+                      <View style={styles.formField}>
+                        <Text style={styles.fieldLabel}>De qué Producto / Palabra Clave (opcional)</Text>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="Ej. bomba, filtro, mantenimiento"
+                          placeholderTextColor="#94A3B8"
+                          value={newRuleKeyword}
+                          onChangeText={setNewRuleKeyword}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  <View style={styles.formField}>
+                    <Text style={styles.fieldLabel}>Nombre / Etiqueta de la Regla</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Ej. Comprobantes de Bombas > $50k"
+                      placeholderTextColor="#94A3B8"
+                      value={newRuleName}
+                      onChangeText={setNewRuleName}
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleAddForwardingRule}
+                  style={[styles.primaryBtn, { marginTop: 10, alignSelf: 'flex-start' }]}
+                >
+                  <Plus size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.primaryBtnText}>Agregar Regla de Reenvío</Text>
+                </TouchableOpacity>
+
+                {forwardingRules.length > 0 && (
+                  <View style={{ marginTop: 14, gap: 8 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F172A' }}>
+                      Reglas de Reenvío Activas ({forwardingRules.length}):
+                    </Text>
+                    {forwardingRules.map((r) => (
+                      <View
+                        key={r.id}
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          backgroundColor: '#FFFFFF',
+                          borderWidth: 1,
+                          borderColor: '#CBD5E1',
+                          borderRadius: 8,
+                          padding: 10
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F172A' }}>
+                            📲 {r.name} ➡️ Destino: <Text style={{ color: '#1A73E8' }}>"{r.targetGroupOrPhone}"</Text>
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                            {r.triggerType === 'ALL_RECEIPTS'
+                              ? 'Reenvía TODOS los comprobantes con foto, nombre del contacto y teléfono'
+                              : `Reenvía comprobantes ${r.minAmount ? `de $${r.minAmount} o más` : 'de cualquier monto'}${
+                                  r.keyword ? ` que sean de "${r.keyword}"` : ''
+                                } con foto, nombre del contacto y teléfono`}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => handleRemoveForwardingRule(r.id)}
+                          style={{ padding: 6 }}
+                        >
+                          <Trash2 size={14} color="#DC2626" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+
             <View style={[styles.formActions, { marginTop: 16 }]}>
               <TouchableOpacity
                 style={styles.saveBtn}
@@ -818,7 +1140,7 @@ export default function KnowledgeBaseScreen() {
                 ) : (
                   <>
                     <Check size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={styles.saveBtnText}>Guardar Contexto y Reglas IA</Text>
+                    <Text style={styles.saveBtnText}>Guardar Contexto y Reglas de Reenvío</Text>
                   </>
                 )}
               </TouchableOpacity>

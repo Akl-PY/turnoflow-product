@@ -307,6 +307,25 @@ export class ConversationsService {
       conversation.messagesCount += 1;
     }
 
+    // Ejecutar reenvíos a grupos o contactos si la IA disparó 'forward_to_group_or_contact'
+    const forwardTools = (aiResult.toolExecutions || []).filter(
+      (t) => t.toolName === 'forward_to_group_or_contact' && t.success && (t.result as any)?.targetGroupOrPhone
+    );
+    if (forwardTools.length > 0 && this.integrationsService) {
+      for (const ft of forwardTools) {
+        const resData = ft.result as any;
+        const target = resData.targetGroupOrPhone;
+        const textMsg = `📲 *[Aviso Reenviado por Regla Personalizada]*\n👤 *Contacto:* ${
+          params.senderName || 'Cliente'
+        }\n📱 *Número:* ${
+          params.senderPhone.startsWith('+') ? params.senderPhone : `+${params.senderPhone}`
+        }\n\n*Detalle:*\n${resData.summaryText || params.messageText}`;
+        await this.integrationsService
+          .sendWhatsAppToGroupOrContact(orgId, target, textMsg)
+          .catch(() => null);
+      }
+    }
+
     // Notificar al dueño si la IA acaba de registrar un nuevo Pedido / Venta (create_order)
     const createdOrderTool = (aiResult.toolExecutions || []).find(
       (t) => t.toolName === 'create_order' && t.success && (t.result as any)?.order

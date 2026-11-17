@@ -96,6 +96,24 @@ export class ReceptionistAgent {
         }
       },
       {
+        name: 'forward_to_group_or_contact',
+        description: 'Reenvía información, comprobantes, pedidos o avisos específicos a un grupo de WhatsApp o número de teléfono siguiendo las instrucciones personalizadas del dueño.',
+        parameters: {
+          type: 'object',
+          properties: {
+            targetGroupOrPhone: {
+              type: 'string',
+              description: 'Nombre exacto del grupo de WhatsApp (ej. "Comprobantes", "Ventas"), JID (@g.us) o número de teléfono de destino'
+            },
+            summaryText: {
+              type: 'string',
+              description: 'Mensaje completo a reenviar incluyendo qué solicita o envía el cliente, monto y producto'
+            }
+          },
+          required: ['targetGroupOrPhone', 'summaryText']
+        }
+      },
+      {
         name: 'check_availability',
         description: 'Verifica turnos y horarios libres en vivo para una fecha, servicio y empleado.',
         parameters: {

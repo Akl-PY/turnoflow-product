@@ -504,6 +504,191 @@ export class IntegrationsService {
     }
   }
 
+  /**
+   * Obtiene la lista de grupos de WhatsApp de la cuenta vinculada en Evolution API.
+   */
+  async fetchWhatsAppGroups(
+    organizationId: string
+  ): Promise<Array<{ id: string; subject: string; size?: number }>> {
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    if (!evolutionUrl || !evolutionKey) return [];
+
+    try {
+      const instanceName = await this.resolveActiveEvolutionInstance(organizationId);
+      const res = await axios.get(
+        `${evolutionUrl}/group/fetchAllGroups/${instanceName}?getParticipants=false`,
+        {
+          headers: {
+            apikey: evolutionKey,
+            Authorization: `Bearer ${evolutionKey}`
+          },
+          timeout: 8000
+        }
+      );
+
+      const list = Array.isArray(res.data) ? res.data : res.data?.groups || [];
+      if (!Array.isArray(list)) return [];
+
+      return list
+        .filter((g: any) => g && (g.id || g.jid) && (g.subject || g.name))
+        .map((g: any) => ({
+          id: g.id || g.jid,
+          subject: String(g.subject || g.name).trim(),
+          size: g.size || g.participants?.length || 0
+        }));
+    } catch (err: any) {
+      this.logger.warn(`No se pudieron listar grupos de WhatsApp desde Evolution: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Resuelve un destino que puede ser:
+   * - Un JID de grupo directo ("120363...@g.us")
+   * - El nombre de un grupo de WhatsApp ("Comprobantes", "Ventas Grandes", etc.)
+   * - Un número de teléfono ("+5491122334455")
+   */
+  async resolveTargetGroupOrPhone(organizationId: string, targetInput: string): Promise<string | null> {
+    const raw = (targetInput || '').trim();
+    if (!raw) return null;
+
+    if (raw.endsWith('@g.us') || raw.endsWith('@s.whatsapp.net')) {
+      return raw;
+    }
+
+    const digitsOnly = raw.replace(/\D/g, '');
+    // Si comienza con 120363 y tiene longitud de grupo de WhatsApp
+    if (digitsOnly.startsWith('120363') && digitsOnly.length >= 15) {
+      return `${digitsOnly}@g.us`;
+    }
+
+    // Si es un número de teléfono convencional (y el texto no tiene letras de nombre de grupo)
+    const hasLetters = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(raw);
+    if (!hasLetters && digitsOnly.length >= 8 && digitsOnly.length <= 15) {
+      return digitsOnly;
+    }
+
+    // Buscar por nombre de grupo en Evolution API
+    const groups = await this.fetchWhatsAppGroups(organizationId);
+    const needle = raw.toLowerCase();
+    const exactMatch = groups.find((g) => g.subject.toLowerCase() === needle);
+    if (exactMatch) return exactMatch.id;
+
+    const partialMatch = groups.find(
+      (g) => g.subject.toLowerCase().includes(needle) || needle.includes(g.subject.toLowerCase())
+    );
+    if (partialMatch) return partialMatch.id;
+
+    // Si contenía tanto letras como números (ej. "Grupo 5491122334455"), extraer dígitos si son válidos
+    if (digitsOnly.length >= 8 && digitsOnly.length <= 15) {
+      return digitsOnly;
+    }
+
+    return null;
+  }
+
+  /**
+   * Envía o reenvía un mensaje (y opcionalmente la imagen del comprobante en base64)
+   * a un Grupo de WhatsApp autorizado por una regla del dueño o a un contacto específico.
+   */
+  async sendWhatsAppToGroupOrContact(
+    organizationId: string,
+    targetInput: string,
+    text: string,
+    options?: {
+      mediaBase64?: string;
+      mimeType?: string;
+      explicitInstanceName?: string;
+    }
+  ): Promise<{ success: boolean; resolvedTarget?: string; messageId?: string }> {
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    const resolvedTarget = await this.resolveTargetGroupOrPhone(organizationId, targetInput);
+    if (!resolvedTarget) {
+      this.logger.warn(
+        `[REENVÍO OMITIDO] No se pudo resolver el grupo o número de destino: "${targetInput}"`
+      );
+      return { success: false };
+    }
+
+    this.recordBotSentMessage(undefined, text);
+
+    if (!evolutionUrl || !evolutionKey) {
+      this.logger.log(
+        `[REENVÍO MOCK] Enviado a ${resolvedTarget} (${targetInput}): "${text.substring(0, 80)}..."`
+      );
+      return { success: true, resolvedTarget, messageId: `mock-fwd-${Date.now()}` };
+    }
+
+    const instanceName =
+      options?.explicitInstanceName || (await this.resolveActiveEvolutionInstance(organizationId));
+
+    const headers = {
+      apikey: evolutionKey,
+      Authorization: `Bearer ${evolutionKey}`,
+      'Content-Type': 'application/json'
+    };
+
+    // Si viene imagen adjunta (ej. foto del comprobante), enviarla con sendMedia y caption
+    if (options?.mediaBase64) {
+      try {
+        const cleanBase64 = options.mediaBase64.replace(/^data:[^;]+;base64,/, '').trim();
+        const mediaRes = await axios.post(
+          `${evolutionUrl}/message/sendMedia/${instanceName}`,
+          {
+            number: resolvedTarget,
+            mediatype: 'image',
+            mimetype: options.mimeType || 'image/jpeg',
+            caption: text,
+            media: cleanBase64,
+            fileName: 'comprobante.jpg'
+          },
+          { headers, timeout: 15000 }
+        );
+        const msgId = mediaRes.data?.key?.id;
+        if (msgId) this.recordBotSentMessage(msgId, text);
+        this.logger.log(
+          `[REENVÍO MULTIMEDIA] Comprobante/imagen reenviado a ${resolvedTarget} (${targetInput}): ${msgId || 'ok'}`
+        );
+        return { success: true, resolvedTarget, messageId: msgId };
+      } catch (mediaErr: any) {
+        this.logger.warn(
+          `Fallo sendMedia a ${resolvedTarget}, reintentando como texto: ${mediaErr.response?.data?.message || mediaErr.message}`
+        );
+      }
+    }
+
+    // Envío como texto (o fallback si sendMedia falló)
+    try {
+      const textRes = await axios.post(
+        `${evolutionUrl}/message/sendText/${instanceName}`,
+        {
+          number: resolvedTarget,
+          text
+        },
+        { headers, timeout: 10000 }
+      );
+      const msgId = textRes.data?.key?.id;
+      if (msgId) this.recordBotSentMessage(msgId, text);
+      this.logger.log(
+        `[REENVÍO TEXTO] Mensaje reenviado a ${resolvedTarget} (${targetInput}): ${msgId || 'ok'}`
+      );
+      return { success: true, resolvedTarget, messageId: msgId };
+    } catch (err: any) {
+      this.logger.error(
+        `Error reenviando a grupo/contacto ${resolvedTarget}: ${err.response?.data?.message || err.message}`
+      );
+      return { success: false, resolvedTarget };
+    }
+  }
+
   async sendWhatsAppMessage(
     to: string,
     messageText: string,

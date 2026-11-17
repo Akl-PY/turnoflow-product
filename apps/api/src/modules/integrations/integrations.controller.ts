@@ -39,6 +39,15 @@ export class IntegrationsController {
     return this.integrationsService.getQRStatus(orgId);
   }
 
+  @Get('whatsapp-qr/groups')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar todos los grupos de WhatsApp de la cuenta vinculada' })
+  async getWhatsAppGroups(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.integrationsService.fetchWhatsAppGroups(orgId);
+  }
+
   @Delete('whatsapp-qr/session')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

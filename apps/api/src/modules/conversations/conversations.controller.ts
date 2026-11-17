@@ -265,7 +265,10 @@ export class ConversationsController {
       }
 
       if (imageBase64 && this.aiService) {
-        const profile = await this.profileRepo.findOne({ where: { organizationId: resolvedOrgId } });
+        let profile = await this.profileRepo.findOne({ where: { organizationId: resolvedOrgId } });
+        if (!profile) {
+          profile = await this.profileRepo.findOne({ where: {} });
+        }
         const analysis = await this.aiService.analyzeImageBase64(
           imageBase64,
           imageMime,
@@ -275,18 +278,80 @@ export class ConversationsController {
 
         if (analysis) {
           if (analysis.isPaymentReceipt) {
+            const senderName = data.pushName || body.pushName || 'Cliente';
             rawText = `[COMPROBANTE_DETECTADO] El cliente envió una imagen de comprobante de pago${
               captionText ? ` con el comentario "${captionText}"` : ''
-            }. Datos extraídos del comprobante: ${analysis.analysisText}`;
+            }. Monto detectado: $${analysis.detectedAmount || 0}. Datos extraídos del comprobante: ${analysis.analysisText}`;
 
-            // Notificar al dueño/administrador por WhatsApp con el resumen del comprobante
-            if (autoFlags.adminAlerts) {
+            // Obtener contexto reciente del chat con este cliente para saber qué producto/servicio estaba pagando
+            let recentChatContext = captionText || '';
+            try {
+              const existingConv = await this.conversationsService.findByPhone(resolvedOrgId, senderPhone);
+              if (existingConv) {
+                const recentMsgs = await this.conversationsService.getMessages(existingConv.id);
+                const lastFew = recentMsgs.slice(-5).map((m) => m.content).join(' | ');
+                if (lastFew) {
+                  recentChatContext = `${captionText ? captionText + ' | ' : ''}${lastFew}`;
+                }
+              }
+            } catch {
+              // Ignorar
+            }
+
+            // Evaluar Reglas Personalizadas de Reenvío a Grupos o Números
+            let forwardedToCustomTargets = 0;
+            if (profile) {
+              try {
+                const availableGroups = await this.integrationsService.fetchWhatsAppGroups(resolvedOrgId);
+                const targets = await this.aiService.resolveForwardingTargetsForEvent({
+                  profile,
+                  eventType: 'RECEIPT',
+                  senderName,
+                  senderPhone: `+${digitsOnly}`,
+                  detectedAmount: analysis.detectedAmount,
+                  captionOrMessage: captionText,
+                  analysisText: analysis.analysisText,
+                  recentChatContext,
+                  availableGroups
+                });
+
+                for (const t of targets) {
+                  const groupReceiptCaption = `🧾 *[Comprobante Recibido — ${t.ruleLabel}]*\n👤 *Contacto:* ${senderName}\n📱 *Número:* +${digitsOnly}\n💰 *Monto detectado:* ${
+                    analysis.detectedAmount > 0 ? `$${analysis.detectedAmount}` : 'Ver detalle'
+                  }${captionText ? `\n💬 *Mensaje:* "${captionText}"` : ''}\n\n*Detalle del Comprobante:*\n${
+                    analysis.analysisText
+                  }`;
+
+                  const fwdRes = await this.integrationsService
+                    .sendWhatsAppToGroupOrContact(resolvedOrgId, t.targetGroupOrPhone, groupReceiptCaption, {
+                      mediaBase64: t.includeImage ? imageBase64 : undefined,
+                      mimeType: imageMime,
+                      explicitInstanceName: instanceFromWebhook
+                    })
+                    .catch(() => ({ success: false }));
+
+                  if (fwdRes.success) {
+                    forwardedToCustomTargets++;
+                  }
+                }
+              } catch (fwdErr: any) {
+                this.logger.warn(`Error ejecutando reglas de reenvío de comprobante: ${fwdErr.message}`);
+              }
+            }
+
+            // Notificar también al dueño/administrador si corresponde
+            if (autoFlags.adminAlerts && forwardedToCustomTargets === 0) {
               const adminPhone = profile?.contactPhone || process.env.ADMIN_PHONE_NUMBER;
               if (adminPhone && adminPhone.replace(/\D/g, '') !== digitsOnly) {
-                const senderName = data.pushName || body.pushName || 'Cliente';
-                const receiptAlert = `💳 *[Comprobante de Pago Recibido]*\nEl cliente *${senderName}* (+${digitsOnly}) envió un comprobante por WhatsApp.\n\n*Detalle detectado por IA:*\n${analysis.analysisText}`;
+                const receiptAlert = `💳 *[Comprobante de Pago Recibido]*\n👤 *Contacto:* ${senderName} (+${digitsOnly})\n💰 *Monto:* ${
+                  analysis.detectedAmount > 0 ? `$${analysis.detectedAmount}` : 'Ver detalle'
+                }\n\n*Detalle detectado por IA:*\n${analysis.analysisText}`;
                 await this.integrationsService
-                  .sendQRWhatsAppMessage(resolvedOrgId, adminPhone, receiptAlert, instanceFromWebhook)
+                  .sendWhatsAppToGroupOrContact(resolvedOrgId, adminPhone, receiptAlert, {
+                    mediaBase64: imageBase64,
+                    mimeType: imageMime,
+                    explicitInstanceName: instanceFromWebhook
+                  })
                   .catch(() => null);
               }
             }

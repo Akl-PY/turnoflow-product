@@ -281,6 +281,7 @@ export class AiService {
   ): Promise<{
     analysisText: string;
     isPaymentReceipt: boolean;
+    detectedAmount: number;
     receiptSummary?: string;
   } | null> {
     const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
@@ -293,7 +294,9 @@ export class AiService {
       caption ? ` El cliente acompañó la imagen con el mensaje: "${caption}".` : ''
     }
 Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
-- Si ES un comprobante de pago o transferencia, responde comenzando EXACTAMENTE con la etiqueta "[COMPROBANTE]" seguida de los datos extraídos: Monto, Fecha/Hora, Emisor/Destinatario, Banco/Billetera y Número de operación.
+- Si ES un comprobante de pago o transferencia:
+  1) Comienza tu respuesta EXACTAMENTE con "[COMPROBANTE][MONTO:XXXX]" donde XXXX es el monto numérico sin puntos de miles (ej. [COMPROBANTE][MONTO:50000]). Si no se distingue el monto, pon [COMPROBANTE][MONTO:0].
+  2) A continuación detalla: Monto, Fecha/Hora, Emisor, Destinatario, Banco/Billetera, Motivo/Concepto y Número de operación.
 - Si NO es un comprobante (por ejemplo: foto de un producto que busca comprar, un equipo o instalación rota, una consulta técnica o visual), responde comenzando con "[CONSULTA_VISUAL]" y describe con precisión qué se observa en la imagen para que el asistente comercial pueda asesorar al cliente.`;
 
     const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
@@ -327,14 +330,30 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
         const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
         if (text) {
           const isReceipt = text.startsWith('[COMPROBANTE]') || text.toLowerCase().includes('comprobante de');
+          let detectedAmount = 0;
+          const montoTagMatch = text.match(/\[MONTO:\s*([\d.,]+)\]/i);
+          if (montoTagMatch?.[1]) {
+            const normalizedNum = montoTagMatch[1].replace(/,/g, '.');
+            detectedAmount = parseFloat(normalizedNum) || 0;
+          } else if (isReceipt) {
+            const fallbackMoney = text.match(/\$\s*([\d.]+)/);
+            if (fallbackMoney?.[1]) {
+              detectedAmount = parseFloat(fallbackMoney[1].replace(/\./g, '')) || 0;
+            }
+          }
+
           const cleanAnalysis = text
             .replace(/^\[COMPROBANTE\]\s*/i, '')
+            .replace(/\[MONTO:\s*[\d.,]+\]\s*/i, '')
             .replace(/^\[CONSULTA_VISUAL\]\s*/i, '')
             .trim();
-          this.logger.log(`[IMAGEN ANALIZADA CON ${model}] Comprobante=${isReceipt}: "${cleanAnalysis.substring(0, 120)}"`);
+          this.logger.log(
+            `[IMAGEN ANALIZADA CON ${model}] Comprobante=${isReceipt} Monto=${detectedAmount}: "${cleanAnalysis.substring(0, 120)}"`
+          );
           return {
             analysisText: cleanAnalysis,
             isPaymentReceipt: isReceipt,
+            detectedAmount,
             receiptSummary: isReceipt ? cleanAnalysis : undefined
           };
         }
@@ -346,6 +365,153 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
     return null;
   }
 
+  /**
+   * Evalúa tanto las Reglas Visuales de Reenvío (`forwardingRules`) como las
+   * Instrucciones Personalizadas en Lenguaje Natural (`customForwardingInstructions`)
+   * para decidir a qué grupo(s) de WhatsApp o número(s) se debe reenviar un comprobante o aviso.
+   */
+  async resolveForwardingTargetsForEvent(params: {
+    profile: BusinessProfile;
+    eventType: 'RECEIPT' | 'ORDER' | 'MESSAGE';
+    senderName: string;
+    senderPhone: string;
+    detectedAmount?: number;
+    captionOrMessage?: string;
+    analysisText?: string;
+    recentChatContext?: string;
+    availableGroups?: Array<{ id: string; subject: string }>;
+  }): Promise<Array<{ targetGroupOrPhone: string; ruleLabel: string; includeImage: boolean }>> {
+    const customSettings = this.extractCustomAiSettings(params.profile);
+    const rules = Array.isArray(customSettings.forwardingRules) ? customSettings.forwardingRules : [];
+    const nlInstructions = (customSettings.customForwardingInstructions || '').trim();
+
+    const matchedTargets = new Map<
+      string,
+      { targetGroupOrPhone: string; ruleLabel: string; includeImage: boolean }
+    >();
+
+    const amount = Number(params.detectedAmount) || 0;
+    const combinedContext = `${params.captionOrMessage || ''} ${params.analysisText || ''} ${
+      params.recentChatContext || ''
+    }`.toLowerCase();
+
+    // 1. Evaluar Reglas Estructuradas configuradas en el panel
+    for (const rule of rules) {
+      if (rule.isActive === false || !rule.targetGroupOrPhone) continue;
+      const target = String(rule.targetGroupOrPhone).trim();
+      if (!target) continue;
+
+      const trigger = rule.triggerType || 'ALL_RECEIPTS';
+      if (params.eventType === 'RECEIPT' && !['ALL_RECEIPTS', 'RECEIPT_CONDITION'].includes(trigger)) {
+        continue;
+      }
+      if (params.eventType === 'ORDER' && trigger !== 'NEW_ORDER') {
+        continue;
+      }
+
+      // Verificar condición de monto mínimo
+      if (rule.minAmount && Number(rule.minAmount) > 0) {
+        if (amount < Number(rule.minAmount)) {
+          continue;
+        }
+      }
+
+      // Verificar condición de monto máximo
+      if (rule.maxAmount && Number(rule.maxAmount) > 0) {
+        if (amount > Number(rule.maxAmount)) {
+          continue;
+        }
+      }
+
+      // Verificar condición de palabra clave / producto / concepto (ej. "bomba", "mantenimiento", "seña")
+      if (rule.keyword && String(rule.keyword).trim()) {
+        const keywords = String(rule.keyword)
+          .toLowerCase()
+          .split(',')
+          .map((k) => k.trim())
+          .filter(Boolean);
+        const matchesKeyword = keywords.some((kw) => combinedContext.includes(kw));
+        if (!matchesKeyword) {
+          continue;
+        }
+      }
+
+      matchedTargets.set(target.toLowerCase(), {
+        targetGroupOrPhone: target,
+        ruleLabel: rule.name || (trigger === 'ALL_RECEIPTS' ? 'Todos los Comprobantes' : 'Regla Personalizada'),
+        includeImage: rule.includeImage !== false
+      });
+    }
+
+    // 2. Evaluar Instrucciones Personalizadas en Lenguaje Natural (`customForwardingInstructions`)
+    if (nlInstructions) {
+      const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+      const cleanKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
+      const groupsStr =
+        params.availableGroups && params.availableGroups.length > 0
+          ? params.availableGroups.map((g) => `"${g.subject}" (ID: ${g.id})`).join(', ')
+          : 'Usa el nombre del grupo o número mencionado en las instrucciones';
+
+      if (cleanKey && !this.isProviderCoolingDown('gemini')) {
+        try {
+          const evalPrompt = `Eres un motor de enrutamiento de WhatsApp.
+INSTRUCCIONES DEL USUARIO:
+"""
+${nlInstructions}
+"""
+
+GRUPOS DE WHATSAPP DISPONIBLES EN LA CUENTA:
+${groupsStr}
+
+EVENTO ACTUAL:
+- Tipo: ${params.eventType === 'RECEIPT' ? 'COMPROBANTE DE PAGO RECIBIDO' : params.eventType}
+- Contacto que lo envió: ${params.senderName} (+${params.senderPhone.replace(/\D/g, '')})
+- Monto detectado: $${amount}
+- Detalle del comprobante / mensaje: ${params.analysisText || params.captionOrMessage || ''}
+- Contexto previo de la conversación (qué producto o servicio hablaba): ${params.recentChatContext || 'Sin contexto previo'}
+
+Según las INSTRUCCIONES DEL USUARIO, ¿a qué grupos o números se debe reenviar este evento ahora mismo?
+Responde ÚNICAMENTE con un JSON válido con el formato:
+[{"target": "nombre del grupo o ID @g.us o teléfono", "label": "motivo de la regla aplicada"}]
+Si ninguna regla aplica, devuelve [].`;
+
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cleanKey}`;
+          const res = await axios.post(
+            url,
+            {
+              contents: [{ role: 'user', parts: [{ text: evalPrompt }] }]
+            },
+            { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
+          );
+
+          const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const parsedList = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(parsedList)) {
+              for (const item of parsedList) {
+                if (item?.target && String(item.target).trim()) {
+                  const t = String(item.target).trim();
+                  if (!matchedTargets.has(t.toLowerCase())) {
+                    matchedTargets.set(t.toLowerCase(), {
+                      targetGroupOrPhone: t,
+                      ruleLabel: item.label || 'Instrucción Personalizada',
+                      includeImage: true
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          this.logger.warn(`Evaluación IA de instrucciones de reenvío omitida: ${err.message}`);
+        }
+      }
+    }
+
+    return Array.from(matchedTargets.values());
+  }
+
   private extractCustomAiSettings(profile: BusinessProfile): {
     businessMode: 'HYBRID' | 'SALES' | 'BOOKING' | 'INFO';
     assistantName: string;
@@ -353,6 +519,8 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
     customContext: string;
     paymentInfo: string;
     shippingOrDeliveryInfo: string;
+    customForwardingInstructions: string;
+    forwardingRules: any[];
   } {
     const defaults = {
       businessMode: 'HYBRID' as const,
@@ -360,7 +528,9 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
       assistantTone: 'Cercano, amable, resolutivo y profesional (voseo natural)',
       customContext: '',
       paymentInfo: '',
-      shippingOrDeliveryInfo: ''
+      shippingOrDeliveryInfo: '',
+      customForwardingInstructions: '',
+      forwardingRules: [] as any[]
     };
 
     if (profile?.specialInstructions) {
@@ -372,7 +542,9 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
           assistantTone: parsed.assistantTone || defaults.assistantTone,
           customContext: parsed.customContext || '',
           paymentInfo: parsed.paymentInfo || '',
-          shippingOrDeliveryInfo: parsed.shippingOrDeliveryInfo || ''
+          shippingOrDeliveryInfo: parsed.shippingOrDeliveryInfo || '',
+          customForwardingInstructions: parsed.customForwardingInstructions || '',
+          forwardingRules: Array.isArray(parsed.forwardingRules) ? parsed.forwardingRules : []
         };
       } catch {
         // Si specialInstructions era texto plano libre, usarlo como customContext
@@ -555,6 +727,10 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
       ? `\nENVÍOS, ENTREGAS Y MODALIDAD DE ATENCIÓN:\n${customAi.shippingOrDeliveryInfo}\n`
       : '';
 
+    const forwardingSection = customAi.customForwardingInstructions
+      ? `\nINSTRUCCIONES PERSONALIZADAS DE REENVÍO Y ENRUTAMIENTO A GRUPOS / CONTACTOS:\n${customAi.customForwardingInstructions}\n(Si se cumple alguna de estas condiciones durante la charla, ejecuta la herramienta 'forward_to_group_or_contact' indicando el grupo/número de destino y el resumen completo).\n`
+      : '';
+
     const systemPrompt = `Eres "${customAi.assistantName}", el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
 Tono y Personalidad: ${customAi.assistantTone}.
 Modo de Operación: ${modeLabelMap[customAi.businessMode] || modeLabelMap.HYBRID}.
@@ -566,7 +742,7 @@ FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
 Política Comercial / Garantías / Cancelaciones: ${profile.cancellationPolicy}.
 Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
-${customContextSection}${paymentSection}${shippingSection}
+${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
 Catálogo de Productos y Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
@@ -1066,6 +1242,18 @@ ${bookingDirective}
             orderCreated: true,
             order: newOrder,
             message: 'Pedido registrado con éxito en el panel y notificado al dueño.'
+          }
+        };
+      }
+
+      case 'forward_to_group_or_contact': {
+        return {
+          success: true,
+          data: {
+            forwardTriggered: true,
+            targetGroupOrPhone: (args.targetGroupOrPhone as string) || '',
+            summaryText: (args.summaryText as string) || '',
+            message: 'Mensaje programado para reenvío al grupo o contacto.'
           }
         };
       }
