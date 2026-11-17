@@ -608,8 +608,12 @@ Si ninguna regla aplica, devuelve [].`;
     let senderPhone = params.senderPhone;
 
     let profile = params.profile;
+    const isRealOrg = Boolean(organizationId && organizationId !== 'default-org-id');
     if (!profile) {
-      profile = (await this.businessProfileRepo.findOne({ where: { organizationId } })) || undefined;
+      profile =
+        (isRealOrg
+          ? await this.businessProfileRepo.findOne({ where: { organizationId } })
+          : await this.businessProfileRepo.findOne({ where: {} })) || undefined;
     }
 
     let convMessagesCount = 0;
@@ -639,7 +643,7 @@ Si ninguna regla aplica, devuelve [].`;
 
     if (senderPhone) {
       // ¿Tiene turnos confirmados o completados?
-      const appts = await this.appointmentRepo.find({ where: { organizationId } });
+      const appts = await this.appointmentRepo.find(isRealOrg ? { where: { organizationId } } : {});
       const hasAppointment = appts.some(
         (a) =>
           this.phonesMatch(a.customerPhone, senderPhone) &&
@@ -650,7 +654,7 @@ Si ninguna regla aplica, devuelve [].`;
       }
 
       // ¿Tiene Lead marcado como BOOKED (cliente/alumno convertido)?
-      const leads = await this.leadRepo.find({ where: { organizationId } });
+      const leads = await this.leadRepo.find(isRealOrg ? { where: { organizationId } } : {});
       const isBookedLead = leads.some(
         (l) => this.phonesMatch(l.phone, senderPhone) && l.status === LeadStatus.BOOKED
       );

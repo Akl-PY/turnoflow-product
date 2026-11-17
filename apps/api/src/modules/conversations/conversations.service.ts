@@ -578,14 +578,44 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     }
   }
 
+  private isUuid(val?: string): boolean {
+    return Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim()));
+  }
+
+  private async resolveEffectiveOrgId(organizationId?: string): Promise<string> {
+    if (this.isUuid(organizationId)) return organizationId!;
+    if (organizationId && organizationId !== 'default-org-id') return organizationId;
+    if (this.profileRepo) {
+      try {
+        const profiles = await this.profileRepo.find({ take: 1 });
+        if (profiles.length > 0 && profiles[0].organizationId) {
+          return profiles[0].organizationId;
+        }
+      } catch {
+        // Ignorar
+      }
+    }
+    try {
+      const convs = await this.conversationRepo.find({ take: 1 });
+      if (convs.length > 0 && convs[0].organizationId) {
+        return convs[0].organizationId;
+      }
+    } catch {
+      // Ignorar
+    }
+    return organizationId || 'default-org-id';
+  }
+
   async findAll(organizationId: string): Promise<Conversation[]> {
-    let list = await this.conversationRepo.find({
-      where: [
-        { organizationId },
-        { organizationId: 'default-org-id' }
-      ],
-      order: { updatedAt: 'DESC' }
-    });
+    const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
+    let list: Conversation[] = [];
+
+    if (effectiveOrgId && effectiveOrgId !== 'default-org-id') {
+      list = await this.conversationRepo.find({
+        where: { organizationId: effectiveOrgId },
+        order: { updatedAt: 'DESC' }
+      });
+    }
 
     // Fallback: si hubo cambio de UUID de organización en redeploy pero hay conversaciones en la base
     if (list.length === 0) {
@@ -596,7 +626,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
     // Si aún está vacío (ej. tras redeploy de contenedor efímero), sincronizar historial reciente desde Evolution API
     if (list.length === 0 && this.integrationsService) {
-      await this.syncRecentChatsFromEvolution(organizationId);
+      await this.syncRecentChatsFromEvolution(effectiveOrgId);
       list = await this.conversationRepo.find({
         order: { updatedAt: 'DESC' }
       });
@@ -765,11 +795,23 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
   async findByPhone(organizationId: string, phone: string): Promise<Conversation | null> {
     const cleanDigits = phone.replace(/\D/g, '');
+    const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
+
+    if (!effectiveOrgId || effectiveOrgId === 'default-org-id') {
+      return this.conversationRepo.findOne({
+        where: [
+          { channelConversationId: phone },
+          { channelConversationId: `+${cleanDigits}` },
+          { channelConversationId: cleanDigits }
+        ]
+      });
+    }
+
     return this.conversationRepo.findOne({
       where: [
-        { organizationId, channelConversationId: phone },
-        { organizationId, channelConversationId: `+${cleanDigits}` },
-        { organizationId, channelConversationId: cleanDigits }
+        { organizationId: effectiveOrgId, channelConversationId: phone },
+        { organizationId: effectiveOrgId, channelConversationId: `+${cleanDigits}` },
+        { organizationId: effectiveOrgId, channelConversationId: cleanDigits }
       ]
     });
   }
@@ -1028,6 +1070,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
   }
 
   async resetAllToAi(organizationId?: string): Promise<{ affected: number }> {
+    const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
     const qb = this.conversationRepo
       .createQueryBuilder()
       .update(Conversation)
@@ -1035,11 +1078,8 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       .where('status = :status', { status: ConversationStatus.HUMAN_TAKEOVER })
       .andWhere("(assignedAgent IS NULL OR assignedAgent != 'EXCLUDED_PERMANENT')");
 
-    if (organizationId && organizationId !== 'default-org-id') {
-      qb.andWhere('(organizationId = :orgId OR organizationId = :defaultOrg)', {
-        orgId: organizationId,
-        defaultOrg: 'default-org-id'
-      });
+    if (effectiveOrgId && effectiveOrgId !== 'default-org-id') {
+      qb.andWhere('organizationId = :orgId', { orgId: effectiveOrgId });
     }
 
     const result = await qb.execute();

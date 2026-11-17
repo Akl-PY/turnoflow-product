@@ -807,7 +807,7 @@ export class ConversationsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Listar conversaciones activas' })
   async findAll(@Request() req: any) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.findAll(orgId);
   }
 
@@ -817,7 +817,7 @@ export class ConversationsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reactivar todas las conversaciones a Modo IA (respetando excluidos permanentes)' })
   async resetAllAi(@Request() req: any) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.resetAllToAi(orgId);
   }
 
@@ -826,7 +826,7 @@ export class ConversationsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Generar y enviar el Resumen Ejecutivo al WhatsApp del dueño' })
   async sendDailySummary(@Request() req: any, @Body('targetPhone') targetPhone?: string) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.sendOwnerExecutiveSummary(orgId, targetPhone);
   }
 
@@ -835,7 +835,7 @@ export class ConversationsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtener lista de teléfonos excluidos permanentemente (Proveedores, Familiares, etc.)' })
   async getExcludedPhones(@Request() req: any) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.getExcludedPhones(orgId);
   }
 
@@ -847,7 +847,7 @@ export class ConversationsController {
     @Request() req: any,
     @Body() body: { phone: string; label?: string }
   ) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.addExcludedPhone(orgId, body.phone, body.label);
   }
 
@@ -856,7 +856,7 @@ export class ConversationsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Quitar un número de la lista de excluidos permanentes' })
   async removeExcludedPhone(@Request() req: any, @Param('phone') phone: string) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.removeExcludedPhone(orgId, phone);
   }
 
@@ -868,7 +868,7 @@ export class ConversationsController {
     @Request() req: any,
     @Body() body: { phone: string; isCustomer: boolean }
   ) {
-    const orgId = req?.user?.organizationId || 'default-org-id';
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
     return this.conversationsService.setCustomerPhoneFlag(orgId, body.phone, Boolean(body.isCustomer));
   }
 
