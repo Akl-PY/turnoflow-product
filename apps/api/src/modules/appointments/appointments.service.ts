@@ -171,13 +171,34 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
 
   async checkSlot(organizationId: string, serviceId: string, startTimeIso: string): Promise<{
     isAvailable: boolean;
+    bookedCount?: number;
+    maxCapacity?: number;
+    remainingSpots?: number;
     alternativeSlots: string[];
   }> {
     const requestedStart = new Date(startTimeIso);
     const requestedEnd = new Date(requestedStart.getTime() + 60 * 60 * 1000); // 60 min
 
-    // Verificar si ya existe un turno confirmado en esa franja
-    const conflict = await this.appointmentRepo.findOne({
+    let maxCapacity = 1;
+    if (this.profileRepo) {
+      const prof = await this.profileRepo.findOne({ where: { organizationId } });
+      if (prof && Array.isArray(prof.services)) {
+        const reqLower = (serviceId || '').toLowerCase().trim();
+        const matched =
+          prof.services.find(
+            (s) =>
+              (s.id || '').toLowerCase() === reqLower ||
+              (s.name || '').toLowerCase().includes(reqLower) ||
+              (reqLower && reqLower.includes((s.name || '').toLowerCase()))
+          ) || prof.services.find((s) => (Number(s.maxCapacityPerSlot) || 1) > 1);
+        if (matched) {
+          maxCapacity = Math.max(1, Number(matched.maxCapacityPerSlot) || 1);
+        }
+      }
+    }
+
+    // Contar cuántos turnos confirmados existen en esa franja
+    const conflicts = await this.appointmentRepo.find({
       where: {
         organizationId,
         status: AppointmentStatus.CONFIRMED,
@@ -188,18 +209,50 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
-    if (conflict) {
+    const bookedCount = conflicts.length;
+    if (bookedCount >= maxCapacity) {
+      // Buscar próximas fechas disponibles para ese mismo turno (próximos 7 días)
+      const nextSameShiftDates: string[] = [];
+      for (let d = 1; d <= 7 && nextSameShiftDates.length < 3; d++) {
+        const candidateDate = new Date(requestedStart.getTime() + d * 24 * 60 * 60 * 1000);
+        const dayOfWeek = candidateDate.getUTCDay();
+        if (dayOfWeek === 0) continue; // Saltar domingo por defecto
+        const candidateEnd = new Date(candidateDate.getTime() + 60 * 60 * 1000);
+        const dayConflicts = await this.appointmentRepo.find({
+          where: {
+            organizationId,
+            status: AppointmentStatus.CONFIRMED,
+            startTime: Between(
+              new Date(candidateDate.getTime() - 45 * 60 * 1000),
+              new Date(candidateEnd.getTime() - 15 * 60 * 1000)
+            )
+          }
+        });
+        if (dayConflicts.length < maxCapacity) {
+          nextSameShiftDates.push(candidateDate.toISOString());
+        }
+      }
+
       return {
         isAvailable: false,
-        alternativeSlots: [
-          new Date(requestedStart.getTime() + 120 * 60 * 1000).toISOString(),
-          new Date(requestedStart.getTime() + 180 * 60 * 1000).toISOString()
-        ]
+        bookedCount,
+        maxCapacity,
+        remainingSpots: 0,
+        alternativeSlots:
+          nextSameShiftDates.length > 0
+            ? nextSameShiftDates
+            : [
+                new Date(requestedStart.getTime() + 120 * 60 * 1000).toISOString(),
+                new Date(requestedStart.getTime() + 180 * 60 * 1000).toISOString()
+              ]
       };
     }
 
     return {
       isAvailable: true,
+      bookedCount,
+      maxCapacity,
+      remainingSpots: maxCapacity - bookedCount,
       alternativeSlots: []
     };
   }
@@ -215,7 +268,9 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   }): Promise<Appointment> {
     const availability = await this.checkSlot(organizationId, data.serviceId, data.startTime);
     if (!availability.isAvailable) {
-      throw new ConflictException('El horario solicitado ya se encuentra ocupado.');
+      throw new ConflictException(
+        `El turno solicitado ya alcanzó su cupo máximo (${availability.bookedCount}/${availability.maxCapacity}). Próximas fechas disponibles: ${(availability.alternativeSlots || []).map((s) => s.split('T')[0]).join(', ')}`
+      );
     }
 
     const start = new Date(data.startTime);

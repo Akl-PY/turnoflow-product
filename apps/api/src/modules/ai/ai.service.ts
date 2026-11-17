@@ -677,7 +677,22 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
     const servicesSummary =
       Array.isArray(profile.services) && profile.services.length > 0
         ? profile.services
-            .map((s) => `- ${s.name}: $${s.price} ${s.currency || profile.currency || 'USD'} (${s.durationMinutes || 60} min)${s.description ? ` — ${s.description}` : ''}`)
+            .map((s) => {
+              const cap = Math.max(1, Number(s.maxCapacityPerSlot) || 1);
+              const capInfo = cap > 1 ? ` | Cupo máx. por turno por día: ${cap} lugares` : '';
+              const slotsInfo =
+                Array.isArray(s.specificSlots) && s.specificSlots.length > 0
+                  ? ` | Horarios de turno: ${s.specificSlots.join(', ')}`
+                  : '';
+              const daysInfo =
+                Array.isArray(s.availableDays) && s.availableDays.length > 0
+                  ? ` | Días: ${s.availableDays.map((d) => dayNames[d] || d).join(', ')}`
+                  : '';
+              const trialInfo = s.requiresTrialFirst
+                ? ` | REGLA: Para empezar en este turno, el alumno nuevo debe agendar primero Clase de Prueba (sujeta al cupo máximo diario de ${cap} por turno)`
+                : '';
+              return `- ${s.name}: $${s.price} ${s.currency || profile.currency || 'USD'} (${s.durationMinutes || 60} min)${capInfo}${slotsInfo}${daysInfo}${trialInfo}${s.description ? ` — ${s.description}` : ''}`;
+            })
             .join('\n')
         : 'Consultar mediante herramienta get_services';
 
@@ -712,7 +727,7 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
     };
 
     const bookingDirective = bookingEnabled && customAi.businessMode !== 'SALES' && customAi.businessMode !== 'INFO'
-      ? `4. CONSULTA DE DISPONIBILIDAD Y TURNOS: La agenda está HABILITADA. Si el cliente busca un turno o visita, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD), el nombre/ID del servicio y opcionalmente el nombre del empleado. Si el cliente solo quiere comprar un producto o hacer una consulta general, asesóralo y bríndale los medios de pago o detalles sin forzar un turno.`
+      ? `4. CONSULTA DE DISPONIBILIDAD, CLASES DE PRUEBA Y CUPO POR TURNO: La agenda está HABILITADA. Si el cliente o alumno busca un turno, clase de prueba o comenzar en un horario determinado, llama SIEMPRE a 'check_availability' (o 'check_available_slots') con la fecha calculada (YYYY-MM-DD) y el nombre/ID del servicio o turno. Si el turno tiene cupo máximo diario (ej. máximo 2 clases de prueba por turno por día) y en esa fecha ese turno figura completo ('fullSlots' o 'slotFull'), explicale amablemente que ya se completaron los cupos de prueba de ese turno en ese día y ofrécele inmediatamente las próximas fechas disponibles devueltas en 'nextAvailableDatesForFullShifts' / 'nextAvailableDates'.`
       : `4. MODO VENTAS Y ATENCIÓN (SIN AGENDA DE CALENDARIO): Este negocio opera sin agenda automática de calendario. Tu objetivo es asesorar sobre productos y servicios, informar precios, explicar cómo comprar, brindar los datos de pago/envío y responder cualquier duda sobre el negocio. Cuando el cliente confirme que quiere comprar, encargar o coordinar con el equipo, registra sus datos con 'create_lead' o utiliza 'handoff_to_human' e indícale que ya avisaste a un asesor para finalizar su pedido.`;
 
     const customContextSection = customAi.customContext
@@ -1400,15 +1415,35 @@ ${bookingDirective}
           }
         }
 
-        // Modo catálogo nativo de TurnoFlow
-        const slots = await this.calculateAvailableSlots(organizationId, date, profile);
+        // Modo catálogo nativo de TurnoFlow (con control de cupo por turno/día, clases de prueba y fechas alternativas)
+        const evalResult = await this.evaluateDayCapacityAndSlots(
+          organizationId,
+          date,
+          profile,
+          requestedServiceRaw
+        );
+        const nextDates = await this.calculateNextAvailableDatesForService(
+          organizationId,
+          date,
+          profile,
+          requestedServiceRaw,
+          evalResult.fullSlots
+        );
+
         return {
           success: true,
           data: {
             date,
             source: 'turnoflow',
-            isAvailable: slots.length > 0,
-            availableSlots: slots
+            serviceName: evalResult.matchedService?.name || undefined,
+            maxCapacityPerSlot: evalResult.maxCapacityPerSlot,
+            requiresTrialFirst: Boolean(evalResult.matchedService?.requiresTrialFirst),
+            isAvailable: evalResult.availableSlots.length > 0,
+            availableSlots: evalResult.availableSlots,
+            fullSlots: evalResult.fullSlots,
+            slotDetails: evalResult.slotDetails,
+            nextAvailableDates: nextDates.upcomingDays,
+            nextAvailableDatesForFullShifts: nextDates.byShift
           }
         };
       }
@@ -1425,13 +1460,15 @@ ${bookingDirective}
           };
         }
 
-        const startTime = new Date(args.startTime as string);
+        const startTime = this.normalizeStartTimeUtc(args.startTime as string);
         const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
         const requestedServiceRaw = ((args.serviceId || '') as string).toLowerCase().trim();
         const requestedStaffRaw = ((args.staffName || '') as string).toLowerCase().trim();
 
         let scalinkyBooking: any = null;
-        let resolvedServiceName = (args.serviceId as string) || 'Servicio General';
+        const matchedNativeService = this.resolveTargetService(profile, requestedServiceRaw);
+        let resolvedServiceName =
+          matchedNativeService?.name || (args.serviceId as string) || 'Servicio General';
         const slug = this.extractScalinkySlug(profile);
 
         if (slug && this.scalinkyService) {
@@ -1535,13 +1572,47 @@ ${bookingDirective}
               };
             }
           }
+        } else {
+          // Validación de cupo máximo por turno por día en catálogo nativo TurnoFlow
+          const reqDateStr = startTime.toISOString().split('T')[0];
+          const reqSlotStr = `${String(startTime.getUTCHours()).padStart(2, '0')}:${String(startTime.getUTCMinutes()).padStart(2, '0')}`;
+          const evalDay = await this.evaluateDayCapacityAndSlots(
+            organizationId,
+            reqDateStr,
+            profile,
+            requestedServiceRaw
+          );
+          const bookedInRequestedSlot = evalDay.bookedCountBySlot[reqSlotStr] || 0;
+          if (bookedInRequestedSlot >= evalDay.maxCapacityPerSlot) {
+            const nextDates = await this.calculateNextAvailableDatesForService(
+              organizationId,
+              reqDateStr,
+              profile,
+              requestedServiceRaw,
+              [reqSlotStr]
+            );
+            return {
+              success: false,
+              data: {
+                slotFull: true,
+                date: reqDateStr,
+                slot: reqSlotStr,
+                bookedCount: bookedInRequestedSlot,
+                maxCapacityPerSlot: evalDay.maxCapacityPerSlot,
+                availableSlotsSameDay: evalDay.availableSlots,
+                nextAvailableDates: nextDates.upcomingDays,
+                nextAvailableDatesForShift: nextDates.byShift[reqSlotStr] || [],
+                message: `El turno de las ${reqSlotStr} el día ${reqDateStr} ya alcanzó su cupo máximo (${bookedInRequestedSlot}/${evalDay.maxCapacityPerSlot}). Ofrécele al alumno/cliente las próximas fechas disponibles para ese turno o los otros horarios disponibles.`
+              }
+            };
+          }
         }
 
         const appointment = this.appointmentRepo.create({
           organizationId,
           customerName: args.customerName as string,
           customerPhone: args.customerPhone as string,
-          serviceId: (args.serviceId as string) || 'srv-default',
+          serviceId: matchedNativeService?.id || (args.serviceId as string) || 'srv-default',
           serviceName: resolvedServiceName,
           startTime,
           endTime,
@@ -1556,6 +1627,7 @@ ${bookingDirective}
             status: 'CONFIRMED',
             startTime: saved.startTime.toISOString(),
             serviceName: saved.serviceName,
+            maxCapacityPerSlot: Math.max(1, Number(matchedNativeService?.maxCapacityPerSlot) || 1),
             scalinky: scalinkyBooking
           }
         };
@@ -1606,22 +1678,102 @@ ${bookingDirective}
     return this.followUpAgent.parseResult(response.content);
   }
 
-  private async calculateAvailableSlots(
+  private normalizeStartTimeUtc(rawStart: string): Date {
+    const trimmed = String(rawStart || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+      const withT = trimmed.replace(' ', 'T');
+      const withSec = withT.length === 16 ? `${withT}:00` : withT;
+      return new Date(`${withSec}Z`);
+    }
+    return new Date(trimmed);
+  }
+
+  private resolveTargetService(profile?: BusinessProfile, requestedServiceRaw?: string): any | undefined {
+    const services = Array.isArray(profile?.services) ? profile!.services.filter((s) => s.isActive !== false) : [];
+    if (services.length === 0) return undefined;
+
+    const req = (requestedServiceRaw || '').toLowerCase().trim();
+    if (req) {
+      const direct = services.find(
+        (s) =>
+          (s.id || '').toLowerCase() === req ||
+          (s.name || '').toLowerCase().includes(req) ||
+          req.includes((s.name || '').toLowerCase())
+      );
+      if (direct) return direct;
+    }
+
+    // Si no especificó nombre exacto pero hay un servicio con clase de prueba o cupo especial, o un único servicio
+    const trialOrCapacityService = services.find(
+      (s) => s.requiresTrialFirst || (Number(s.maxCapacityPerSlot) || 1) > 1 || (Array.isArray(s.specificSlots) && s.specificSlots.length > 0)
+    );
+    return trialOrCapacityService || services[0];
+  }
+
+  public async evaluateDayCapacityAndSlots(
     organizationId: string,
     dateStr: string,
-    profile?: BusinessProfile
-  ): Promise<string[]> {
+    profile?: BusinessProfile,
+    requestedServiceRaw?: string,
+    preloadedAppointments?: Appointment[]
+  ): Promise<{
+    matchedService?: any;
+    maxCapacityPerSlot: number;
+    candidateSlots: string[];
+    availableSlots: string[];
+    fullSlots: string[];
+    bookedCountBySlot: Record<string, number>;
+    slotDetails: Array<{
+      slot: string;
+      booked: number;
+      maxCapacity: number;
+      remaining: number;
+      isFull: boolean;
+    }>;
+  }> {
+    const matchedService = this.resolveTargetService(profile, requestedServiceRaw);
+    const maxCapacityPerSlot = Math.max(1, Number(matchedService?.maxCapacityPerSlot) || 1);
+
+    const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const parsedDate = new Date(`${dateStr}T12:00:00Z`);
+    const dayKey = !isNaN(parsedDate.getTime()) ? dayKeys[parsedDate.getUTCDay()] : 'monday';
+
+    // Verificar si el servicio/turno se dicta en este día de la semana
+    if (
+      matchedService &&
+      Array.isArray(matchedService.availableDays) &&
+      matchedService.availableDays.length > 0
+    ) {
+      const allowedDays = matchedService.availableDays.map((d: string) => String(d).toLowerCase().trim());
+      if (!allowedDays.includes(dayKey)) {
+        return {
+          matchedService,
+          maxCapacityPerSlot,
+          candidateSlots: [],
+          availableSlots: [],
+          fullSlots: [],
+          bookedCountBySlot: {},
+          slotDetails: []
+        };
+      }
+    }
+
     let candidateSlots = ['09:00', '10:00', '11:30', '14:00', '15:30', '17:00'];
 
     if (profile && Array.isArray(profile.businessHours) && profile.businessHours.length > 0) {
-      const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-      const parsedDate = new Date(`${dateStr}T12:00:00Z`);
       if (!isNaN(parsedDate.getTime())) {
-        const dayKey = dayKeys[parsedDate.getUTCDay()];
         const daySched = profile.businessHours.find((h) => h.day === dayKey);
         if (daySched) {
           if (!daySched.isOpen) {
-            return [];
+            return {
+              matchedService,
+              maxCapacityPerSlot,
+              candidateSlots: [],
+              availableSlots: [],
+              fullSlots: [],
+              bookedCountBySlot: {},
+              slotDetails: []
+            };
           }
           const openH = parseInt((daySched.open || '09:00').split(':')[0], 10);
           const closeH = parseInt((daySched.close || '18:00').split(':')[0], 10);
@@ -1638,24 +1790,154 @@ ${bookingDirective}
       }
     }
 
+    // Si el servicio/clase tiene horarios fijos de turno (ej. ["18:00", "19:30"] en escuela de Taekwondo)
+    if (
+      matchedService &&
+      Array.isArray(matchedService.specificSlots) &&
+      matchedService.specificSlots.length > 0
+    ) {
+      candidateSlots = matchedService.specificSlots
+        .map((s: string) => String(s).trim())
+        .filter(Boolean);
+    }
+
+    const existing =
+      preloadedAppointments ||
+      (await this.appointmentRepo.find({
+        where: { organizationId, status: AppointmentStatus.CONFIRMED }
+      }));
+
+    const bookedCountBySlot: Record<string, number> = {};
+    for (const a of existing) {
+      try {
+        const d = new Date(a.startTime);
+        const apptDate = d.toISOString().split('T')[0];
+        if (apptDate !== dateStr) continue;
+        const slot = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+        bookedCountBySlot[slot] = (bookedCountBySlot[slot] || 0) + 1;
+      } catch {
+        // Ignorar fecha inválida
+      }
+    }
+
+    const availableSlots: string[] = [];
+    const fullSlots: string[] = [];
+    const slotDetails = candidateSlots.map((slot) => {
+      const booked = bookedCountBySlot[slot] || 0;
+      const remaining = Math.max(0, maxCapacityPerSlot - booked);
+      const isFull = booked >= maxCapacityPerSlot;
+      if (isFull) {
+        fullSlots.push(slot);
+      } else {
+        availableSlots.push(slot);
+      }
+      return {
+        slot,
+        booked,
+        maxCapacity: maxCapacityPerSlot,
+        remaining,
+        isFull
+      };
+    });
+
+    // También incluir en fullSlots cualquier horario fuera de candidateSlots que ya haya alcanzado el cupo ese día
+    for (const [bookedSlot, count] of Object.entries(bookedCountBySlot)) {
+      if (!candidateSlots.includes(bookedSlot) && count >= maxCapacityPerSlot) {
+        fullSlots.push(bookedSlot);
+      }
+    }
+
+    return {
+      matchedService,
+      maxCapacityPerSlot,
+      candidateSlots,
+      availableSlots,
+      fullSlots,
+      bookedCountBySlot,
+      slotDetails
+    };
+  }
+
+  public async calculateNextAvailableDatesForService(
+    organizationId: string,
+    fromDateStr: string,
+    profile?: BusinessProfile,
+    requestedServiceRaw?: string,
+    targetShifts: string[] = []
+  ): Promise<{
+    upcomingDays: Array<{ date: string; dayLabel: string; availableSlots: string[] }>;
+    byShift: Record<string, Array<{ date: string; dayLabel: string; remainingSpots: number }>>;
+  }> {
     const existing = await this.appointmentRepo.find({
       where: { organizationId, status: AppointmentStatus.CONFIRMED }
     });
 
-    const bookedHours = existing
-      .filter((a) => {
-        try {
-          return new Date(a.startTime).toISOString().split('T')[0] === dateStr;
-        } catch {
-          return false;
-        }
-      })
-      .map((a) => {
-        const d = new Date(a.startTime);
-        return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-      });
+    const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const baseDate = new Date(`${fromDateStr}T12:00:00Z`);
+    const upcomingDays: Array<{ date: string; dayLabel: string; availableSlots: string[] }> = [];
+    const byShift: Record<string, Array<{ date: string; dayLabel: string; remainingSpots: number }>> = {};
 
-    return candidateSlots.filter((slot) => !bookedHours.includes(slot));
+    for (const sh of targetShifts) {
+      byShift[sh] = [];
+    }
+
+    if (isNaN(baseDate.getTime())) {
+      return { upcomingDays, byShift };
+    }
+
+    for (let offset = 1; offset <= 14; offset++) {
+      const nextD = new Date(baseDate.getTime() + offset * 24 * 60 * 60 * 1000);
+      const nextDateStr = nextD.toISOString().split('T')[0];
+      const dayLabel = dayLabels[nextD.getUTCDay()];
+
+      const evalNext = await this.evaluateDayCapacityAndSlots(
+        organizationId,
+        nextDateStr,
+        profile,
+        requestedServiceRaw,
+        existing
+      );
+
+      if (evalNext.availableSlots.length > 0 && upcomingDays.length < 5) {
+        upcomingDays.push({
+          date: nextDateStr,
+          dayLabel,
+          availableSlots: evalNext.availableSlots
+        });
+      }
+
+      for (const sh of targetShifts) {
+        if (byShift[sh] && byShift[sh].length < 4) {
+          const booked = evalNext.bookedCountBySlot[sh] || 0;
+          const isDayOpenForShift =
+            evalNext.candidateSlots.includes(sh) || evalNext.availableSlots.length > 0;
+          if (isDayOpenForShift && booked < evalNext.maxCapacityPerSlot) {
+            byShift[sh].push({
+              date: nextDateStr,
+              dayLabel,
+              remainingSpots: evalNext.maxCapacityPerSlot - booked
+            });
+          }
+        }
+      }
+    }
+
+    return { upcomingDays, byShift };
+  }
+
+  private async calculateAvailableSlots(
+    organizationId: string,
+    dateStr: string,
+    profile?: BusinessProfile,
+    requestedServiceRaw?: string
+  ): Promise<string[]> {
+    const evalResult = await this.evaluateDayCapacityAndSlots(
+      organizationId,
+      dateStr,
+      profile,
+      requestedServiceRaw
+    );
+    return evalResult.availableSlots;
   }
 
   private async createDefaultProfile(organizationId: string): Promise<BusinessProfile> {

@@ -49,6 +49,10 @@ function formatAppointmentItem(raw: any) {
     customerName: raw.customerName,
     customerPhone: raw.customerPhone,
     serviceName: raw.serviceName || raw.serviceId,
+    rawStartIso: raw.startTime ? new Date(raw.startTime).toISOString() : '',
+    slotKey: raw.startTime
+      ? `${new Date(raw.startTime).toISOString().split('T')[0]}_${String(new Date(raw.startTime).getUTCHours()).padStart(2, '0')}:${String(new Date(raw.startTime).getUTCMinutes()).padStart(2, '0')}`
+      : `${raw.date}_${raw.time}`,
     date: dateStr.charAt(0).toUpperCase() + dateStr.slice(1),
     time: timeStr,
     status: raw.status || 'CONFIRMED',
@@ -59,6 +63,7 @@ function formatAppointmentItem(raw: any) {
 export default function AppointmentsScreen() {
   const { user } = useAuth();
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [servicesCatalog, setServicesCatalog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Formulario de Nuevo Turno
@@ -76,9 +81,15 @@ export default function AppointmentsScreen() {
     const fetchAppointments = async () => {
       setLoading(true);
       try {
-        const res = await apiClient.get('/appointments');
-        if (Array.isArray(res.data)) {
-          setAppointments(res.data.map(formatAppointmentItem));
+        const [resAppts, resBiz] = await Promise.all([
+          apiClient.get('/appointments'),
+          apiClient.get('/business').catch(() => ({ data: null }))
+        ]);
+        if (Array.isArray(resAppts.data)) {
+          setAppointments(resAppts.data.map(formatAppointmentItem));
+        }
+        if (Array.isArray(resBiz.data?.services)) {
+          setServicesCatalog(resBiz.data.services);
         }
       } catch {
         setAppointments([]);
@@ -331,6 +342,17 @@ export default function AppointmentsScreen() {
           ) : (
             appointments.map((apt) => {
               const isConfirmed = apt.status === 'CONFIRMED';
+              const sameSlotCount = appointments.filter(
+                (other) => other.status === 'CONFIRMED' && other.slotKey && other.slotKey === apt.slotKey
+              ).length;
+              const matchedSrv = servicesCatalog.find(
+                (s) =>
+                  (s.name || '').toLowerCase() === (apt.serviceName || '').toLowerCase() ||
+                  (apt.serviceName || '').toLowerCase().includes((s.name || '').toLowerCase())
+              );
+              const maxCap = Math.max(1, Number(matchedSrv?.maxCapacityPerSlot) || 1);
+              const isSlotFull = sameSlotCount >= maxCap;
+
               return (
                 <View key={apt.id} style={styles.aptRow}>
                   {/* Fecha y Hora */}
@@ -346,7 +368,32 @@ export default function AppointmentsScreen() {
                       <Phone size={12} color="#64748B" style={{ marginRight: 4 }} />
                       <Text style={styles.customerPhone}>{apt.customerPhone}</Text>
                     </View>
-                    <Text style={styles.serviceTag}>{apt.serviceName}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.serviceTag}>{apt.serviceName}</Text>
+                      {isConfirmed && (
+                        <View
+                          style={{
+                            backgroundColor: isSlotFull && maxCap > 1 ? '#FEF2F2' : '#F8FAFC',
+                            borderWidth: 1,
+                            borderColor: isSlotFull && maxCap > 1 ? '#FECACA' : '#E2E8F0',
+                            borderRadius: 6,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: isSlotFull && maxCap > 1 ? '#DC2626' : '#475569'
+                            }}
+                          >
+                            👥 Cupo en este turno: {sameSlotCount}/{maxCap}
+                            {isSlotFull && maxCap > 1 ? ' (Cupo Completo)' : ''}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                     {apt.notes ? (
                       <Text style={styles.notesText}>{apt.notes}</Text>
                     ) : null}

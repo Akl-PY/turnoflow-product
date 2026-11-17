@@ -106,6 +106,14 @@ export interface ServiceItem {
   currency: string;
   durationMinutes: number;
   isActive: boolean;
+  /** Cupo máximo permitido por turno/horario en un mismo día (ej. 1 para atención individual, 2 para máx. 2 clases de prueba por turno por día) */
+  maxCapacityPerSlot?: number;
+  /** Horarios fijos del turno (ej. ["18:00", "19:30"] para clases de Taekwondo). Si está vacío, usa el horario general del negocio. */
+  specificSlots?: string[];
+  /** Días de la semana en los que se dicta este turno/servicio (ej. ["monday", "wednesday", "friday"]). Si está vacío, usa los días abiertos del negocio. */
+  availableDays?: string[];
+  /** Indica si para ingresar a este turno el alumno/cliente nuevo debe realizar primero una clase de prueba sujeta al cupo diario del turno */
+  requiresTrialFirst?: boolean;
 }
 
 export interface FAQItem {

@@ -25,7 +25,11 @@ export const ServiceItemSchema = z.object({
   price: z.number().nonnegative('El precio no puede ser negativo'),
   currency: z.string().default('USD'),
   durationMinutes: z.number().int().positive('La duración debe ser mayor a 0 minutos'),
-  isActive: z.boolean().default(true)
+  isActive: z.boolean().default(true),
+  maxCapacityPerSlot: z.number().int().positive().default(1).optional(),
+  specificSlots: z.array(z.string()).default([]).optional(),
+  availableDays: z.array(z.string()).default([]).optional(),
+  requiresTrialFirst: z.boolean().default(false).optional()
 });
 
 export const FAQItemSchema = z.object({

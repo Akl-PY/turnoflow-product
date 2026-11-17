@@ -41,12 +41,15 @@ export default function KnowledgeBaseScreen() {
   const [orderDeliveryMethod, setOrderDeliveryMethod] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
-  // Form para nuevo servicio o producto
+  // Form para nuevo servicio, turno/clase o producto
   const [showAddModal, setShowAddModal] = useState(false);
   const [newItemCategory, setNewItemCategory] = useState<'Servicio' | 'Producto'>('Servicio');
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
   const [newServiceDuration, setNewServiceDuration] = useState('60');
+  const [newServiceCapacity, setNewServiceCapacity] = useState('1');
+  const [newServiceSpecificSlots, setNewServiceSpecificSlots] = useState('');
+  const [newServiceRequiresTrial, setNewServiceRequiresTrial] = useState(false);
   const [newServiceDesc, setNewServiceDesc] = useState('');
   const [submittingService, setSubmittingService] = useState(false);
 
@@ -265,6 +268,13 @@ export default function KnowledgeBaseScreen() {
   const handleAddService = async () => {
     if (!newServiceName.trim() || !newServicePrice.trim()) return;
     setSubmittingService(true);
+    const parsedSlots =
+      newItemCategory === 'Servicio' && newServiceSpecificSlots.trim()
+        ? newServiceSpecificSlots
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
     const item = {
       name: newServiceName.trim(),
       category: newItemCategory,
@@ -272,10 +282,13 @@ export default function KnowledgeBaseScreen() {
         newServiceDesc.trim() ||
         (newItemCategory === 'Producto'
           ? 'Producto disponible para compra'
-          : 'Servicio profesional de nuestro negocio'),
-      price: parseFloat(newServicePrice) || 30,
+          : 'Servicio o turno profesional de nuestro negocio'),
+      price: parseFloat(newServicePrice) || 0,
       currency: 'USD',
       durationMinutes: newItemCategory === 'Producto' ? 15 : parseInt(newServiceDuration, 10) || 60,
+      maxCapacityPerSlot: newItemCategory === 'Producto' ? 1 : Math.max(1, parseInt(newServiceCapacity, 10) || 1),
+      specificSlots: parsedSlots,
+      requiresTrialFirst: newItemCategory === 'Servicio' ? newServiceRequiresTrial : false,
       isActive: true
     };
 
@@ -292,6 +305,9 @@ export default function KnowledgeBaseScreen() {
       setSubmittingService(false);
       setNewServiceName('');
       setNewServicePrice('');
+      setNewServiceCapacity('1');
+      setNewServiceSpecificSlots('');
+      setNewServiceRequiresTrial(false);
       setNewServiceDesc('');
       setShowAddModal(false);
     }
@@ -440,7 +456,7 @@ export default function KnowledgeBaseScreen() {
                           color: newItemCategory === cat ? '#1A73E8' : '#475569'
                         }}
                       >
-                        {cat === 'Producto' ? '📦 Producto en Venta' : '🛠️ Servicio / Prestación'}
+                        {cat === 'Producto' ? '📦 Producto en Venta' : '🛠️ Servicio / Turno / Clase'}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -449,14 +465,16 @@ export default function KnowledgeBaseScreen() {
                 <View style={styles.formGrid}>
                   <View style={styles.formField}>
                     <Text style={styles.fieldLabel}>
-                      {newItemCategory === 'Producto' ? 'Nombre del Producto / Artículo' : 'Nombre del Servicio'}
+                      {newItemCategory === 'Producto'
+                        ? 'Nombre del Producto / Artículo'
+                        : 'Nombre del Servicio, Turno o Clase'}
                     </Text>
                     <TextInput
                       style={styles.formInput}
                       placeholder={
                         newItemCategory === 'Producto'
-                          ? 'Ej. Bomba Autocebante 1HP, Kit de Cloro, Repuesto...'
-                          : 'Ej. Mantenimiento Mensual, Visita Técnica, Consulta...'
+                          ? 'Ej. Bomba Autocebante 1HP, Kit de Cloro, Dobok...'
+                          : 'Ej. Clase de Prueba Taekwondo, Turno Infantil, Consulta...'
                       }
                       placeholderTextColor="#94A3B8"
                       value={newServiceName}
@@ -464,10 +482,10 @@ export default function KnowledgeBaseScreen() {
                     />
                   </View>
                   <View style={styles.formField}>
-                    <Text style={styles.fieldLabel}>Precio ($ USD o moneda local)</Text>
+                    <Text style={styles.fieldLabel}>Precio ($ USD o moneda local, 0 si es gratis)</Text>
                     <TextInput
                       style={styles.formInput}
-                      placeholder="Ej. 45"
+                      placeholder="Ej. 0 (para clase de prueba gratis) o 45"
                       placeholderTextColor="#94A3B8"
                       keyboardType="numeric"
                       value={newServicePrice}
@@ -475,17 +493,44 @@ export default function KnowledgeBaseScreen() {
                     />
                   </View>
                   {newItemCategory === 'Servicio' && (
-                    <View style={styles.formField}>
-                      <Text style={styles.fieldLabel}>Duración Estimada (Minutos)</Text>
-                      <TextInput
-                        style={styles.formInput}
-                        placeholder="Ej. 60"
-                        placeholderTextColor="#94A3B8"
-                        keyboardType="numeric"
-                        value={newServiceDuration}
-                        onChangeText={setNewServiceDuration}
-                      />
-                    </View>
+                    <>
+                      <View style={styles.formField}>
+                        <Text style={styles.fieldLabel}>Duración Estimada (Minutos)</Text>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="Ej. 60"
+                          placeholderTextColor="#94A3B8"
+                          keyboardType="numeric"
+                          value={newServiceDuration}
+                          onChangeText={setNewServiceDuration}
+                        />
+                      </View>
+                      <View style={styles.formField}>
+                        <Text style={styles.fieldLabel}>
+                          Cupo Máx. por Turno por Día (Ej: 2 clases de prueba máx.)
+                        </Text>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="1 (individual) o ej. 2 para máx. 2 pruebas por turno/día"
+                          placeholderTextColor="#94A3B8"
+                          keyboardType="numeric"
+                          value={newServiceCapacity}
+                          onChangeText={setNewServiceCapacity}
+                        />
+                      </View>
+                      <View style={styles.formField}>
+                        <Text style={styles.fieldLabel}>
+                          Horarios de los Turnos (Opcional, separados por coma)
+                        </Text>
+                        <TextInput
+                          style={styles.formInput}
+                          placeholder="Ej. 18:00, 19:30, 21:00 (vacío = usa horario general)"
+                          placeholderTextColor="#94A3B8"
+                          value={newServiceSpecificSlots}
+                          onChangeText={setNewServiceSpecificSlots}
+                        />
+                      </View>
+                    </>
                   )}
                   <View style={styles.formField}>
                     <Text style={styles.fieldLabel}>Detalles, Stock o Descripción</Text>
@@ -494,7 +539,7 @@ export default function KnowledgeBaseScreen() {
                       placeholder={
                         newItemCategory === 'Producto'
                           ? 'Ej. En stock para entrega inmediata, garantía de 1 año'
-                          : 'Ej. Incluye revisión completa, insumos y asesoramiento'
+                          : 'Ej. Traer ropa cómoda y botella de agua. Si el turno está lleno ofrece otra fecha.'
                       }
                       placeholderTextColor="#94A3B8"
                       value={newServiceDesc}
@@ -502,6 +547,46 @@ export default function KnowledgeBaseScreen() {
                     />
                   </View>
                 </View>
+
+                {newItemCategory === 'Servicio' && (
+                  <TouchableOpacity
+                    onPress={() => setNewServiceRequiresTrial(!newServiceRequiresTrial)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: newServiceRequiresTrial ? '#EFF6FF' : '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: newServiceRequiresTrial ? '#93C5FD' : '#E2E8F0',
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 14
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 6,
+                        backgroundColor: newServiceRequiresTrial ? '#1A73E8' : '#FFFFFF',
+                        borderWidth: 1.5,
+                        borderColor: newServiceRequiresTrial ? '#1A73E8' : '#94A3B8',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: 10
+                      }}
+                    >
+                      {newServiceRequiresTrial && <Check size={13} color="#FFFFFF" />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                        🥋 Requiere Clase de Prueba para empezar en este turno (Escuelas, Taekwondo, Academias, Gym)
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
+                        Si un alumno quiere empezar en un turno, la IA verifica cuántas clases de prueba hay agendadas ese día en ese turno. Si ya alcanzó el cupo máximo (ej. 2 por turno por día), le propone automáticamente las próximas fechas con lugar.
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
 
                 <View style={styles.formActions}>
                   <TouchableOpacity
@@ -541,7 +626,7 @@ export default function KnowledgeBaseScreen() {
                 <Tag size={44} color="#94A3B8" />
                 <Text style={styles.emptyTitle}>No hay servicios cargados aún</Text>
                 <Text style={styles.emptySub}>
-                  Agrega los servicios, mantenimientos o prestaciones que ofrece tu negocio para que el asistente de WhatsApp pueda informar los precios exactos a tus clientes.
+                  Agrega los servicios, turnos, clases de prueba o productos que ofrece tu negocio para que el asistente de WhatsApp controle cupos, horarios y precios automáticamente.
                 </Text>
               </View>
             ) : (
@@ -558,11 +643,67 @@ export default function KnowledgeBaseScreen() {
                       </TouchableOpacity>
                     </View>
 
-                    <Text style={styles.servicePrice}>${srv.price}</Text>
+                    <Text style={styles.servicePrice}>
+                      {Number(srv.price) === 0 ? 'Gratis ($0)' : `$${srv.price}`}
+                    </Text>
 
                     <Text style={styles.serviceDesc}>
                       {srv.description || 'Servicio disponible en nuestro catálogo.'}
                     </Text>
+
+                    {/* Badges de Cupo por Turno, Horarios Fijos y Clase de Prueba */}
+                    {srv.category !== 'Producto' && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                        {(Number(srv.maxCapacityPerSlot) || 1) > 1 && (
+                          <View
+                            style={{
+                              backgroundColor: '#EFF6FF',
+                              borderWidth: 1,
+                              borderColor: '#BFDBFE',
+                              borderRadius: 6,
+                              paddingHorizontal: 8,
+                              paddingVertical: 3
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                              👥 Cupo máx: {srv.maxCapacityPerSlot} por turno/día
+                            </Text>
+                          </View>
+                        )}
+                        {Array.isArray(srv.specificSlots) && srv.specificSlots.length > 0 && (
+                          <View
+                            style={{
+                              backgroundColor: '#F8FAFC',
+                              borderWidth: 1,
+                              borderColor: '#CBD5E1',
+                              borderRadius: 6,
+                              paddingHorizontal: 8,
+                              paddingVertical: 3
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#334155' }}>
+                              🕒 Turnos: {srv.specificSlots.join(', ')} hs
+                            </Text>
+                          </View>
+                        )}
+                        {srv.requiresTrialFirst && (
+                          <View
+                            style={{
+                              backgroundColor: '#FEF3C7',
+                              borderWidth: 1,
+                              borderColor: '#FDE68A',
+                              borderRadius: 6,
+                              paddingHorizontal: 8,
+                              paddingVertical: 3
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                              🥋 Clase de Prueba (propone otra fecha si el turno está lleno)
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
 
                     <View style={styles.serviceFooter}>
                       <View style={styles.durationRow}>

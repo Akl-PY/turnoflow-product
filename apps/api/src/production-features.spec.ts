@@ -39,6 +39,7 @@ describe('TurnoFlow AI — Suite de Producción (Anti-Ráfaga, Excluidos, Ventas
   let dbConversations: Conversation[] = [];
   let dbMessages: Message[] = [];
   let dbLeads: Lead[] = [];
+  let dbAppointments: Appointment[] = [];
 
   const mockProfileRepo = {
     findOne: jest.fn().mockImplementation(() => Promise.resolve(dbProfile)),
@@ -145,10 +146,13 @@ describe('TurnoFlow AI — Suite de Producción (Anti-Ráfaga, Excluidos, Ventas
   };
 
   const mockApptRepo = {
-    find: jest.fn().mockResolvedValue([]),
-    count: jest.fn().mockResolvedValue(0),
-    create: jest.fn().mockImplementation((dto) => ({ id: 'apt-1', ...dto })),
-    save: jest.fn().mockImplementation((dto) => Promise.resolve(dto))
+    find: jest.fn().mockImplementation(() => Promise.resolve([...dbAppointments])),
+    count: jest.fn().mockImplementation(() => Promise.resolve(dbAppointments.length)),
+    create: jest.fn().mockImplementation((dto) => ({ id: `apt-${dbAppointments.length + 1}`, ...dto })),
+    save: jest.fn().mockImplementation((dto) => {
+      dbAppointments.push(dto);
+      return Promise.resolve(dto);
+    })
   };
 
   const mockIntegrationsService = {
@@ -170,6 +174,7 @@ describe('TurnoFlow AI — Suite de Producción (Anti-Ráfaga, Excluidos, Ventas
     dbConversations = [];
     dbMessages = [];
     dbLeads = [];
+    dbAppointments = [];
     dbProfile = {
       id: 'prof-1',
       organizationId: orgId,
@@ -394,5 +399,94 @@ describe('TurnoFlow AI — Suite de Producción (Anti-Ráfaga, Excluidos, Ventas
     expect(summary.summaryText).toContain('CrystalPool Mantenimiento & Bombas');
     expect(summary.summaryText).toContain('Chats Activos:');
     expect(summary.summaryText).toContain('Pedidos / Ventas:');
+  });
+
+  it('6. [ESCUELA DE TAEKWONDO / CLASES DE PRUEBA] Controla máximo 2 clases de prueba por turno por día y sugiere próximas fechas al llenarse', async () => {
+    // 1. Dar de alta el turno/servicio de Clase de Prueba de Taekwondo con máx. 2 alumnos de prueba por turno por día
+    await businessService.addService(orgId, {
+      name: 'Clase de Prueba Taekwondo',
+      category: 'Servicio',
+      description: 'Clase inicial obligatoria para nuevos alumnos',
+      price: 0,
+      durationMinutes: 60,
+      maxCapacityPerSlot: 2,
+      specificSlots: ['18:00', '19:30'],
+      requiresTrialFirst: true
+    });
+
+    // 2. Consultar disponibilidad inicial el Miércoles 2026-11-18 -> ambos turnos (18:00 y 19:30) tienen 2 cupos libres
+    const initialEval = await aiService.evaluateDayCapacityAndSlots(
+      orgId,
+      '2026-11-18',
+      dbProfile,
+      'Clase de Prueba Taekwondo'
+    );
+    expect(initialEval.maxCapacityPerSlot).toBe(2);
+    expect(initialEval.availableSlots).toEqual(['18:00', '19:30']);
+    expect(initialEval.fullSlots).toEqual([]);
+
+    // 3. Se agenda el Alumno 1 de prueba en el turno de las 18:00 del 2026-11-18
+    await mockApptRepo.save(
+      mockApptRepo.create({
+        organizationId: orgId,
+        customerName: 'Alumno 1',
+        customerPhone: '+5491111111111',
+        serviceId: 'Clase de Prueba Taekwondo',
+        serviceName: 'Clase de Prueba Taekwondo',
+        startTime: new Date('2026-11-18T18:00:00Z'),
+        endTime: new Date('2026-11-18T19:00:00Z'),
+        status: 'CONFIRMED'
+      })
+    );
+
+    // Con 1 clase de prueba agendada, el turno de las 18:00 TODAVÍA tiene 1 cupo disponible (1/2)
+    const afterOneEval = await aiService.evaluateDayCapacityAndSlots(
+      orgId,
+      '2026-11-18',
+      dbProfile,
+      'Clase de Prueba Taekwondo'
+    );
+    expect(afterOneEval.availableSlots).toContain('18:00');
+    expect(afterOneEval.slotDetails.find((s) => s.slot === '18:00')?.remaining).toBe(1);
+    expect(afterOneEval.fullSlots).toEqual([]);
+
+    // 4. Se agenda el Alumno 2 de prueba en el mismo turno de las 18:00 del 2026-11-18 (llega al tope de 2/2)
+    await mockApptRepo.save(
+      mockApptRepo.create({
+        organizationId: orgId,
+        customerName: 'Alumno 2',
+        customerPhone: '+5491122222222',
+        serviceId: 'Clase de Prueba Taekwondo',
+        serviceName: 'Clase de Prueba Taekwondo',
+        startTime: new Date('2026-11-18T18:00:00Z'),
+        endTime: new Date('2026-11-18T19:00:00Z'),
+        status: 'CONFIRMED'
+      })
+    );
+
+    // 5. Ahora un 3er alumno quiere empezar en el turno de las 18:00 el 2026-11-18:
+    // El sistema detecta que el turno de las 18:00 ya tiene 2/2 clases de prueba ese día (COMPLETO)
+    const afterTwoEval = await aiService.evaluateDayCapacityAndSlots(
+      orgId,
+      '2026-11-18',
+      dbProfile,
+      'Clase de Prueba Taekwondo'
+    );
+    expect(afterTwoEval.availableSlots).not.toContain('18:00');
+    expect(afterTwoEval.availableSlots).toEqual(['19:30']); // El de 19:30 sí sigue libre ese día
+    expect(afterTwoEval.fullSlots).toContain('18:00');
+    expect(afterTwoEval.slotDetails.find((s) => s.slot === '18:00')?.isFull).toBe(true);
+
+    // 6. Y calcula automáticamente las próximas fechas donde el turno de las 18:00 sí tiene cupos de prueba libres
+    const nextDates = await aiService.calculateNextAvailableDatesForService(
+      orgId,
+      '2026-11-18',
+      dbProfile,
+      'Clase de Prueba Taekwondo',
+      afterTwoEval.fullSlots
+    );
+    expect(nextDates.byShift['18:00'].length).toBeGreaterThan(0);
+    expect(nextDates.byShift['18:00'][0].date).toBe('2026-11-19');
+    expect(nextDates.byShift['18:00'][0].remainingSpots).toBe(2);
   });
 });

@@ -93,7 +93,11 @@ export class BusinessService {
       price: serviceData.price ?? 25,
       currency: serviceData.currency || profile.currency || 'USD',
       durationMinutes: serviceData.durationMinutes ?? 45,
-      isActive: true
+      isActive: true,
+      maxCapacityPerSlot: Math.max(1, Number(serviceData.maxCapacityPerSlot) || 1),
+      specificSlots: Array.isArray(serviceData.specificSlots) ? serviceData.specificSlots.map((s) => String(s).trim()).filter(Boolean) : [],
+      availableDays: Array.isArray(serviceData.availableDays) ? serviceData.availableDays.map((d) => String(d).trim().toLowerCase()).filter(Boolean) : [],
+      requiresTrialFirst: Boolean(serviceData.requiresTrialFirst)
     };
     services.push(newService);
     profile.services = services;
