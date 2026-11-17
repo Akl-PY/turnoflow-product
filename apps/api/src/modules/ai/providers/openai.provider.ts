@@ -22,6 +22,10 @@ export class OpenAiProvider implements AiProviderInterface {
     const groqKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const openRouterKey = (process.env.OPENROUTER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const openAiKey = (process.env.OPENAI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const mistralKey = (process.env.MISTRAL_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const cerebrasKey = (process.env.CEREBRAS_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const deepseekKey = (process.env.DEEPSEEK_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const togetherKey = (process.env.TOGETHER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const rawBaseUrl = process.env.OPENAI_BASE_URL?.replace(/^['"]|['"]$/g, '').trim();
 
     const rawEnvModel = (process.env.AI_MODEL || '').replace(/^['"]|['"]$/g, '').trim();
@@ -35,42 +39,91 @@ export class OpenAiProvider implements AiProviderInterface {
 
     const configs: Array<{ label: string; apiKey: string; baseURL: string; model: string }> = [];
 
+    if (groqKey) {
+      for (const m of [
+        safeOptModel || 'llama-3.3-70b-versatile',
+        'llama-3.1-8b-instant',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'qwen/qwen3-32b'
+      ]) {
+        configs.push({
+          label: `groq:${m}`,
+          apiKey: groqKey,
+          baseURL: 'https://api.groq.com/openai/v1',
+          model: m
+        });
+      }
+    }
+
+    if (cerebrasKey) {
+      for (const m of ['llama-3.3-70b', 'llama3.1-8b']) {
+        configs.push({
+          label: `cerebras:${m}`,
+          apiKey: cerebrasKey,
+          baseURL: 'https://api.cerebras.ai/v1',
+          model: m
+        });
+      }
+    }
+
+    if (mistralKey) {
+      for (const m of ['mistral-small-latest', 'open-mistral-nemo']) {
+        configs.push({
+          label: `mistral:${m}`,
+          apiKey: mistralKey,
+          baseURL: 'https://api.mistral.ai/v1',
+          model: m
+        });
+      }
+    }
+
+    if (openRouterKey) {
+      for (const m of [
+        safeOptModel || 'openrouter/free',
+        'deepseek/deepseek-chat-v3-0324:free',
+        'qwen/qwen-2.5-72b-instruct:free',
+        'google/gemma-3-27b-it:free',
+        'meta-llama/llama-3.3-70b-instruct'
+      ]) {
+        configs.push({
+          label: `openrouter:${m}`,
+          apiKey: openRouterKey,
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: m
+        });
+      }
+    }
+
+    if (togetherKey) {
+      configs.push({
+        label: 'together',
+        apiKey: togetherKey,
+        baseURL: 'https://api.together.xyz/v1',
+        model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free'
+      });
+    }
+
+    if (deepseekKey) {
+      configs.push({
+        label: 'deepseek',
+        apiKey: deepseekKey,
+        baseURL: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat'
+      });
+    }
+
     if (openAiKey) {
       const base = (rawBaseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
       const defaultM = base.includes('groq.com')
         ? 'llama-3.3-70b-versatile'
         : base.includes('openrouter.ai')
-        ? 'meta-llama/llama-3.3-70b-instruct:free'
+        ? 'openrouter/free'
         : 'gpt-4o-mini';
       configs.push({
         label: base.includes('openrouter.ai') ? 'openrouter' : base.includes('groq.com') ? 'groq' : 'openai',
         apiKey: openAiKey,
         baseURL: base,
         model: safeOptModel || safeEnvModel || defaultM
-      });
-    }
-
-    if (groqKey) {
-      configs.push({
-        label: 'groq',
-        apiKey: groqKey,
-        baseURL: 'https://api.groq.com/openai/v1',
-        model: safeOptModel || 'llama-3.3-70b-versatile'
-      });
-    }
-
-    if (openRouterKey) {
-      configs.push({
-        label: 'openrouter-free',
-        apiKey: openRouterKey,
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: safeOptModel || 'openrouter/free'
-      });
-      configs.push({
-        label: 'openrouter-llama',
-        apiKey: openRouterKey,
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: safeOptModel || 'meta-llama/llama-3.3-70b-instruct'
       });
     }
 

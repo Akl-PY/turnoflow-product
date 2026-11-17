@@ -95,12 +95,16 @@ export class AiService {
     const hasOpenAiCompatible = !!(
       process.env.OPENAI_API_KEY ||
       process.env.GROQ_API_KEY ||
-      process.env.OPENROUTER_API_KEY
+      process.env.OPENROUTER_API_KEY ||
+      process.env.MISTRAL_API_KEY ||
+      process.env.CEREBRAS_API_KEY ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.TOGETHER_API_KEY
     );
     const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
     const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
 
-    if (configured === 'openai' || configured === 'openrouter' || configured === 'groq') {
+    if (['openai', 'openrouter', 'groq', 'mistral', 'cerebras', 'deepseek', 'together'].includes(configured)) {
       if (this.isProviderCoolingDown('openai')) {
         this.logger.warn('[CIRCUIT BREAKER] OpenAI/Groq en enfriamiento de 30m por cuota. Conmutando a Gemini.');
         if (hasGemini && !this.isProviderCoolingDown('gemini')) return this.geminiProvider;
@@ -174,7 +178,7 @@ export class AiService {
 
     // 1. Intentar con Gemini Multimodal nativo
     if (cleanKey) {
-      const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
       for (const model of models) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
@@ -216,30 +220,32 @@ export class AiService {
       }
     }
 
-    // 2. Intentar con Groq Whisper si hay clave
+    // 2. Intentar con Groq Whisper (whisper-large-v3-turbo y whisper-large-v3)
     const groqKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     if (groqKey && typeof FormData !== 'undefined') {
-      try {
-        const buffer = Buffer.from(cleanBase64, 'base64');
-        const form = new FormData();
-        const blob = new Blob([buffer], { type: mimeType });
-        form.append('file', blob, 'audio.ogg');
-        form.append('model', 'whisper-large-v3-turbo');
-        form.append('language', 'es');
+      for (const whisperModel of ['whisper-large-v3-turbo', 'whisper-large-v3']) {
+        try {
+          const buffer = Buffer.from(cleanBase64, 'base64');
+          const form = new FormData();
+          const blob = new Blob([buffer], { type: mimeType });
+          form.append('file', blob, 'audio.ogg');
+          form.append('model', whisperModel);
+          form.append('language', 'es');
 
-        const res = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', form, {
-          headers: {
-            Authorization: `Bearer ${groqKey}`
-          },
-          timeout: 15000
-        });
+          const res = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', form, {
+            headers: {
+              Authorization: `Bearer ${groqKey}`
+            },
+            timeout: 15000
+          });
 
-        if (res.data?.text?.trim()) {
-          this.logger.log(`[AUDIO TRANSCRITO CON GROQ WHISPER]: "${res.data.text.trim()}"`);
-          return res.data.text.trim();
+          if (res.data?.text?.trim()) {
+            this.logger.log(`[AUDIO TRANSCRITO CON GROQ ${whisperModel}]: "${res.data.text.trim()}"`);
+            return res.data.text.trim();
+          }
+        } catch (err: any) {
+          this.logger.warn(`Transcripción con Groq ${whisperModel} falló: ${err?.message}`);
         }
-      } catch (err: any) {
-        this.logger.warn(`Transcripción con Groq Whisper falló: ${err?.message}`);
       }
     }
 
@@ -270,7 +276,62 @@ export class AiService {
       }
     }
 
+    // 4. Intentar con HuggingFace Inference Whisper si hay HF_TOKEN
+    const hfKey = (process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    if (hfKey) {
+      try {
+        const buffer = Buffer.from(cleanBase64, 'base64');
+        const res = await axios.post(
+          'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo',
+          buffer,
+          {
+            headers: {
+              Authorization: `Bearer ${hfKey}`,
+              'Content-Type': mimeType || 'audio/ogg'
+            },
+            timeout: 18000
+          }
+        );
+        if (res.data?.text?.trim()) {
+          this.logger.log(`[AUDIO TRANSCRITO CON HUGGINGFACE WHISPER]: "${res.data.text.trim()}"`);
+          return res.data.text.trim();
+        }
+      } catch (err: any) {
+        this.logger.warn(`Transcripción con HuggingFace Whisper falló: ${err?.message}`);
+      }
+    }
+
     return null;
+  }
+
+  private parseImageAnalysisText(text: string, modelLabel: string) {
+    const isReceipt = text.startsWith('[COMPROBANTE]') || text.toLowerCase().includes('comprobante de');
+    let detectedAmount = 0;
+    const montoTagMatch = text.match(/\[MONTO:\s*([\d.,]+)\]/i);
+    if (montoTagMatch?.[1]) {
+      const normalizedNum = montoTagMatch[1].replace(/,/g, '.');
+      detectedAmount = parseFloat(normalizedNum) || 0;
+    } else if (isReceipt) {
+      const fallbackMoney = text.match(/\$\s*([\d.]+)/);
+      if (fallbackMoney?.[1]) {
+        detectedAmount = parseFloat(fallbackMoney[1].replace(/\./g, '')) || 0;
+      }
+    }
+
+    const cleanAnalysis = text
+      .replace(/^\[COMPROBANTE\]\s*/i, '')
+      .replace(/\[MONTO:\s*[\d.,]+\]\s*/i, '')
+      .replace(/^\[CONSULTA_VISUAL\]\s*/i, '')
+      .trim();
+    this.logger.log(
+      `[IMAGEN ANALIZADA CON ${modelLabel}] Comprobante=${isReceipt} Monto=${detectedAmount}: "${cleanAnalysis.substring(0, 120)}"`
+    );
+    return {
+      analysisText: cleanAnalysis,
+      isPaymentReceipt: isReceipt,
+      detectedAmount,
+      receiptSummary: isReceipt ? cleanAnalysis : undefined
+    };
   }
 
   async analyzeImageBase64(
@@ -288,7 +349,7 @@ export class AiService {
     const cleanKey = rawKey.replace(/^['"]|['"]$/g, '').trim();
     const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '').trim();
 
-    if (!cleanBase64 || !cleanKey) return null;
+    if (!cleanBase64) return null;
 
     const promptText = `Analiza esta imagen enviada por un cliente por WhatsApp a "${businessName}".${
       caption ? ` El cliente acompañó la imagen con el mensaje: "${caption}".` : ''
@@ -299,66 +360,105 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
   2) A continuación detalla: Monto, Fecha/Hora, Emisor, Destinatario, Banco/Billetera, Motivo/Concepto y Número de operación.
 - Si NO es un comprobante (por ejemplo: foto de un producto que busca comprar, un equipo o instalación rota, una consulta técnica o visual), responde comenzando con "[CONSULTA_VISUAL]" y describe con precisión qué se observa en la imagen para que el asistente comercial pueda asesorar al cliente.`;
 
-    const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
-    for (const model of models) {
+    // 1. Gemini Vision Multimodal
+    if (cleanKey) {
+      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+      for (const model of models) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+          const res = await axios.post(
+            url,
+            {
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { text: promptText },
+                    {
+                      inlineData: {
+                        mimeType,
+                        data: cleanBase64
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 12000
+            }
+          );
+
+          const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (text) {
+            return this.parseImageAnalysisText(text, model);
+          }
+        } catch (err: any) {
+          this.logger.warn(`Análisis de imagen con Gemini ${model} falló: ${err?.message}`);
+        }
+      }
+    }
+
+    // 2. Fallback Multimodal OpenAI-compatible Vision (Groq Vision, OpenRouter Vision, Mistral Pixtral, OpenAI Vision)
+    const visionCandidates: Array<{ label: string; key: string; baseURL: string; model: string }> = [];
+    const groqKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const openRouterKey = (process.env.OPENROUTER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const mistralKey = (process.env.MISTRAL_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const openAiKey = (process.env.OPENAI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+
+    if (groqKey) {
+      visionCandidates.push(
+        { label: 'groq-scout', key: groqKey, baseURL: 'https://api.groq.com/openai/v1', model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+        { label: 'groq-maverick', key: groqKey, baseURL: 'https://api.groq.com/openai/v1', model: 'meta-llama/llama-4-maverick-17b-128e-instruct' }
+      );
+    }
+    if (openRouterKey) {
+      visionCandidates.push(
+        { label: 'openrouter-free', key: openRouterKey, baseURL: 'https://openrouter.ai/api/v1', model: 'openrouter/free' },
+        { label: 'openrouter-gemma', key: openRouterKey, baseURL: 'https://openrouter.ai/api/v1', model: 'google/gemma-3-27b-it:free' },
+        { label: 'openrouter-llama-vision', key: openRouterKey, baseURL: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.2-11b-vision-instruct:free' }
+      );
+    }
+    if (mistralKey) {
+      visionCandidates.push({ label: 'mistral-pixtral', key: mistralKey, baseURL: 'https://api.mistral.ai/v1', model: 'pixtral-12b-2409' });
+    }
+    if (openAiKey) {
+      visionCandidates.push({ label: 'openai-gpt4o-mini', key: openAiKey, baseURL: 'https://api.openai.com/v1', model: 'gpt-4o-mini' });
+    }
+
+    const dataUri = `data:${mimeType || 'image/jpeg'};base64,${cleanBase64}`;
+    for (const vc of visionCandidates) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
         const res = await axios.post(
-          url,
+          `${vc.baseURL}/chat/completions`,
           {
-            contents: [
+            model: vc.model,
+            messages: [
               {
                 role: 'user',
-                parts: [
-                  { text: promptText },
-                  {
-                    inlineData: {
-                      mimeType,
-                      data: cleanBase64
-                    }
-                  }
+                content: [
+                  { type: 'text', text: promptText },
+                  { type: 'image_url', image_url: { url: dataUri } }
                 ]
               }
-            ]
+            ],
+            max_tokens: 500
           },
           {
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              Authorization: `Bearer ${vc.key}`,
+              'Content-Type': 'application/json'
+            },
             timeout: 18000
           }
         );
-
-        const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        const text = res.data?.choices?.[0]?.message?.content?.trim();
         if (text) {
-          const isReceipt = text.startsWith('[COMPROBANTE]') || text.toLowerCase().includes('comprobante de');
-          let detectedAmount = 0;
-          const montoTagMatch = text.match(/\[MONTO:\s*([\d.,]+)\]/i);
-          if (montoTagMatch?.[1]) {
-            const normalizedNum = montoTagMatch[1].replace(/,/g, '.');
-            detectedAmount = parseFloat(normalizedNum) || 0;
-          } else if (isReceipt) {
-            const fallbackMoney = text.match(/\$\s*([\d.]+)/);
-            if (fallbackMoney?.[1]) {
-              detectedAmount = parseFloat(fallbackMoney[1].replace(/\./g, '')) || 0;
-            }
-          }
-
-          const cleanAnalysis = text
-            .replace(/^\[COMPROBANTE\]\s*/i, '')
-            .replace(/\[MONTO:\s*[\d.,]+\]\s*/i, '')
-            .replace(/^\[CONSULTA_VISUAL\]\s*/i, '')
-            .trim();
-          this.logger.log(
-            `[IMAGEN ANALIZADA CON ${model}] Comprobante=${isReceipt} Monto=${detectedAmount}: "${cleanAnalysis.substring(0, 120)}"`
-          );
-          return {
-            analysisText: cleanAnalysis,
-            isPaymentReceipt: isReceipt,
-            detectedAmount,
-            receiptSummary: isReceipt ? cleanAnalysis : undefined
-          };
+          return this.parseImageAnalysisText(text, vc.label);
         }
       } catch (err: any) {
-        this.logger.warn(`Análisis de imagen con Gemini ${model} falló: ${err?.message}`);
+        this.logger.warn(`Análisis de imagen con ${vc.label} falló: ${err?.message}`);
       }
     }
 
