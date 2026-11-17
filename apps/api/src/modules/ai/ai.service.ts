@@ -582,6 +582,10 @@ Si ninguna regla aplica, devuelve [].`;
     return defaults;
   }
 
+  private isUuid(val?: string): boolean {
+    return Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim()));
+  }
+
   private normalizePhoneDigits(phone?: string): string {
     return (phone || '').replace(/\D/g, '');
   }
@@ -617,13 +621,14 @@ Si ninguna regla aplica, devuelve [].`;
     }
 
     let convMessagesCount = 0;
-    if (!senderPhone && conversationId) {
+    const validConvId = this.isUuid(conversationId);
+    if (!senderPhone && validConvId) {
       const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
       if (conv) {
         senderPhone = conv.channelConversationId;
         convMessagesCount = conv.messagesCount || 0;
       }
-    } else if (conversationId) {
+    } else if (validConvId) {
       const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
       if (conv) {
         convMessagesCount = conv.messagesCount || 0;
@@ -671,7 +676,7 @@ Si ninguna regla aplica, devuelve [].`;
       if (convMessagesCount > 0) {
         return 'RETURNING_CONTACT';
       }
-      if (this.messageRepo && conversationId) {
+      if (this.messageRepo && validConvId) {
         const userMsgCount = await this.messageRepo.count({
           where: { conversationId, sender: MessageSender.USER }
         });
@@ -696,6 +701,7 @@ Si ninguna regla aplica, devuelve [].`;
     senderPhone?: string;
     contactSegment?: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
     hadPriorUserMessages?: boolean;
+    simulatedHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     overrideProvider?: AIProviderType;
     overrideModel?: string;
   }): Promise<{
@@ -943,7 +949,16 @@ ${bookingDirective}
 
     const historyMessages: ChatMessage[] = [];
 
-    if (this.messageRepo && conversationId) {
+    if (Array.isArray(params.simulatedHistory) && params.simulatedHistory.length > 0) {
+      for (const hm of params.simulatedHistory.slice(-12)) {
+        if (hm?.content && hm.content.trim()) {
+          historyMessages.push({
+            role: hm.role === 'assistant' ? 'assistant' : 'user',
+            content: hm.content
+          });
+        }
+      }
+    } else if (this.messageRepo && this.isUuid(conversationId)) {
       try {
         const dbMessages = await this.messageRepo.find({
           where: { conversationId },
@@ -1090,9 +1105,11 @@ ${bookingDirective}
         if (!handoffToHuman && humanTransferPatterns.some((pattern) => textLower.includes(pattern))) {
           handoffToHuman = true;
           handoffReason = 'Promesa de atención humana en la respuesta';
-          await this.conversationRepo.update(conversationId, {
-            status: ConversationStatus.HUMAN_TAKEOVER
-          });
+          if (this.isUuid(conversationId)) {
+            await this.conversationRepo.update(conversationId, {
+              status: ConversationStatus.HUMAN_TAKEOVER
+            });
+          }
         }
 
         return {
@@ -1127,15 +1144,19 @@ ${bookingDirective}
             (tc.arguments?.reason as string) ||
             result.data?.reason ||
             'Solicitud de operador o caso especial';
-          await this.conversationRepo.update(conversationId, {
-            status: ConversationStatus.HUMAN_TAKEOVER
-          });
+          if (this.isUuid(conversationId)) {
+            await this.conversationRepo.update(conversationId, {
+              status: ConversationStatus.HUMAN_TAKEOVER
+            });
+          }
         }
 
         if (result.data?.scalinkyDesynced) {
-          await this.conversationRepo.update(conversationId, {
-            status: ConversationStatus.HUMAN_TAKEOVER
-          });
+          if (this.isUuid(conversationId)) {
+            await this.conversationRepo.update(conversationId, {
+              status: ConversationStatus.HUMAN_TAKEOVER
+            });
+          }
           return {
             replyText:
               'En este momento nuestra agenda se encuentra desincronizada. Ya le avisé a un miembro de nuestro equipo humano para que te atienda personalmente y coordine con vos a la brevedad.',

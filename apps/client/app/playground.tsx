@@ -73,10 +73,20 @@ export default function PlaygroundScreen() {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedToolTrace, setSelectedToolTrace] = useState<any[] | null>(null);
+  const [simulatedSegment, setSimulatedSegment] = useState<
+    'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER'
+  >('NEW_CONTACT');
 
   const sendMessage = async (textToSend?: string) => {
     const text = textToSend || inputText;
     if (!text.trim() || isLoading) return;
+
+    const historyPayload = messages
+      .filter((m) => m.id !== 'm-welcome')
+      .map((m) => ({
+        role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
+        content: m.text
+      }));
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -92,7 +102,9 @@ export default function PlaygroundScreen() {
       const res = await apiClient.post('/ai/playground', {
         message: text,
         agentRole: 'RECEPTIONIST',
-        organizationId: user?.organizationId
+        organizationId: user?.organizationId,
+        history: historyPayload,
+        contactSegment: simulatedSegment
       });
 
       const botMsg: ChatMessage = {
@@ -107,11 +119,12 @@ export default function PlaygroundScreen() {
       if ((res.data?.toolExecutions || res.data?.toolCalls)?.length > 0) {
         setSelectedToolTrace(res.data.toolExecutions || res.data.toolCalls);
       }
-    } catch {
+    } catch (err: any) {
+      const errDetail = err?.response?.data?.message || err?.message || 'Error de conexión con la API';
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         sender: 'assistant',
-        text: '¡Hola! En este momento estoy consultando el catálogo de productos, servicios y horarios de tu negocio. ¿En qué te puedo ayudar?'
+        text: `⚠️ No se pudo obtener respuesta del simulador (${errDetail}).`
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -137,8 +150,39 @@ export default function PlaygroundScreen() {
         subtitle="Prueba cómo responderá tu bot ante consultas de ventas, información o turnos de tus clientes por WhatsApp"
       />
 
-      {/* Escenarios de Prueba Rápida */}
+      {/* Escenarios de Prueba Rápida y Tipo de Contacto a Simular */}
       <View style={styles.scenariosBar}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          <Text style={[styles.scenariosTitle, { marginBottom: 0, marginRight: 4 }]}>Simular como:</Text>
+          {[
+            { id: 'NEW_CONTACT' as const, label: '🆕 Gente Nueva' },
+            { id: 'RETURNING_CONTACT' as const, label: '💬 Ya se Comunicó' },
+            { id: 'EXISTING_CUSTOMER' as const, label: '⭐ Cliente / Alumno' }
+          ].map((seg) => (
+            <TouchableOpacity
+              key={seg.id}
+              onPress={() => setSimulatedSegment(seg.id)}
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 6,
+                backgroundColor: simulatedSegment === seg.id ? '#EFF6FF' : '#F8FAFC',
+                borderWidth: 1,
+                borderColor: simulatedSegment === seg.id ? '#1A73E8' : '#CBD5E1'
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: '700',
+                  color: simulatedSegment === seg.id ? '#1A73E8' : '#475569'
+                }}
+              >
+                {seg.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <Text style={styles.scenariosTitle}>Casos habituales:</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scenariosList}>
           {SCENARIOS.map((s) => (

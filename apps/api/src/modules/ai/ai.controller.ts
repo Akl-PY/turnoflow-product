@@ -34,6 +34,8 @@ export class AiController {
       provider?: AIProviderType;
       model?: string;
       organizationId?: string;
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      contactSegment?: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
     }
   ) {
     let orgId = body.organizationId;
@@ -47,6 +49,9 @@ export class AiController {
       organizationId: orgId,
       conversationId,
       userText: body.message,
+      simulatedHistory: Array.isArray(body.history) ? body.history : undefined,
+      contactSegment: body.contactSegment,
+      hadPriorUserMessages: Array.isArray(body.history) && body.history.some((m) => m.role === 'user'),
       overrideProvider: body.provider,
       overrideModel: body.model
     });
@@ -54,7 +59,8 @@ export class AiController {
     return {
       success: true,
       role: body.agentRole || AgentRoleType.RECEPTIONIST,
-      provider: body.provider || 'anthropic',
+      provider: body.provider || 'gemini',
+      contactSegment: result.contactSegment,
       response: result.replyText,
       toolExecutions: result.toolExecutions,
       handoffToHuman: result.handoffToHuman,
