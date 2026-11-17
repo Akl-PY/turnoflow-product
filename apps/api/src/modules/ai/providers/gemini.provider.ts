@@ -36,13 +36,15 @@ export class GeminiProvider implements AiProviderInterface {
     const rawRequested = options?.model || this.defaultModel;
     const primaryModel = rawRequested.replace(/^['"]|['"]$/g, '').trim();
 
-    // Lista de modelos ordenados para fallback automático si el principal está deprecated o agota cuota
+    // Lista de modelos ordenados para fallback automático si el principal está deprecated, sobrecargado o agota cuota
     const modelsToTry = [
       primaryModel,
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash',
       'gemini-3.5-flash',
       'gemini-3.5-flash-lite',
       'gemini-2.5-flash'
-    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+    ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
     const temperature = options?.temperature ?? 0.2;
     const maxTokens = options?.maxTokens ?? 1024;

@@ -1055,7 +1055,7 @@ ${bookingDirective}
               `[AI FAILOVER EN CALIENTE] Conmutando de inmediato a ${nextProvider.providerName} para responder al cliente...`
             );
             response = await nextProvider.chatCompletion(messages, {
-              model: overrideModel,
+              model: undefined,
               tools,
               temperature: 0.2,
               maxTokens: 1000

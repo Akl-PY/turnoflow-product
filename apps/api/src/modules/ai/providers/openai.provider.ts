@@ -13,44 +13,71 @@ export class OpenAiProvider implements AiProviderInterface {
   readonly providerName = 'openai';
   private readonly logger = new Logger(OpenAiProvider.name);
 
-  private getEffectiveConfig(options?: CompletionOptions) {
+  private getCandidateConfigs(options?: CompletionOptions): Array<{
+    label: string;
+    apiKey: string;
+    baseURL: string;
+    model: string;
+  }> {
     const groqKey = (process.env.GROQ_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const openRouterKey = (process.env.OPENROUTER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const openAiKey = (process.env.OPENAI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
-
-    const apiKey = openAiKey || groqKey || openRouterKey;
     const rawBaseUrl = process.env.OPENAI_BASE_URL?.replace(/^['"]|['"]$/g, '').trim();
 
-    let baseURL = rawBaseUrl || 'https://api.openai.com/v1';
-    let defaultModel = process.env.AI_MODEL?.replace(/^['"]|['"]$/g, '').trim() || 'gpt-4o';
+    const rawEnvModel = (process.env.AI_MODEL || '').replace(/^['"]|['"]$/g, '').trim();
+    const rawOptModel = (options?.model || '').replace(/^['"]|['"]$/g, '').trim();
 
-    if (!rawBaseUrl) {
-      if (groqKey && !openAiKey) {
-        baseURL = 'https://api.groq.com/openai/v1';
-        defaultModel = 'llama-3.3-70b-versatile';
-      } else if (openRouterKey && !openAiKey) {
-        baseURL = 'https://openrouter.ai/api/v1';
-        defaultModel = 'meta-llama/llama-3.3-70b-instruct:free';
-      }
-    } else {
-      if (baseURL.includes('groq.com') && (!process.env.AI_MODEL || defaultModel === 'gpt-4o')) {
-        defaultModel = 'llama-3.3-70b-versatile';
-      } else if (baseURL.includes('openrouter.ai') && (!process.env.AI_MODEL || defaultModel === 'gpt-4o')) {
-        defaultModel = 'meta-llama/llama-3.3-70b-instruct:free';
-      }
+    const isForeignModel = (m: string) =>
+      m.toLowerCase().startsWith('gemini') || m.toLowerCase().startsWith('claude');
+
+    const safeOptModel = rawOptModel && !isForeignModel(rawOptModel) ? rawOptModel : '';
+    const safeEnvModel = rawEnvModel && !isForeignModel(rawEnvModel) ? rawEnvModel : '';
+
+    const configs: Array<{ label: string; apiKey: string; baseURL: string; model: string }> = [];
+
+    if (openAiKey) {
+      const base = (rawBaseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+      const defaultM = base.includes('groq.com')
+        ? 'llama-3.3-70b-versatile'
+        : base.includes('openrouter.ai')
+        ? 'meta-llama/llama-3.3-70b-instruct:free'
+        : 'gpt-4o-mini';
+      configs.push({
+        label: base.includes('openrouter.ai') ? 'openrouter' : base.includes('groq.com') ? 'groq' : 'openai',
+        apiKey: openAiKey,
+        baseURL: base,
+        model: safeOptModel || safeEnvModel || defaultM
+      });
     }
 
-    const model = (options?.model || defaultModel).replace(/^['"]|['"]$/g, '').trim();
-    return { apiKey, baseURL: baseURL.replace(/\/$/, ''), model };
+    if (groqKey) {
+      configs.push({
+        label: 'groq',
+        apiKey: groqKey,
+        baseURL: 'https://api.groq.com/openai/v1',
+        model: safeOptModel || 'llama-3.3-70b-versatile'
+      });
+    }
+
+    if (openRouterKey) {
+      configs.push({
+        label: 'openrouter',
+        apiKey: openRouterKey,
+        baseURL: 'https://openrouter.ai/api/v1',
+        model: safeOptModel || 'meta-llama/llama-3.3-70b-instruct:free'
+      });
+    }
+
+    return configs;
   }
 
   async chatCompletion(
     messages: ChatMessage[],
     options?: CompletionOptions
   ): Promise<CompletionResponse> {
-    const { apiKey, baseURL, model } = this.getEffectiveConfig(options);
+    const configs = this.getCandidateConfigs(options);
 
-    if (!apiKey) {
+    if (configs.length === 0) {
       throw new Error('OPENAI_API_KEY, GROQ_API_KEY o OPENROUTER_API_KEY no están configuradas.');
     }
     const temperature = options?.temperature ?? 0.2;
@@ -89,44 +116,24 @@ export class OpenAiProvider implements AiProviderInterface {
       }
     }));
 
-    try {
-      let response: any;
+    let lastError: any = null;
+
+    for (const cfg of configs) {
       try {
-        response = await axios.post(
-          `${baseURL}/chat/completions`,
-          {
-            model,
-            messages: formattedMessages,
-            temperature,
-            max_tokens: maxTokens,
-            ...(tools && tools.length > 0 ? { tools } : {})
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://turnoflow.com',
-              'X-Title': 'TurnoFlow AI'
-            },
-            timeout: 25000
-          }
-        );
-      } catch (apiError: any) {
-        // Si el modelo seleccionado no soporta function calling / tools, reintentar sin tools
-        const errData = apiError.response?.data?.error?.message || apiError.message || '';
-        if (tools && tools.length > 0 && (apiError.response?.status === 400 || errData.includes('tools') || errData.includes('function'))) {
-          this.logger.warn(`El modelo ${model} no admite tools. Reintentando en modo conversación directa...`);
+        let response: any;
+        try {
           response = await axios.post(
-            `${baseURL}/chat/completions`,
+            `${cfg.baseURL}/chat/completions`,
             {
-              model,
-              messages: formattedMessages.map(({ tool_calls, tool_call_id, ...rest }: any) => rest),
+              model: cfg.model,
+              messages: formattedMessages,
               temperature,
-              max_tokens: maxTokens
+              max_tokens: maxTokens,
+              ...(tools && tools.length > 0 ? { tools } : {})
             },
             {
               headers: {
-                Authorization: `Bearer ${apiKey}`,
+                Authorization: `Bearer ${cfg.apiKey}`,
                 'Content-Type': 'application/json',
                 'HTTP-Referer': 'https://turnoflow.com',
                 'X-Title': 'TurnoFlow AI'
@@ -134,44 +141,69 @@ export class OpenAiProvider implements AiProviderInterface {
               timeout: 25000
             }
           );
-        } else {
-          throw apiError;
-        }
-      }
-
-      const choice = response.data.choices?.[0];
-      const message = choice?.message;
-      const textContent = message?.content || '';
-
-      const toolCalls: ToolCall[] = [];
-      if (message?.tool_calls) {
-        for (const tc of message.tool_calls) {
-          let parsedArgs = {};
-          try {
-            parsedArgs = JSON.parse(tc.function.arguments);
-          } catch {
-            parsedArgs = {};
+        } catch (apiError: any) {
+          const errData = apiError.response?.data?.error?.message || apiError.message || '';
+          if (tools && tools.length > 0 && (apiError.response?.status === 400 || errData.includes('tools') || errData.includes('function'))) {
+            this.logger.warn(`El modelo ${cfg.model} no admite tools. Reintentando en modo conversación directa...`);
+            response = await axios.post(
+              `${cfg.baseURL}/chat/completions`,
+              {
+                model: cfg.model,
+                messages: formattedMessages.map(({ tool_calls, tool_call_id, ...rest }: any) => rest),
+                temperature,
+                max_tokens: maxTokens
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${cfg.apiKey}`,
+                  'Content-Type': 'application/json',
+                  'HTTP-Referer': 'https://turnoflow.com',
+                  'X-Title': 'TurnoFlow AI'
+                },
+                timeout: 25000
+              }
+            );
+          } else {
+            throw apiError;
           }
-          toolCalls.push({
-            id: tc.id,
-            name: tc.function.name,
-            arguments: parsedArgs
-          });
         }
-      }
 
-      return {
-        content: textContent,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        usage: {
-          inputTokens: response.data.usage?.prompt_tokens || 0,
-          outputTokens: response.data.usage?.completion_tokens || 0
+        const choice = response.data.choices?.[0];
+        const message = choice?.message;
+        const textContent = message?.content || '';
+
+        const toolCalls: ToolCall[] = [];
+        if (message?.tool_calls) {
+          for (const tc of message.tool_calls) {
+            let parsedArgs = {};
+            try {
+              parsedArgs = JSON.parse(tc.function.arguments);
+            } catch {
+              parsedArgs = {};
+            }
+            toolCalls.push({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: parsedArgs
+            });
+          }
         }
-      };
-    } catch (error: any) {
-      const errorMsg = error.response?.data?.error?.message || error.message;
-      this.logger.error(`Error en llamada a OpenAI: ${errorMsg}`);
-      throw new Error(`OpenAI Error: ${errorMsg}`);
+
+        return {
+          content: textContent,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          usage: {
+            inputTokens: response.data.usage?.prompt_tokens || 0,
+            outputTokens: response.data.usage?.completion_tokens || 0
+          }
+        };
+      } catch (error: any) {
+        const errorMsg = error.response?.data?.error?.message || error.message;
+        this.logger.warn(`Fallo en proveedor ${cfg.label} (${cfg.model}): ${errorMsg}. Probando siguiente...`);
+        lastError = new Error(`${cfg.label} Error: ${errorMsg}`);
+      }
     }
+
+    throw lastError || new Error('Todos los proveedores compatibles con OpenAI fallaron.');
   }
 }
