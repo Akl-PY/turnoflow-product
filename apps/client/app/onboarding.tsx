@@ -8,7 +8,8 @@ import {
   TouchableOpacity,
   Platform,
   Image,
-  ActivityIndicator
+  ActivityIndicator,
+  Switch
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header } from '../src/components/Header';
@@ -138,6 +139,32 @@ export default function OnboardingScreen() {
       setConnectedPhone(null);
     } catch (err: any) {
       console.warn('Error desconectando QR:', err?.message);
+    }
+  };
+
+  const [automationsList, setAutomationsList] = useState<
+    Array<{ id: string; name: string; description: string; isActive: boolean }>
+  >([]);
+
+  useEffect(() => {
+    apiClient
+      .get('/automations')
+      .then((res) => {
+        if (Array.isArray(res.data)) {
+          setAutomationsList(res.data);
+        }
+      })
+      .catch(() => null);
+  }, []);
+
+  const handleToggleAutomation = async (id: string) => {
+    setAutomationsList((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, isActive: !a.isActive } : a))
+    );
+    try {
+      await apiClient.patch(`/automations/${id}/toggle`);
+    } catch {
+      // ignore
     }
   };
 
@@ -1389,6 +1416,69 @@ export default function OnboardingScreen() {
                 </View>
               )}
             </View>
+
+            {/* Automatizaciones del Bot (unificadas en Configuración) */}
+            {automationsList.length > 0 && (
+              <View style={[styles.sectionCard, { marginTop: 18 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                  <View>
+                    <Text style={styles.cardTitle}>⚡ Automatizaciones Activas del Asistente</Text>
+                    <Text style={{ fontSize: 13, color: '#64748B', marginTop: 2 }}>
+                      Activa o pausa funciones clave sin salir de Configuración.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push('/guide' as any)}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 8,
+                      backgroundColor: '#EFF6FF',
+                      borderWidth: 1,
+                      borderColor: '#BFDBFE'
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>
+                      ❓ Ver Guía de Uso
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ gap: 10 }}>
+                  {automationsList.map((auto) => (
+                    <View
+                      key={auto.id}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: '#F8FAFC',
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        borderRadius: 10,
+                        padding: 12,
+                        gap: 12
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                          {auto.name}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                          {auto.description}
+                        </Text>
+                      </View>
+                      <Switch
+                        value={Boolean(auto.isActive)}
+                        onValueChange={() => handleToggleAutomation(auto.id)}
+                        trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                        thumbColor={auto.isActive ? '#1A73E8' : '#F1F5F9'}
+                      />
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>

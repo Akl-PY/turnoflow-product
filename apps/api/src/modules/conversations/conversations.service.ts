@@ -709,6 +709,60 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     return { success: true, existingCustomerPhones: filtered };
   }
 
+  async sendSegmentedBroadcast(
+    organizationId: string,
+    targetSegment: 'ALL' | 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER',
+    messageText: string
+  ): Promise<{ totalTargeted: number; sentCount: number; failedCount: number }> {
+    const trimmed = (messageText || '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('El mensaje de difusión no puede estar vacío.');
+    }
+    const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
+    const allConvs: any[] = await this.findAll(effectiveOrgId);
+
+    const targets = allConvs.filter((c) => {
+      if (c.assignedAgent === 'EXCLUDED_PERMANENT') return false;
+      const phone = c.channelConversationId;
+      if (!phone) return false;
+      if (targetSegment !== 'ALL' && c.contactSegment !== targetSegment) return false;
+      return true;
+    });
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const conv of targets) {
+      if (!this.integrationsService) {
+        failedCount++;
+        continue;
+      }
+      try {
+        const res = await this.integrationsService.sendQRWhatsAppMessage(
+          effectiveOrgId,
+          conv.channelConversationId,
+          trimmed
+        );
+        if (res.success) {
+          sentCount++;
+        } else {
+          failedCount++;
+        }
+      } catch {
+        failedCount++;
+      }
+      if (process.env.NODE_ENV !== 'test') {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
+    }
+
+    return {
+      totalTargeted: targets.length,
+      sentCount,
+      failedCount
+    };
+  }
+
   private async syncRecentChatsFromEvolution(organizationId: string): Promise<void> {
     if (!this.integrationsService) return;
     try {

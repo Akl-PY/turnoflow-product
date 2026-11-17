@@ -22,12 +22,9 @@ import { apiClient } from '../lib/api';
 const NAV_ITEMS = [
   { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
   { path: '/chats', label: 'Chats & Control IA', icon: MessageSquare },
-  { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
   { path: '/knowledge-base', label: 'Catálogo & Contexto IA', icon: BookOpen },
-  { path: '/agents', label: 'Agentes de IA', icon: Bot },
-  { path: '/automations', label: 'Automatizaciones', icon: Workflow },
   { path: '/playground', label: 'Simulador en Vivo', icon: Sparkles },
   { path: '/onboarding', label: 'Configuración & Canales', icon: Smartphone }
 ];

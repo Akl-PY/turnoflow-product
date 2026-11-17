@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
+import { downloadCsv } from '../src/lib/csv';
 
 const STATUS_FILTERS = [
   { key: 'TODOS', label: 'Todos los Clientes' },
@@ -185,6 +186,28 @@ export default function LeadsScreen() {
               onChangeText={setSearch}
             />
           </View>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderWidth: 1,
+              borderColor: '#CBD5E1',
+              borderRadius: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 10
+            }}
+            onPress={() =>
+              downloadCsv(
+                `clientes-leads-${new Date().toISOString().split('T')[0]}.csv`,
+                ['Nombre', 'Teléfono', 'Servicio/Interés', 'Estado', 'Notas'],
+                filteredLeads.map((l) => [l.name, l.phone, l.requestedService, l.status, l.notes])
+              )
+            }
+          >
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#334155' }}>
+              📥 Exportar CSV
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.newLeadBtn}

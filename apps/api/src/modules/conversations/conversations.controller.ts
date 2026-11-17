@@ -890,6 +890,26 @@ export class ConversationsController {
     return this.conversationsService.setCustomerPhoneFlag(orgId, body.phone, Boolean(body.isCustomer));
   }
 
+  @Post('broadcast')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enviar aviso o difusión por WhatsApp segmentada por tipo de contacto' })
+  async sendBroadcast(
+    @Request() req: any,
+    @Body()
+    body: {
+      targetSegment: 'ALL' | 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
+      message: string;
+    }
+  ) {
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
+    return this.conversationsService.sendSegmentedBroadcast(
+      orgId,
+      body.targetSegment || 'EXISTING_CUSTOMER',
+      body.message
+    );
+  }
+
   @Get(':id/messages')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()

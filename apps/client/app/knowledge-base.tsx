@@ -273,10 +273,6 @@ export default function KnowledgeBaseScreen() {
     setSavingContext(true);
     setContextSaved(false);
     try {
-      const parsedPhones = existingCustomerPhonesText
-        .split(/[\n,;]+/)
-        .map((p) => p.trim())
-        .filter(Boolean);
       await apiClient.put('/business', {
         specialInstructions: JSON.stringify({
           bookingEnabled: businessMode === 'SALES' || businessMode === 'INFO' ? false : true,
@@ -293,7 +289,6 @@ export default function KnowledgeBaseScreen() {
             returningContactContext,
             existingCustomerContext
           },
-          existingCustomerPhones: parsedPhones,
           customForwardingInstructions,
           forwardingRules,
           updatedAt: new Date().toISOString()
@@ -1373,19 +1368,9 @@ export default function KnowledgeBaseScreen() {
                 />
               </View>
 
-              <View style={styles.formField}>
-                <Text style={styles.fieldLabel}>
-                  📋 Teléfonos de Clientes / Estudiantes Actuales (separados por coma o enter — además se detectan solos por turnos, pedidos o desde Chats)
-                </Text>
-                <TextInput
-                  style={[styles.formInput, { height: 60, textAlignVertical: 'top' }]}
-                  multiline
-                  placeholder="Ej. +5491122334455, +5493516677889"
-                  placeholderTextColor="#94A3B8"
-                  value={existingCustomerPhonesText}
-                  onChangeText={setExistingCustomerPhonesText}
-                />
-              </View>
+              <Text style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
+                💡 Los Clientes / Estudiantes Actuales se detectan solos por turnos, pedidos o marcándolos en 1 clic desde <Text style={{ fontWeight: '700' }}>Chats</Text> o <Text style={{ fontWeight: '700' }}>Clientes & Leads</Text>.
+              </Text>
             </View>
 
             {/* ======================================================== */}

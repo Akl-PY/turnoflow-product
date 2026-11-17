@@ -74,6 +74,10 @@ export default function ChatsScreen() {
   const [showExcludedManager, setShowExcludedManager] = useState(false);
   const [newExcludedPhone, setNewExcludedPhone] = useState('');
   const [newExcludedLabel, setNewExcludedLabel] = useState('Proveedor / Personal');
+  const [showBroadcastBox, setShowBroadcastBox] = useState(false);
+  const [broadcastSegment, setBroadcastSegment] = useState<'EXISTING_CUSTOMER' | 'RETURNING_CONTACT' | 'NEW_CONTACT' | 'ALL'>('EXISTING_CUSTOMER');
+  const [broadcastText, setBroadcastText] = useState('');
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
   // Consulta de conversaciones
   const {
@@ -330,6 +334,26 @@ export default function ChatsScreen() {
       window.open(url, '_blank');
     } else {
       Linking.openURL(url);
+    }
+  };
+
+  const handleSendBroadcast = async () => {
+    if (!broadcastText.trim() || sendingBroadcast) return;
+    setSendingBroadcast(true);
+    try {
+      const res = await apiClient.post('/conversations/broadcast', {
+        targetSegment: broadcastSegment,
+        message: broadcastText.trim()
+      });
+      const { sentCount, totalTargeted } = res.data || { sentCount: 0, totalTargeted: 0 };
+      setActionNotice(`📢 Aviso enviado a ${sentCount} de ${totalTargeted} contacto(s) del segmento seleccionado.`);
+      setTimeout(() => setActionNotice(null), 5000);
+      setBroadcastText('');
+      setShowBroadcastBox(false);
+    } catch {
+      setActionNotice('⚠️ No se pudo enviar la difusión. Verifica la conexión de WhatsApp.');
+    } finally {
+      setSendingBroadcast(false);
     }
   };
 
@@ -1114,6 +1138,19 @@ export default function ChatsScreen() {
 
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <TouchableOpacity
+                style={[
+                  styles.refreshButton,
+                  { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }
+                ]}
+                onPress={() => setShowBroadcastBox(!showBroadcastBox)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>
+                  📢 Aviso por Segmento
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.resetAllButton}
                 onPress={() => resetAllMutation.mutate()}
                 disabled={resetAllMutation.isPending}
@@ -1149,6 +1186,97 @@ export default function ChatsScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Caja inline de Aviso / Difusión por Segmento */}
+          {showBroadcastBox && (
+            <View
+              style={{
+                backgroundColor: '#FFFFFF',
+                marginHorizontal: 20,
+                marginTop: 12,
+                padding: 14,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#BFDBFE',
+                gap: 10
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                📢 Enviar Aviso por WhatsApp según Tipo de Número (excluidos nunca reciben)
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {[
+                  { id: 'EXISTING_CUSTOMER' as const, label: '⭐ Clientes / Alumnos' },
+                  { id: 'RETURNING_CONTACT' as const, label: '💬 Ya se comunicaron' },
+                  { id: 'NEW_CONTACT' as const, label: '🆕 Gente Nueva' },
+                  { id: 'ALL' as const, label: '👥 Todos (activos)' }
+                ].map((opt) => (
+                  <TouchableOpacity
+                    key={opt.id}
+                    onPress={() => setBroadcastSegment(opt.id)}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 6,
+                      backgroundColor: broadcastSegment === opt.id ? '#EFF6FF' : '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: broadcastSegment === opt.id ? '#1A73E8' : '#CBD5E1'
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: '700',
+                        color: broadcastSegment === opt.id ? '#1A73E8' : '#475569'
+                      }}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                  borderRadius: 8,
+                  padding: 10,
+                  fontSize: 13,
+                  minHeight: 70,
+                  textAlignVertical: 'top',
+                  color: '#0F172A'
+                }}
+                multiline
+                placeholder="Ej. ¡Hola! Te recordamos que del 1 al 15 vence la cuota mensual (Alias: altagracia.tkd)."
+                placeholderTextColor="#94A3B8"
+                value={broadcastText}
+                onChangeText={setBroadcastText}
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setShowBroadcastBox(false)}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#F1F5F9' }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569' }}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleSendBroadcast}
+                  disabled={sendingBroadcast || !broadcastText.trim()}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: '#1A73E8',
+                    opacity: sendingBroadcast || !broadcastText.trim() ? 0.6 : 1
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                    {sendingBroadcast ? 'Enviando...' : 'Enviar Aviso'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           {/* Tarjetas de Métricas de Estado */}
           <View style={styles.statsRow}>

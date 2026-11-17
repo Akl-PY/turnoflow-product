@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
+import { downloadCsv } from '../src/lib/csv';
 
 function formatAppointmentItem(raw: any) {
   if (raw.date && raw.time) return raw;
@@ -224,13 +225,45 @@ export default function AppointmentsScreen() {
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.newAptBtn}
-            onPress={() => setShowAddForm(!showAddForm)}
-          >
-            <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-            <Text style={styles.newAptBtnText}>Agendar Turno Manualmente</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderWidth: 1,
+                borderColor: '#CBD5E1',
+                borderRadius: 8,
+                paddingHorizontal: 14,
+                paddingVertical: 10
+              }}
+              onPress={() =>
+                downloadCsv(
+                  `agenda-turnos-${new Date().toISOString().split('T')[0]}.csv`,
+                  ['Cliente', 'Teléfono', 'Servicio/Turno', 'Fecha', 'Hora', 'Estado', 'Notas'],
+                  appointments.map((a) => [
+                    a.customerName,
+                    a.customerPhone,
+                    a.serviceName,
+                    a.date,
+                    a.time,
+                    a.status,
+                    a.notes
+                  ])
+                )
+              }
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#334155' }}>
+                📥 Exportar CSV
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.newAptBtn}
+              onPress={() => setShowAddForm(!showAddForm)}
+            >
+              <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.newAptBtnText}>Agendar Turno Manualmente</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Resumen Visual de Cupos por Turno del Día */}
