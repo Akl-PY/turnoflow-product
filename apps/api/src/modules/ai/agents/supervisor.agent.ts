@@ -30,13 +30,21 @@ export class SupervisorAgent {
   determineActiveRole(userText: string, currentRole?: AgentRoleType): AgentRoleType {
     const text = userText.toLowerCase();
 
-    // 1. Si pide explícitamente reservar o agendar un turno
+    // 1. Si pide explícitamente reservar o agendar un turno, o menciona clase de prueba/turnos
     if (
       text.includes('agendar') ||
       text.includes('reservar') ||
       text.includes('confirmar turno') ||
-      text.includes('apartar cita')
+      text.includes('apartar cita') ||
+      text.includes('clase de prueba') ||
+      text.includes('turno') ||
+      text.includes('disponibilidad')
     ) {
+      return AgentRoleType.BOOKING;
+    }
+
+    // 2. Si venía en flujo de agendamiento y está respondiendo datos
+    if (currentRole === AgentRoleType.BOOKING) {
       return AgentRoleType.BOOKING;
     }
 

@@ -305,8 +305,9 @@ export default function ChatsScreen() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const phoneMatch = (c.channelConversationId || '').toLowerCase().includes(q);
+      const nameMatch = ((c as any).contactName || c.metadata?.contactName || '').toLowerCase().includes(q);
       const textMatch = (c.lastMessagePreview || '').toLowerCase().includes(q);
-      return phoneMatch || textMatch;
+      return phoneMatch || nameMatch || textMatch;
     }
     return true;
   });
@@ -656,9 +657,17 @@ export default function ChatsScreen() {
                         <User size={15} color={isExcluded ? '#DC2626' : '#D97706'} />
                       )}
                     </View>
-                    <Text style={styles.chatPhone}>
-                      {conv.channelConversationId || (conv as any).customerPhone || 'Cliente WhatsApp'}
-                    </Text>
+                    <View style={{ flex: 1, marginRight: 6 }}>
+                      <Text style={styles.chatPhone} numberOfLines={1}>
+                        {(conv as any).contactName || conv.metadata?.contactName || conv.channelConversationId || (conv as any).customerPhone || 'Cliente WhatsApp'}
+                      </Text>
+                      {((conv as any).contactName || conv.metadata?.contactName) &&
+                       ((conv as any).contactName || conv.metadata?.contactName) !== (conv.channelConversationId || (conv as any).customerPhone) ? (
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }} numberOfLines={1}>
+                          {conv.channelConversationId || (conv as any).customerPhone}
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
 
                   <View
@@ -771,8 +780,14 @@ export default function ChatsScreen() {
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <Text style={styles.detailPhone}>
-                  {targetPhone}
+                  {(selectedChat as any).contactName || selectedChat.metadata?.contactName || targetPhone}
                 </Text>
+                {((selectedChat as any).contactName || selectedChat.metadata?.contactName) &&
+                 ((selectedChat as any).contactName || selectedChat.metadata?.contactName) !== targetPhone ? (
+                  <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>
+                    ({targetPhone})
+                  </Text>
+                ) : null}
 
                 <View
                   style={[

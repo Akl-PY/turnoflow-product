@@ -22,7 +22,8 @@ import {
   AiProviderInterface,
   ChatMessage,
   CompletionResponse,
-  ToolCall
+  ToolCall,
+  ToolDefinition
 } from './interfaces/ai-provider.interface';
 import {
   AgentRoleType,
@@ -811,6 +812,7 @@ Si ninguna regla aplica, devuelve [].`;
     conversationId: string;
     userText: string;
     senderPhone?: string;
+    customerName?: string;
     contactSegment?: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER';
     hadPriorUserMessages?: boolean;
     simulatedHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -863,14 +865,19 @@ Si ninguna regla aplica, devuelve [].`;
 
     // 4. Preparar contexto y herramientas según el rol y estado de agenda
     const bookingEnabled = this.extractBookingEnabled(profile);
-    const rawTools =
-      activeRole === AgentRoleType.BOOKING && bookingEnabled
-        ? this.bookingAgent.getToolDefinitions()
-        : this.receptionistAgent.getToolDefinitions();
-
+    const baseTools = [
+      ...this.receptionistAgent.getToolDefinitions(),
+      ...(bookingEnabled ? this.bookingAgent.getToolDefinitions() : [])
+    ];
+    const toolMap = new Map<string, ToolDefinition>();
+    for (const t of baseTools) {
+      if (!toolMap.has(t.name)) {
+        toolMap.set(t.name, t);
+      }
+    }
     const tools = bookingEnabled
-      ? rawTools
-      : rawTools.filter(
+      ? Array.from(toolMap.values())
+      : Array.from(toolMap.values()).filter(
           (t) =>
             !['check_availability', 'check_available_slots', 'confirm_appointment', 'cancel_appointment'].includes(
               t.name
@@ -1042,6 +1049,16 @@ IMPORTANTE: Si el cliente solicita consultar disponibilidad de turnos o agendar 
         }\n`
       : '';
 
+    const cleanSenderPhone = (params.senderPhone || '').replace(/\D/g, '');
+    const clientPhoneFormatted = cleanSenderPhone ? `+${cleanSenderPhone}` : '';
+    const clientContextSection = `\nDATOS DEL CONTACTO EN ESTE CHAT DE WHATSAPP:
+- Teléfono de WhatsApp: ${clientPhoneFormatted || 'Número de origen registrado'}
+- Nombre del contacto: ${params.customerName || 'Aún no proporcionado'}
+REGLA CRÍTICA INQUEBRANTABLE (NUNCA PEDIR TELÉFONO):
+- El cliente YA te está escribiendo por WhatsApp en su teléfono (${clientPhoneFormatted}). ¡NUNCA jamás le pidas su número de teléfono o celular! Ya lo tienes registrado.
+- Cuando vayas a confirmar un turno o clase ('confirm_appointment'), crear un lead ('create_lead') o un pedido ('create_order'), utiliza automáticamente este número (${clientPhoneFormatted}) sin pedírselo.
+- Solo pregúntale su Nombre y Apellido si todavía no te lo dijo durante la conversación.\n`;
+
     const systemPrompt = `Eres "${customAi.assistantName}", el Asistente Inteligente de Atención al Cliente y Ventas de ${profile.businessName}.
 Tono y Personalidad: ${customAi.assistantTone}.
 Modo de Operación: ${modeLabelMap[customAi.businessMode] || modeLabelMap.HYBRID}.
@@ -1053,7 +1070,7 @@ FECHA ACTUAL: ${dateFormatted} (${isoDate}). HORA ACTUAL: ${timeFormatted} hs.
 Moneda: ${profile.currency}.
 Política Comercial / Garantías / Cancelaciones: ${profile.cancellationPolicy}.
 Estado de la Agenda de Turnos: ${bookingEnabled ? 'HABILITADA' : 'DESHABILITADA'}.
-${contactSegmentSection}${enrollmentFormSection}${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
+${clientContextSection}${contactSegmentSection}${enrollmentFormSection}${customContextSection}${paymentSection}${shippingSection}${forwardingSection}
 Catálogo de Productos y Servicios del Negocio:
 ${servicesSummary}
 ${scalinkyInfo}
@@ -1249,7 +1266,19 @@ ${bookingDirective}
       });
 
       for (const tc of response.toolCalls) {
-        const result = await this.executeTool(organizationId, tc, profile, params.senderPhone);
+        let result: { success: boolean; data: any };
+        try {
+          result = await this.executeTool(organizationId, tc, profile, params.senderPhone);
+        } catch (toolErr: any) {
+          this.logger.error(`Error ejecutando herramienta ${tc.name}: ${toolErr.message}`, toolErr.stack);
+          result = {
+            success: false,
+            data: {
+              error: toolErr.message,
+              message: `No se pudo completar ${tc.name} debido a un error: ${toolErr.message}`
+            }
+          };
+        }
         toolExecutions.push({
           toolName: tc.name,
           arguments: tc.arguments,
@@ -1923,18 +1952,45 @@ ${bookingDirective}
           }
         }
 
+        const effectiveCustomerPhone = String(args.customerPhone || senderPhone || 'Sin teléfono').trim();
+        const effectiveCustomerName = String(args.customerName || 'Cliente').trim();
+
         const appointment = this.appointmentRepo.create({
           organizationId,
-          customerName: args.customerName as string,
-          customerPhone: args.customerPhone as string,
+          customerName: effectiveCustomerName,
+          customerPhone: effectiveCustomerPhone,
           serviceId: matchedNativeService?.id || (args.serviceId as string) || 'srv-default',
           serviceName: resolvedServiceName,
           startTime,
           endTime,
           status: AppointmentStatus.CONFIRMED,
-          notes: args.notes as string
+          notes: (args.notes as string) || undefined
         });
         const saved = await this.appointmentRepo.save(appointment);
+
+        // Actualizar o enriquecer Lead en CRM
+        if (this.leadRepo && effectiveCustomerPhone) {
+          try {
+            const cleanDigits = effectiveCustomerPhone.replace(/\D/g, '');
+            const existingLead = await this.leadRepo.findOne({
+              where: [
+                { organizationId, phone: effectiveCustomerPhone },
+                { organizationId, phone: `+${cleanDigits}` },
+                { organizationId, phone: cleanDigits }
+              ]
+            });
+            if (existingLead) {
+              if (effectiveCustomerName && effectiveCustomerName !== 'Cliente') {
+                existingLead.name = effectiveCustomerName;
+              }
+              existingLead.status = LeadStatus.BOOKED;
+              existingLead.notes = `Turno confirmado: ${saved.serviceName} (${saved.startTime.toISOString()})`;
+              await this.leadRepo.save(existingLead);
+            }
+          } catch (err: any) {
+            this.logger.warn(`No se pudo actualizar lead al confirmar turno: ${err.message}`);
+          }
+        }
         return {
           success: true,
           data: {
@@ -2043,12 +2099,29 @@ ${bookingDirective}
 
   private normalizeStartTimeUtc(rawStart: string): Date {
     const trimmed = String(rawStart || '').trim();
+    if (!trimmed) return new Date();
+
     if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
       const withT = trimmed.replace(' ', 'T');
       const withSec = withT.length === 16 ? `${withT}:00` : withT;
       return new Date(`${withSec}Z`);
     }
-    return new Date(trimmed);
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return new Date(`${trimmed}T20:00:00Z`);
+    }
+
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d;
+
+    const dateMatch = trimmed.match(/(\d{4}-\d{2}-\d{2})/);
+    const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
+    if (dateMatch) {
+      const timePart = timeMatch ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}:00` : '20:00:00';
+      return new Date(`${dateMatch[1]}T${timePart}Z`);
+    }
+
+    return new Date();
   }
 
   private resolveTargetService(profile?: BusinessProfile, requestedServiceRaw?: string): any | undefined {

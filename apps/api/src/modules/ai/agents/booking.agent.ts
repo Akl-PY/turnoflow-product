@@ -27,13 +27,13 @@ export class BookingAgent {
           type: 'object',
           properties: {
             customerName: { type: 'string', description: 'Nombre completo del cliente' },
-            customerPhone: { type: 'string', description: 'Teléfono celular del cliente' },
+            customerPhone: { type: 'string', description: 'Teléfono celular del cliente (opcional; se usa automáticamente el número del chat si no se provee)' },
             serviceId: { type: 'string', description: 'ID o nombre del servicio' },
             startTime: { type: 'string', description: 'Fecha y hora de inicio en formato ISO 8601 (ej. 2026-11-12T15:00:00)' },
             staffName: { type: 'string', description: 'Nombre o ID del empleado/profesional asignado (opcional)' },
             notes: { type: 'string', description: 'Notas opcionales' }
           },
-          required: ['customerName', 'customerPhone', 'serviceId', 'startTime']
+          required: ['customerName', 'serviceId', 'startTime']
         }
       },
       {

@@ -161,10 +161,12 @@ export interface ConversationItem {
   leadId?: string;
   channel: string;
   channelConversationId: string;
+  contactName?: string;
   status: 'AI_HANDLED' | 'HUMAN_TAKEOVER' | 'ESCALATED' | 'CLOSED';
   assignedAgent: string;
   messagesCount: number;
   lastMessagePreview?: string;
+  metadata?: Record<string, any>;
   createdAt: string;
   updatedAt: string;
 }

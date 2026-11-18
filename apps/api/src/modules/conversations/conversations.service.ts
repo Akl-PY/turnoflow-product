@@ -314,6 +314,11 @@ export class ConversationsService {
         });
       }
 
+      const candidateCustomerName =
+        conversation.metadata?.contactName ||
+        (params.senderName && params.senderName !== 'Cliente' ? params.senderName : undefined) ||
+        this.extractNameFromMessage(params.messageText);
+
       try {
         aiResult = this.aiService
           ? await this.aiService.processIncomingMessage({
@@ -321,6 +326,7 @@ export class ConversationsService {
               conversationId: conversation.id,
               userText: params.messageText,
               senderPhone: params.senderPhone,
+              customerName: candidateCustomerName,
               contactSegment,
               hadPriorUserMessages
             })
@@ -593,6 +599,22 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
         }
       }
 
+      // Extraer nombre del contacto si vino en el texto o en las herramientas ejecutadas
+      let effectiveName = senderName && senderName !== 'Cliente' ? senderName : undefined;
+      for (const t of toolExecutions) {
+        if (t.arguments?.customerName) {
+          effectiveName = String(t.arguments.customerName).trim();
+          break;
+        }
+        if (t.arguments?.name) {
+          effectiveName = String(t.arguments.name).trim();
+          break;
+        }
+      }
+      if (!effectiveName) {
+        effectiveName = this.extractNameFromMessage(messageText);
+      }
+
       const existing = await this.leadRepo.findOne({
         where: [
           { organizationId, phone: formattedPhone },
@@ -604,7 +626,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       if (!existing) {
         const newLead = this.leadRepo.create({
           organizationId,
-          name: senderName && senderName !== 'Cliente' ? senderName : `Contacto ${formattedPhone}`,
+          name: effectiveName || `Contacto ${formattedPhone}`,
           phone: formattedPhone,
           requestedService: detectedItem || 'Consulta General / WhatsApp',
           intent,
@@ -616,8 +638,8 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
         });
         await this.leadRepo.save(newLead);
       } else {
-        if (senderName && senderName !== 'Cliente' && existing.name.startsWith('Contacto ')) {
-          existing.name = senderName;
+        if (effectiveName && (existing.name.startsWith('Contacto ') || existing.name === 'Cliente' || !existing.name)) {
+          existing.name = effectiveName;
         }
         if (detectedItem) {
           existing.requestedService = detectedItem;
@@ -635,9 +657,52 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
         existing.lastInteractionAt = new Date();
         await this.leadRepo.save(existing);
       }
+
+      if (effectiveName) {
+        const conv = await this.findByPhone(organizationId, rawPhone);
+        if (conv) {
+          conv.metadata = { ...(conv.metadata || {}), contactName: effectiveName };
+          await this.conversationRepo.save(conv);
+        }
+      }
     } catch (err: any) {
       this.logger.warn(`Auto-captura de lead omitida: ${err.message}`);
     }
+  }
+
+  extractNameFromMessage(text: string): string | undefined {
+    if (!text) return undefined;
+    const trimmed = text.trim();
+
+    const introMatch = trimmed.match(
+      /(?:me llamo|mi nombre es|yo me llamo|soy)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+){0,3})/i
+    );
+    if (introMatch && introMatch[1]) {
+      const candidate = introMatch[1].trim();
+      if (!['un', 'una', 'el', 'la', 'nuevo', 'nueva', 'alumno', 'alumna'].includes(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/^[A-ZÁÉÍÓÚÑa-záéíóúñ]{2,15}(\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]{2,15}){1,3}$/.test(line)) {
+        const lower = line.toLowerCase();
+        if (
+          !lower.includes('hola') &&
+          !lower.includes('gracias') &&
+          !lower.includes('buenas') &&
+          !lower.includes('consulta') &&
+          !lower.includes('taekwondo') &&
+          !lower.includes('clase') &&
+          !lower.includes('prueba')
+        ) {
+          return line;
+        }
+      }
+    }
+
+    return undefined;
   }
 
   private isUuid(val?: string): boolean {
@@ -694,6 +759,26 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       });
     }
 
+    const leadMap = new Map<string, string>();
+    if (this.leadRepo) {
+      try {
+        const leads = await this.leadRepo.find({
+          where: effectiveOrgId && effectiveOrgId !== 'default-org-id' ? { organizationId: effectiveOrgId } : {}
+        });
+        for (const l of leads) {
+          const clean = (l.phone || '').replace(/\D/g, '');
+          if (clean && l.name && !l.name.startsWith('Contacto ') && l.name !== 'Cliente') {
+            leadMap.set(clean, l.name);
+            if (clean.length >= 8) {
+              leadMap.set(clean.slice(-8), l.name);
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`No se pudieron cargar leads para enriquecer chats: ${err.message}`);
+      }
+    }
+
     const seen = new Set<string>();
     const deduplicated: any[] = [];
     for (const c of list) {
@@ -701,6 +786,11 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       const key = cleanPhone || c.id;
       if (!seen.has(key)) {
         seen.add(key);
+        const contactName =
+          c.metadata?.contactName ||
+          leadMap.get(cleanPhone) ||
+          (cleanPhone.length >= 8 ? leadMap.get(cleanPhone.slice(-8)) : undefined);
+
         let segment: 'NEW_CONTACT' | 'RETURNING_CONTACT' | 'EXISTING_CUSTOMER' =
           (c.messagesCount || 0) > 1 ? 'RETURNING_CONTACT' : 'NEW_CONTACT';
         if (this.aiService) {
@@ -717,6 +807,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
         }
         deduplicated.push({
           ...c,
+          contactName: contactName || c.channelConversationId,
           contactSegment: segment
         });
       }
