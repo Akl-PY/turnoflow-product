@@ -38,11 +38,11 @@ export class GeminiProvider implements AiProviderInterface {
 
     // Lista de modelos ordenados para fallback automático si el principal agota cuota o demora
     const modelsToTry = [
+      'gemini-flash-lite-latest',
       primaryModel,
-      'gemini-3.5-flash-lite',
-      'gemini-3.8-flash',
-      'gemini-3.5-flash',
-      'gemini-2.5-flash'
+      'gemini-flash-latest',
+      'gemini-2.5-flash',
+      'gemma-4-31b-it'
     ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
     const temperature = options?.temperature ?? 0.2;

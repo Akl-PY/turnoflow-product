@@ -184,7 +184,7 @@ export class AiService {
 
     // 1. Intentar con Gemini Multimodal nativo
     if (cleanKey) {
-      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+      const models = ['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-2.5-flash'];
       for (const model of models) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
@@ -368,7 +368,7 @@ Determina primero si es un COMPROBANTE DE PAGO / TRANSFERENCIA BANCARIA.
 
     // 1. Gemini Vision Multimodal
     if (cleanKey) {
-      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+      const models = ['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-2.5-flash'];
       for (const model of models) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;

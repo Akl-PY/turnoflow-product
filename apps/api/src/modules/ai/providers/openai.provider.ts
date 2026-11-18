@@ -46,10 +46,9 @@ export class OpenAiProvider implements AiProviderInterface {
 
     if (groqKey) {
       for (const m of [
-        safeOptModel || 'llama-3.3-70b-versatile',
-        'llama-3.1-8b-instant',
-        'meta-llama/llama-4-scout-17b-16e-instruct',
-        'qwen/qwen3-32b'
+        safeOptModel || 'qwen/qwen3.8-27b',
+        'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b'
       ]) {
         configs.push({
           label: `groq:${m}`,
@@ -129,11 +128,11 @@ export class OpenAiProvider implements AiProviderInterface {
     }
 
     if (githubKey) {
-      for (const m of ['gpt-4o-mini', 'Llama-3.3-70B-Instruct']) {
+      for (const m of ['openai/gpt-4o-mini', 'meta/llama-3.3-70b-instruct']) {
         configs.push({
           label: `github-models:${m}`,
           apiKey: githubKey,
-          baseURL: 'https://models.inference.ai.azure.com',
+          baseURL: 'https://models.github.ai/inference',
           model: m
         });
       }
