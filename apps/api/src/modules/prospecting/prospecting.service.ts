@@ -111,15 +111,39 @@ export class ProspectingService {
 
         if (currentStep && currentStep.branches && currentStep.branches.length > 0) {
           // Evaluar si el usuario eligió alguna de las ramas de la seguidilla
+          // 1. Prioridad absoluta: Coincidencia EXACTA (ej. "4", "1", "opcion 4", "si", "ok")
           let matchedBranch = currentStep.branches.find((branch) => {
             return (branch.keywords || []).some((kw) => {
               const cleanKw = normalizeText(kw);
-              if (!cleanKw) return false;
-              // Coincidencia exacta de número de opción (ej. "1", "2") o palabra contenida
-              if (cleanUserText === cleanKw) return true;
-              return cleanUserText.includes(cleanKw);
+              return cleanUserText === cleanKw;
             });
           });
+
+          // 2. Si no hubo coincidencia exacta, buscar la coincidencia más específica (palabra o frase más larga)
+          if (!matchedBranch) {
+            let maxBranchKwLen = 0;
+            for (const branch of currentStep.branches) {
+              for (const kw of branch.keywords || []) {
+                const cleanKw = normalizeText(kw);
+                if (!cleanKw) continue;
+                // Si la keyword es de un solo carácter (ej. dígito "1", "4"), solo debe coincidir como palabra aislada
+                if (cleanKw.length === 1) {
+                  const singleWordRegex = new RegExp(`(^|\\s|\\b)${cleanKw}(\\b|\\s|$)`);
+                  if (singleWordRegex.test(cleanUserText)) {
+                    if (cleanKw.length > maxBranchKwLen) {
+                      maxBranchKwLen = cleanKw.length;
+                      matchedBranch = branch;
+                    }
+                  }
+                } else if (cleanUserText.includes(cleanKw)) {
+                  if (cleanKw.length > maxBranchKwLen) {
+                    maxBranchKwLen = cleanKw.length;
+                    matchedBranch = branch;
+                  }
+                }
+              }
+            }
+          }
 
           if (matchedBranch) {
             const nextStep = activeFlow.steps.find((s) => s.id === matchedBranch!.nextStepId);
