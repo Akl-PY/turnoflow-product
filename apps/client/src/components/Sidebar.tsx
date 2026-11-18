@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { path: '/chats', label: 'Chats & Control IA', icon: MessageSquare },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
+  { path: '/prospecting', label: 'Embudos & Prospección', icon: Workflow },
   { path: '/knowledge-base', label: 'Catálogo & Contexto IA', icon: BookOpen },
   { path: '/playground', label: 'Simulador en Vivo', icon: Sparkles },
   { path: '/onboarding', label: 'Configuración & Canales', icon: Smartphone }

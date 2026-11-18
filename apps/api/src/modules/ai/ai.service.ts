@@ -99,7 +99,13 @@ export class AiService {
       process.env.MISTRAL_API_KEY ||
       process.env.CEREBRAS_API_KEY ||
       process.env.DEEPSEEK_API_KEY ||
-      process.env.TOGETHER_API_KEY
+      process.env.TOGETHER_API_KEY ||
+      process.env.HF_TOKEN ||
+      process.env.GITHUB_MODELS_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.SAMBANOVA_API_KEY ||
+      process.env.COHERE_API_KEY ||
+      process.env.NVIDIA_API_KEY
     );
     const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
     const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;

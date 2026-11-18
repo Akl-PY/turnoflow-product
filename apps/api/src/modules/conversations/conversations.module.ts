@@ -6,6 +6,7 @@ import { BusinessProfile } from '../../entities/business-profile.entity';
 import { Lead } from '../../entities/lead.entity';
 import { AiModule } from '../ai/ai.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { ProspectingModule } from '../prospecting/prospecting.module';
 import { ConversationsService } from './conversations.service';
 import { ConversationsController } from './conversations.controller';
 
@@ -13,7 +14,8 @@ import { ConversationsController } from './conversations.controller';
   imports: [
     TypeOrmModule.forFeature([Conversation, Message, BusinessProfile, Lead]),
     AiModule,
-    IntegrationsModule
+    IntegrationsModule,
+    ProspectingModule
   ],
   controllers: [ConversationsController],
   providers: [ConversationsService],

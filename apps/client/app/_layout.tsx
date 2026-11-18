@@ -48,6 +48,7 @@ const ALL_NAV_ITEMS = [
   { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
   { path: '/leads', label: 'Clientes & Leads', icon: Users },
   { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
+  { path: '/prospecting', label: 'Embudos & Prospección', icon: Workflow },
   { path: '/knowledge-base', label: 'Servicios & Tarifas', icon: BookOpen },
   { path: '/agents', label: 'Agentes de IA', icon: Bot },
   { path: '/automations', label: 'Automatizaciones', icon: Workflow },

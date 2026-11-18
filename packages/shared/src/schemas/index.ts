@@ -7,7 +7,9 @@ import {
   AppointmentStatus,
   ConversationStatus,
   AIProviderType,
-  AgentRoleType
+  AgentRoleType,
+  FlowTriggerType,
+  FlowStepAction
 } from '../types';
 
 export const DayScheduleSchema = z.object({
@@ -140,3 +142,36 @@ export const PlaygroundMessageSchema = z.object({
   overrideProvider: z.nativeEnum(AIProviderType).optional(),
   overrideModel: z.string().optional()
 });
+
+export const FlowBranchSchema = z.object({
+  id: z.string().default(() => Math.random().toString(36).substring(2, 9)),
+  label: z.string().min(1, 'La etiqueta de la opción es requerida'),
+  keywords: z.array(z.string()).min(1, 'Debe especificar al menos una palabra o frase clave'),
+  nextStepId: z.string().min(1, 'Debe seleccionar el siguiente paso')
+});
+
+export const ProspectingStepSchema = z.object({
+  id: z.string().default(() => Math.random().toString(36).substring(2, 9)),
+  name: z.string().min(2, 'Nombre del paso requerido'),
+  botResponse: z.string().min(2, 'El mensaje a enviar es requerido'),
+  action: z.nativeEnum(FlowStepAction).default(FlowStepAction.NONE),
+  actionPayload: z.object({
+    serviceName: z.string().optional(),
+    leadStatus: z.nativeEnum(LeadStatus).optional(),
+    notes: z.string().optional()
+  }).optional(),
+  branches: z.array(FlowBranchSchema).default([]),
+  fallbackResponse: z.string().optional(),
+  isFinalStep: z.boolean().default(false)
+});
+
+export const CreateProspectingFlowSchema = z.object({
+  name: z.string().min(2, 'El nombre del embudo es requerido'),
+  description: z.string().optional().default(''),
+  isActive: z.boolean().default(true),
+  triggerType: z.nativeEnum(FlowTriggerType).default(FlowTriggerType.KEYWORD),
+  triggerKeywords: z.array(z.string()).default([]),
+  steps: z.array(ProspectingStepSchema).min(1, 'El embudo debe tener al menos un paso')
+});
+
+export const UpdateProspectingFlowSchema = CreateProspectingFlowSchema.partial();

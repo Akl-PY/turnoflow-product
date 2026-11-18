@@ -54,6 +54,9 @@ export class Conversation {
   @Column({ default: 0 })
   messagesCount: number;
 
+  @Column({ type: 'simple-json', nullable: true })
+  metadata: Record<string, any>;
+
   @OneToMany(() => Message, (message) => message.conversation)
   messages: Message[];
 

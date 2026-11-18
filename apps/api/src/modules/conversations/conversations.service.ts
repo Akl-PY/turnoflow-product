@@ -8,6 +8,7 @@ import { BusinessProfile } from '../../entities/business-profile.entity';
 import { Lead } from '../../entities/lead.entity';
 import { AiService } from '../ai/ai.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { ProspectingService } from '../prospecting/prospecting.service';
 import {
   ConversationStatus,
   MessageSender,
@@ -37,7 +38,9 @@ export class ConversationsService {
     private readonly integrationsService?: IntegrationsService,
     @Optional()
     @InjectRepository(Lead)
-    private readonly leadRepo?: Repository<Lead>
+    private readonly leadRepo?: Repository<Lead>,
+    @Optional()
+    private readonly prospectingService?: ProspectingService
   ) {}
 
   getTenantVerifyToken(organizationId: string): string {
@@ -251,26 +254,84 @@ export class ConversationsService {
     });
     await this.messageRepo.save(userMsg);
 
-    // 3. Procesar con motor de IA de forma segura
+    // 2.2 Evaluar si coincide con un Embudo de Prospección / Respuestas Guiadas en Seguidilla
+    let prospectingMatch;
+    if (this.prospectingService) {
+      try {
+        prospectingMatch = await this.prospectingService.evaluateMessage({
+          organizationId: orgId,
+          userText: params.messageText,
+          conversationMetadata: conversation.metadata,
+          isNewContact: !hadPriorUserMessages,
+          leadPhone: params.senderPhone
+        });
+      } catch (err: any) {
+        this.logger.warn(`Error evaluando embudo de prospección: ${err.message}`);
+      }
+    }
+
+    // 3. Procesar con Embudo o con motor de IA de forma segura
     let aiResult;
-    try {
-      aiResult = this.aiService
-        ? await this.aiService.processIncomingMessage({
-            organizationId: orgId,
-            conversationId: conversation.id,
-            userText: params.messageText,
-            senderPhone: params.senderPhone,
-            contactSegment,
-            hadPriorUserMessages
-          })
-        : {
-            replyText: 'Gracias por comunicarte con nosotros.',
-            toolExecutions: [],
-            handoffToHuman: false,
-            handoffReason: undefined,
-            contactSegment
-          };
-    } catch (err: any) {
+    if (prospectingMatch && prospectingMatch.matched) {
+      conversation.metadata = {
+        ...(conversation.metadata || {}),
+        activeFlowId: prospectingMatch.isFinalStep ? undefined : prospectingMatch.flowId,
+        currentStepId: prospectingMatch.isFinalStep ? undefined : prospectingMatch.stepId,
+        lastMatchedAt: new Date().toISOString()
+      };
+      await this.conversationRepo.update(conversation.id, {
+        metadata: conversation.metadata
+      });
+
+      aiResult = {
+        replyText: prospectingMatch.replyMessage || '',
+        toolExecutions: [
+          {
+            toolName: 'prospecting_flow_step',
+            arguments: {
+              flowId: prospectingMatch.flowId,
+              stepId: prospectingMatch.stepId,
+              action: prospectingMatch.action
+            },
+            result: { matched: true, isFinalStep: prospectingMatch.isFinalStep },
+            success: true,
+            timestamp: new Date().toISOString()
+          }
+        ],
+        handoffToHuman: !!prospectingMatch.handoffToHuman,
+        handoffReason: prospectingMatch.handoffToHuman ? 'Solicitud en embudo' : undefined,
+        contactSegment
+      };
+    } else {
+      if (conversation.metadata?.activeFlowId) {
+        conversation.metadata = {
+          ...conversation.metadata,
+          activeFlowId: undefined,
+          currentStepId: undefined
+        };
+        await this.conversationRepo.update(conversation.id, {
+          metadata: conversation.metadata
+        });
+      }
+
+      try {
+        aiResult = this.aiService
+          ? await this.aiService.processIncomingMessage({
+              organizationId: orgId,
+              conversationId: conversation.id,
+              userText: params.messageText,
+              senderPhone: params.senderPhone,
+              contactSegment,
+              hadPriorUserMessages
+            })
+          : {
+              replyText: 'Gracias por comunicarte con nosotros.',
+              toolExecutions: [],
+              handoffToHuman: false,
+              handoffReason: undefined,
+              contactSegment
+            };
+      } catch (err: any) {
       this.logger.error(`Error procesando mensaje con IA: ${err.message}`);
 
       // Comprobar si el último mensaje ya fue una disculpa o aviso de demora
@@ -310,6 +371,7 @@ export class ConversationsService {
         handoffReason: 'Falla técnica del proveedor de IA'
       };
     }
+  }
 
     // Guardar respuesta del asistente solo si hay texto para enviar
     if (aiResult.replyText && aiResult.replyText.trim()) {

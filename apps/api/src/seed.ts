@@ -11,7 +11,8 @@ import {
   AgentConfigEntity,
   AutomationEntity,
   AuditLog,
-  Order
+  Order,
+  ProspectingFlowEntity
 } from './entities';
 import {
   UserRole,
@@ -21,7 +22,9 @@ import {
   LeadPriority,
   AppointmentStatus,
   AgentRoleType,
-  AIProviderType
+  AIProviderType,
+  FlowTriggerType,
+  FlowStepAction
 } from '@turnoflow/shared';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -45,7 +48,8 @@ export const AppDataSource = new DataSource(
           AgentConfigEntity,
           AutomationEntity,
           AuditLog,
-          Order
+          Order,
+          ProspectingFlowEntity
         ],
         synchronize: true
       }
@@ -63,7 +67,8 @@ export const AppDataSource = new DataSource(
           AgentConfigEntity,
           AutomationEntity,
           AuditLog,
-          Order
+          Order,
+          ProspectingFlowEntity
         ],
         synchronize: true
       }
@@ -418,6 +423,114 @@ async function runSeed() {
     ];
     await autoRepo.save(defaultAutos.map((d) => autoRepo.create({ ...d, organizationId: org.id, lastRunAt: new Date() })));
     console.log('✅ Workflows de automatización sembrados.');
+  }
+
+  // 8. Crear Embudos de Prospección Iniciales (Prospecting Flows)
+  const flowRepo = AppDataSource.getRepository(ProspectingFlowEntity);
+  const existingFlows = await flowRepo.count({ where: { organizationId: org.id } });
+  if (existingFlows === 0) {
+    const defaultFlow = flowRepo.create({
+      organizationId: org.id,
+      name: 'Calificación Inicial & Consulta de Tratamientos',
+      description: 'Embudo guiado paso a paso para indagar el interés del cliente y llevarlo a agendar turno',
+      isActive: true,
+      triggerType: FlowTriggerType.KEYWORD,
+      triggerKeywords: ['precio', 'cuanto sale', 'costo', 'tratamiento', 'info', 'promo', 'laser', 'facial'],
+      steps: [
+        {
+          id: 'step-intro',
+          name: 'Paso 1: Bienvenida e Indagación',
+          botResponse: '¡Hola! Es un placer saludarte. ✨ Para brindarte la información exacta y nuestras promociones vigentes, ¿sobre qué tratamiento te gustaría consultar?\n\n1️⃣ Depilación Láser Soprano\n2️⃣ Limpieza Facial Profunda\n3️⃣ Uñas Esculpidas & Semipermanente',
+          action: FlowStepAction.NONE,
+          branches: [
+            {
+              id: 'branch-1-laser',
+              label: '1) Depilación Láser',
+              keywords: ['1', 'laser', 'depilacion', 'soprano'],
+              nextStepId: 'step-laser-zone'
+            },
+            {
+              id: 'branch-2-facial',
+              label: '2) Limpieza Facial',
+              keywords: ['2', 'facial', 'limpieza', 'cutis'],
+              nextStepId: 'step-facial-info'
+            },
+            {
+              id: 'branch-3-nails',
+              label: '3) Uñas',
+              keywords: ['3', 'uñas', 'semi', 'manicuria', 'esculpidas'],
+              nextStepId: 'step-nails-info'
+            }
+          ],
+          fallbackResponse: 'Por favor responde con el número 1, 2 o 3 para indicarme cuál tratamiento te interesa conocer.',
+          isFinalStep: false
+        },
+        {
+          id: 'step-laser-zone',
+          name: 'Paso 2 Láser: Indagación de Zona',
+          botResponse: '¡Excelente elección! Nuestro equipo Soprano Titanium es 100% indoloro y efectivo desde la primera sesión. ❄️\n\n¿En qué zona estás interesada/o?\n• Axilas\n• Piernas completas\n• Cavado o Bozo',
+          action: FlowStepAction.SET_LEAD_INTEREST,
+          actionPayload: {
+            serviceName: 'Depilación Láser Soprano',
+            leadStatus: LeadStatus.INTERESTED
+          },
+          branches: [
+            {
+              id: 'branch-axilas',
+              label: 'Axilas o Zonas Chicas',
+              keywords: ['axilas', 'axila', 'bozo', 'cavado'],
+              nextStepId: 'step-laser-close'
+            },
+            {
+              id: 'branch-piernas',
+              label: 'Piernas o Zonas Grandes',
+              keywords: ['piernas', 'pierna', 'espalda', 'completa'],
+              nextStepId: 'step-laser-close'
+            }
+          ],
+          fallbackResponse: 'Contame en qué zona del cuerpo te gustaría realizar el tratamiento (por ejemplo: Axilas, Piernas, o Rostro).',
+          isFinalStep: false
+        },
+        {
+          id: 'step-facial-info',
+          name: 'Paso 2 Facial: Beneficios y Cierre',
+          botResponse: 'Nuestra Limpieza Facial Profunda incluye punta de diamante, extracción suave y máscara descongestiva por $22.000. 💆‍♀️ Deja la piel luminosa e hidratada.\n\n¿Te gustaría que te reserve un turno para esta semana?',
+          action: FlowStepAction.SET_LEAD_INTEREST,
+          actionPayload: {
+            serviceName: 'Limpieza Facial Profunda',
+            leadStatus: LeadStatus.INTERESTED
+          },
+          branches: [],
+          isFinalStep: true
+        },
+        {
+          id: 'step-nails-info',
+          name: 'Paso 2 Uñas: Opciones y Cierre',
+          botResponse: 'Realizamos esmaltado semipermanente con nivelación o esculpidas soft gel con diseños personalizados. 💅\n\n¿Te gustaría ver los horarios disponibles para esta semana?',
+          action: FlowStepAction.SET_LEAD_INTEREST,
+          actionPayload: {
+            serviceName: 'Uñas Esculpidas',
+            leadStatus: LeadStatus.INTERESTED
+          },
+          branches: [],
+          isFinalStep: true
+        },
+        {
+          id: 'step-laser-close',
+          name: 'Paso 3 Láser: Oferta 2x1 y Cierre',
+          botResponse: '¡Buenísimo! Justo esta semana tenemos una *Promo 2x1 en esa zona* contratando el pack de 6 sesiones. 🎉\n\n¿Te gustaría que te reservemos un lugar para coordinar tu primera sesión este jueves o sábado?',
+          action: FlowStepAction.SET_LEAD_STATUS,
+          actionPayload: {
+            leadStatus: LeadStatus.BOOKED,
+            notes: 'Calificado en embudo: Interés en Promo 2x1 Láser'
+          },
+          branches: [],
+          isFinalStep: true
+        }
+      ]
+    });
+    await flowRepo.save(defaultFlow);
+    console.log('✅ Embudo de prospección sembrado.');
   }
 
   console.log('🎉 Sembrado completado exitosamente.');

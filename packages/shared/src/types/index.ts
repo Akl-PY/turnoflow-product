@@ -242,3 +242,67 @@ export interface DashboardMetrics {
   leadsTrend: number;
   bookingsTrend: number;
 }
+
+export enum FlowTriggerType {
+  NEW_LEAD = 'NEW_LEAD',
+  KEYWORD = 'KEYWORD',
+  INTENT = 'INTENT'
+}
+
+export enum FlowStepAction {
+  NONE = 'NONE',
+  SET_LEAD_INTEREST = 'SET_LEAD_INTEREST',
+  SET_LEAD_STATUS = 'SET_LEAD_STATUS',
+  OFFER_BOOKING = 'OFFER_BOOKING',
+  HANDOFF = 'HANDOFF'
+}
+
+export interface FlowBranch {
+  id: string;
+  label: string;
+  keywords: string[];
+  nextStepId: string;
+}
+
+export interface ProspectingStep {
+  id: string;
+  name: string;
+  botResponse: string;
+  action?: FlowStepAction;
+  actionPayload?: {
+    serviceName?: string;
+    leadStatus?: LeadStatus;
+    notes?: string;
+  };
+  branches: FlowBranch[];
+  fallbackResponse?: string;
+  isFinalStep?: boolean;
+}
+
+export interface ProspectingFlow {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  triggerType: FlowTriggerType;
+  triggerKeywords: string[];
+  steps: ProspectingStep[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FlowMatchResult {
+  matched: boolean;
+  flowId?: string;
+  stepId?: string;
+  replyMessage?: string;
+  action?: FlowStepAction;
+  actionPayload?: {
+    serviceName?: string;
+    leadStatus?: LeadStatus;
+    notes?: string;
+  };
+  isFinalStep?: boolean;
+  handoffToHuman?: boolean;
+}

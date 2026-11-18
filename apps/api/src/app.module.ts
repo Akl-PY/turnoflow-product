@@ -15,7 +15,8 @@ import {
   AgentConfigEntity,
   AutomationEntity,
   AuditLog,
-  Order
+  Order,
+  ProspectingFlowEntity
 } from './entities';
 
 import { AuthModule } from './modules/auth/auth.module';
@@ -30,6 +31,7 @@ import { AgentsModule } from './modules/agents/agents.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ExportModule } from './modules/export/export.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { ProspectingModule } from './modules/prospecting/prospecting.module';
 import { HealthController } from './modules/health/health.controller';
 
 const entities = [
@@ -43,7 +45,8 @@ const entities = [
   AgentConfigEntity,
   AutomationEntity,
   AuditLog,
-  Order
+  Order,
+  ProspectingFlowEntity
 ];
 
 function probeTcp(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
@@ -182,7 +185,8 @@ function probeTcp(host: string, port: number, timeoutMs = 1500): Promise<boolean
     AgentsModule,
     DashboardModule,
     ExportModule,
-    OrdersModule
+    OrdersModule,
+    ProspectingModule
   ],
   controllers: [HealthController]
 })

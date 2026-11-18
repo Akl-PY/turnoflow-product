@@ -9,3 +9,4 @@ export * from './agent-config.entity';
 export * from './automation.entity';
 export * from './audit-log.entity';
 export * from './order.entity';
+export * from './prospecting-flow.entity';

@@ -27,6 +27,10 @@ export class OpenAiProvider implements AiProviderInterface {
     const deepseekKey = (process.env.DEEPSEEK_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const togetherKey = (process.env.TOGETHER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const hfKey = (process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const githubKey = (process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || '').replace(/^['"]|['"]$/g, '').trim();
+    const sambanovaKey = (process.env.SAMBANOVA_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const cohereKey = (process.env.COHERE_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const nvidiaKey = (process.env.NVIDIA_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const rawBaseUrl = process.env.OPENAI_BASE_URL?.replace(/^['"]|['"]$/g, '').trim();
 
     const rawEnvModel = (process.env.AI_MODEL || '').replace(/^['"]|['"]$/g, '').trim();
@@ -122,6 +126,46 @@ export class OpenAiProvider implements AiProviderInterface {
           model: m
         });
       }
+    }
+
+    if (githubKey) {
+      for (const m of ['gpt-4o-mini', 'Llama-3.3-70B-Instruct']) {
+        configs.push({
+          label: `github-models:${m}`,
+          apiKey: githubKey,
+          baseURL: 'https://models.inference.ai.azure.com',
+          model: m
+        });
+      }
+    }
+
+    if (sambanovaKey) {
+      for (const m of ['Meta-Llama-3.3-70B-Instruct', 'DeepSeek-V3-0324']) {
+        configs.push({
+          label: `sambanova:${m}`,
+          apiKey: sambanovaKey,
+          baseURL: 'https://api.sambanova.ai/v1',
+          model: m
+        });
+      }
+    }
+
+    if (cohereKey) {
+      configs.push({
+        label: 'cohere:command-a-03-2025',
+        apiKey: cohereKey,
+        baseURL: 'https://api.cohere.ai/compatibility/v1',
+        model: 'command-a-03-2025'
+      });
+    }
+
+    if (nvidiaKey) {
+      configs.push({
+        label: 'nvidia:llama-3.3-70b',
+        apiKey: nvidiaKey,
+        baseURL: 'https://integrate.api.nvidia.com/v1',
+        model: 'meta/llama-3.3-70b-instruct'
+      });
     }
 
     if (openAiKey) {
