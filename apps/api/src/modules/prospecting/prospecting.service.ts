@@ -119,7 +119,28 @@ export class ProspectingService {
             });
           });
 
-          // 2. Si no hubo coincidencia exacta, buscar la coincidencia más específica (palabra o frase más larga)
+          // 2. Si no hubo coincidencia exacta, verificar si el usuario mencionó una edad numérica (ej. "40", "tengo 40", "tiene 6 años", "15", "8")
+          if (!matchedBranch) {
+            const ageNumberMatch = cleanUserText.match(/\b(\d{1,2})\b/);
+            if (ageNumberMatch) {
+              const ageVal = parseInt(ageNumberMatch[1], 10);
+              let targetCategory: string | null = null;
+              if (ageVal >= 4 && ageVal <= 6) targetCategory = 'kids';
+              else if (ageVal >= 7 && ageVal <= 10) targetCategory = 'infantiles';
+              else if (ageVal >= 11 && ageVal <= 17) targetCategory = 'juveniles';
+              else if (ageVal >= 18 && ageVal <= 100) targetCategory = 'adultos';
+
+              if (targetCategory) {
+                matchedBranch = currentStep.branches.find(
+                  (b) =>
+                    b.nextStepId.toLowerCase().includes(targetCategory!) ||
+                    (b.keywords || []).some((kw) => kw.toLowerCase().includes(targetCategory!))
+                );
+              }
+            }
+          }
+
+          // 3. Buscar la coincidencia más específica por palabra o frase
           if (!matchedBranch) {
             let maxBranchKwLen = 0;
             for (const branch of currentStep.branches) {
@@ -166,7 +187,8 @@ export class ProspectingService {
             }
           }
 
-          // Si no coincidió con ninguna rama pero tiene un fallback de repregunta
+          // Si no coincidió con ninguna rama:
+          // Si el paso tiene un fallbackResponse explícito, devolverlo. Si no tiene, dejar que la IA responda con inteligencia contextual.
           if (currentStep.fallbackResponse && currentStep.fallbackResponse.trim()) {
             return {
               matched: true,
@@ -178,6 +200,8 @@ export class ProspectingService {
               handoffToHuman: false
             };
           }
+
+          return { matched: false };
         }
       }
     }
