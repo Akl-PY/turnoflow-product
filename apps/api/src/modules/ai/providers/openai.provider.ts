@@ -26,6 +26,7 @@ export class OpenAiProvider implements AiProviderInterface {
     const cerebrasKey = (process.env.CEREBRAS_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const deepseekKey = (process.env.DEEPSEEK_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const togetherKey = (process.env.TOGETHER_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+    const hfKey = (process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
     const rawBaseUrl = process.env.OPENAI_BASE_URL?.replace(/^['"]|['"]$/g, '').trim();
 
     const rawEnvModel = (process.env.AI_MODEL || '').replace(/^['"]|['"]$/g, '').trim();
@@ -110,6 +111,17 @@ export class OpenAiProvider implements AiProviderInterface {
         baseURL: 'https://api.deepseek.com/v1',
         model: 'deepseek-chat'
       });
+    }
+
+    if (hfKey) {
+      for (const m of ['Qwen/Qwen2.5-72B-Instruct', 'meta-llama/Llama-3.3-70B-Instruct']) {
+        configs.push({
+          label: `huggingface:${m}`,
+          apiKey: hfKey,
+          baseURL: 'https://router.huggingface.co/v1',
+          model: m
+        });
+      }
     }
 
     if (openAiKey) {
