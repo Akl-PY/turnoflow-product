@@ -190,33 +190,40 @@ export class ProspectingService {
       }
     }
 
-    // 2.2 Disparador por PALABRAS CLAVE (ej. "precio", "depilacion", "promo", "lifting", "uñas")
+    // 2.2 Disparador por PALABRAS CLAVE (con prioridad al emparejamiento más específico / frase más larga)
+    let bestMatchFlow: ProspectingFlowEntity | null = null;
+    let maxKeywordLength = 0;
+
     for (const flow of activeFlows) {
       if (flow.triggerType === FlowTriggerType.KEYWORD && flow.triggerKeywords && flow.triggerKeywords.length > 0) {
-        const matchesKeyword = flow.triggerKeywords.some((kw) => {
+        for (const kw of flow.triggerKeywords) {
           const cleanKw = normalizeText(kw);
-          if (!cleanKw) return false;
-          return cleanUserText.includes(cleanKw);
-        });
-
-        if (matchesKeyword && flow.steps && flow.steps.length > 0) {
-          const firstStep = flow.steps[0];
-          const isFinal = !!firstStep.isFinalStep || !firstStep.branches || firstStep.branches.length === 0;
-
-          await this.applyStepAction(organizationId, leadPhone, firstStep);
-
-          return {
-            matched: true,
-            flowId: flow.id,
-            stepId: firstStep.id,
-            replyMessage: firstStep.botResponse,
-            action: firstStep.action,
-            actionPayload: firstStep.actionPayload,
-            isFinalStep: isFinal,
-            handoffToHuman: firstStep.action === FlowStepAction.HANDOFF
-          };
+          if (cleanKw && cleanUserText.includes(cleanKw)) {
+            if (cleanKw.length > maxKeywordLength) {
+              maxKeywordLength = cleanKw.length;
+              bestMatchFlow = flow;
+            }
+          }
         }
       }
+    }
+
+    if (bestMatchFlow && bestMatchFlow.steps && bestMatchFlow.steps.length > 0) {
+      const firstStep = bestMatchFlow.steps[0];
+      const isFinal = !!firstStep.isFinalStep || !firstStep.branches || firstStep.branches.length === 0;
+
+      await this.applyStepAction(organizationId, leadPhone, firstStep);
+
+      return {
+        matched: true,
+        flowId: bestMatchFlow.id,
+        stepId: firstStep.id,
+        replyMessage: firstStep.botResponse,
+        action: firstStep.action,
+        actionPayload: firstStep.actionPayload,
+        isFinalStep: isFinal,
+        handoffToHuman: firstStep.action === FlowStepAction.HANDOFF
+      };
     }
 
     return { matched: false };
