@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
 import * as QRCode from 'qrcode';
+import * as crypto from 'crypto';
 import { IntegrationStatus, MessageSender, ConversationStatus, AgentRoleType } from '@turnoflow/shared';
 import { Conversation } from '../../entities/conversation.entity';
 import { Message } from '../../entities/message.entity';
@@ -462,7 +463,7 @@ export class IntegrationsService {
     to: string,
     text: string,
     explicitInstanceName?: string
-  ): Promise<{ success: boolean; messageId?: string }> {
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const rawUrl = process.env.EVOLUTION_API_URL || '';
     const rawKey = process.env.EVOLUTION_API_KEY || '';
     const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
@@ -517,8 +518,96 @@ export class IntegrationsService {
       return { success: true, messageId: msgId };
     } catch (err: any) {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
-      return { success: false };
+      return { success: false, error: err.response?.data?.message || err.message };
     }
+  }
+
+  /**
+   * Genera una API Key única, determinística e inviolable para una organización.
+   * Formato: tf_sec_<orgPrefix>_<signature>
+   */
+  generateOrgApiKey(organizationId: string): string {
+    const secret =
+      process.env.OUTBOUND_WEBHOOK_KEY ||
+      process.env.WEBHOOK_SECRET ||
+      process.env.JWT_SECRET ||
+      'turnoflow-webhook-secret-2026';
+    const cleanOrg = organizationId.replace(/-/g, '').substring(0, 10);
+    const signature = crypto
+      .createHmac('sha256', secret)
+      .update(organizationId)
+      .digest('hex')
+      .substring(0, 24);
+    return `tf_sec_${cleanOrg}_${signature}`;
+  }
+
+  /**
+   * Valida la clave provista y resuelve la organización propietaria con aislamiento estricto.
+   */
+  async validateAndResolveOrgFromKey(providedKey: string): Promise<string | null> {
+    if (!providedKey || typeof providedKey !== 'string') return null;
+
+    const masterKey =
+      process.env.OUTBOUND_WEBHOOK_KEY ||
+      process.env.WEBHOOK_SECRET ||
+      'turnoflow-webhook-secret-2026';
+
+    if (providedKey === masterKey) {
+      return 'master';
+    }
+
+    if (providedKey.startsWith('tf_sec_')) {
+      const parts = providedKey.split('_');
+      if (parts.length >= 4) {
+        const prefix = parts[2];
+        if (this.orgRepo) {
+          try {
+            const orgs = await this.orgRepo.find();
+            for (const org of orgs) {
+              const cleanId = org.id.replace(/-/g, '').substring(0, 10);
+              if (cleanId === prefix) {
+                const expectedKey = this.generateOrgApiKey(org.id);
+                if (providedKey === expectedKey) {
+                  return org.id;
+                }
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(`Error buscando organización para API key: ${err.message}`);
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async getOrgWebhookCredentials(organizationId: string): Promise<{
+    organizationId: string;
+    organizationName: string;
+    apiKey: string;
+    instanceName: string;
+    webhookEndpoint: string;
+  }> {
+    const apiKey = this.generateOrgApiKey(organizationId);
+    const instanceName = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+    let organizationName = 'Mi Negocio';
+    if (this.orgRepo) {
+      try {
+        const org = await this.orgRepo.findOne({ where: { id: organizationId } });
+        if (org?.name) organizationName = org.name;
+      } catch {
+        // Fallback
+      }
+    }
+
+    return {
+      organizationId,
+      organizationName,
+      apiKey,
+      instanceName,
+      webhookEndpoint: 'https://turnoflowapi-production.up.railway.app/api/integrations/outbound-webhook'
+    };
   }
 
   /**

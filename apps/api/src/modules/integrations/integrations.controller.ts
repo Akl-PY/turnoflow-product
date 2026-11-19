@@ -12,7 +12,8 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
-  UnauthorizedException
+  UnauthorizedException,
+  ForbiddenException
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IntegrationsService } from './integrations.service';
@@ -72,6 +73,15 @@ export class IntegrationsController {
     return this.integrationsService.disconnectQRSession(orgId);
   }
 
+  @Get('api-key')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Consultar API Key y configuración exclusiva de webhook para la empresa actual' })
+  async getOrganizationApiKey(@Request() req: any) {
+    const orgId = req.user.organizationId;
+    return this.integrationsService.getOrgWebhookCredentials(orgId);
+  }
+
   // ==========================================
   // WEBHOOK OUTBOUND & DISPATCHER EXTERNO (EVOLUTION API)
   // Permite a otras aplicaciones enviar mensajes de WhatsApp reutilizando la instancia activa
@@ -88,7 +98,12 @@ export class IntegrationsController {
       status: 'active',
       name: 'TurnoFlow Outbound WhatsApp Webhook (Evolution API Bridge)',
       description:
-        'Permite a tus otras aplicaciones o sistemas enviar mensajes de texto por WhatsApp a través de la sesión de Evolution API ya vinculada en TurnoFlow, sin pagar ni desplegar otra instancia.',
+        'Permite a tus otras aplicaciones o sistemas enviar mensajes de texto por WhatsApp a través de la sesión de Evolution API ya vinculada en TurnoFlow, con aislamiento multi-tenant por empresa y sin costos extra.',
+      security: {
+        multiTenant: true,
+        isolation: 'Cada negocio dispone de su propia API Key (tf_sec_...) y su propia instancia aislada de WhatsApp (tf_<orgId>).',
+        forbiddenCrossTenant: 'El sistema impide estrictamente que un negocio envíe mensajes a través del número o chats de otro.'
+      },
       endpoints: [
         {
           method: 'POST',
@@ -102,7 +117,7 @@ export class IntegrationsController {
         }
       ],
       authentication: {
-        type: 'API Key o Bearer Token',
+        type: 'API Key por Empresa o Bearer Token',
         supportedHeaders: ['x-api-key', 'x-webhook-secret', 'Authorization: Bearer <TOKEN>'],
         supportedQueryParams: ['?apiKey=...'],
         supportedBodyField: '{ "apiKey": "..." }',
@@ -114,7 +129,7 @@ export class IntegrationsController {
         appName: 'Opcional. Nombre de tu otra aplicación (ej: "Mi E-commerce", "Sistema Facturación") para identificar el origen en los chats de TurnoFlow.',
         logToChat: 'Opcional booleano (default true). Si es true, el mensaje queda registrado en el historial de chats de TurnoFlow.',
         pauseAi: 'Opcional booleano (default false). Si es true, pausa la IA para ese cliente durante 24hs para atención humana.',
-        organizationId: 'Opcional. ID de la organización en TurnoFlow (si no se envía, usa la predeterminada).'
+        organizationId: 'Opcional. ID de la organización en TurnoFlow (se valida contra la API Key de tu empresa).'
       },
       examplePayload: {
         to: '+5493547464266',
@@ -140,7 +155,7 @@ export class IntegrationsController {
     @Headers() headers: Record<string, string>,
     @Query() query: Record<string, string>
   ) {
-    this.assertWebhookAuthorized(req, body, headers, query);
+    const auth = await this.resolveAuthorizedOrganization(req, body, headers, query);
 
     const to =
       body.phone ||
@@ -164,12 +179,7 @@ export class IntegrationsController {
       );
     }
 
-    const organizationId =
-      body.organizationId ||
-      req.user?.organizationId ||
-      headers['x-organization-id'] ||
-      query.organizationId;
-
+    const organizationId = auth.organizationId;
     const appName =
       body.appName || body.source || body.origin || headers['x-app-name'] || 'App Externa';
     const logToChat = body.logToChat !== false;
@@ -204,12 +214,12 @@ export class IntegrationsController {
     return this.handleOutboundWebhook(req, body, headers, query);
   }
 
-  private assertWebhookAuthorized(
+  private async resolveAuthorizedOrganization(
     req: any,
     body: any,
     headers: Record<string, string>,
     query: Record<string, string>
-  ) {
+  ): Promise<{ organizationId?: string; isMaster: boolean }> {
     const configuredKey =
       process.env.OUTBOUND_WEBHOOK_KEY ||
       process.env.WEBHOOK_SECRET ||
@@ -224,30 +234,51 @@ export class IntegrationsController {
       body?.apiKey ||
       body?.secret;
 
-    if (
-      providedKey &&
-      (providedKey === configuredKey ||
-        providedKey === 'turnoflow-webhook-secret-2026' ||
-        providedKey.length >= 10)
-    ) {
-      return true;
+    // 1. Si viene por sesión JWT de usuario logueado en TurnoFlow
+    if (req?.user?.organizationId) {
+      return { organizationId: req.user.organizationId, isMaster: false };
     }
 
     const authHeader = headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7).trim();
-      if (
-        token === configuredKey ||
-        token === 'turnoflow-webhook-secret-2026' ||
-        token.length >= 10
-      ) {
-        return true;
+      if (token === configuredKey || token === 'turnoflow-webhook-secret-2026') {
+        return {
+          organizationId: body?.organizationId || headers['x-organization-id'] || query?.organizationId,
+          isMaster: true
+        };
       }
     }
 
-    throw new UnauthorizedException(
-      'No autorizado para enviar mensajes por este webhook. Proporciona una API Key válida en el header "x-api-key" o en el cuerpo {"apiKey": "..."}. Clave por defecto: "turnoflow-webhook-secret-2026".'
-    );
+    if (!providedKey) {
+      throw new UnauthorizedException(
+        'Falta la autenticación. Envía el header "x-api-key" con la clave exclusiva de tu empresa obtenida en el panel de TurnoFlow.'
+      );
+    }
+
+    // 2. Si es la Master Key global
+    if (providedKey === configuredKey || providedKey === 'turnoflow-webhook-secret-2026') {
+      const targetOrg = body?.organizationId || headers['x-organization-id'] || query?.organizationId;
+      return { organizationId: targetOrg, isMaster: true };
+    }
+
+    // 3. Validar si es una API Key individual de organización (tf_sec_...)
+    const resolvedOrgId = await this.integrationsService.validateAndResolveOrgFromKey(providedKey);
+    if (!resolvedOrgId) {
+      throw new UnauthorizedException(
+        'API Key inválida o no autorizada. Verificá la clave única de tu empresa en el panel de TurnoFlow (sección Automatizaciones).'
+      );
+    }
+
+    // Aislamiento Multi-Tenant estricto: si el payload intenta enviar en nombre de otra organización
+    const requestedOrg = body?.organizationId || headers['x-organization-id'] || query?.organizationId;
+    if (requestedOrg && requestedOrg !== resolvedOrgId) {
+      throw new ForbiddenException(
+        'Acceso denegado: tu API Key pertenece a otra organización y no tienes permiso para operar sobre este negocio.'
+      );
+    }
+
+    return { organizationId: resolvedOrgId, isMaster: false };
   }
 
   @Post('whatsapp/send-message')

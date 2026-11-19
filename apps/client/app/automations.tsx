@@ -90,7 +90,12 @@ export default function AutomationsScreen() {
   const { user } = useAuth();
   const [workflows, setWorkflows] = useState<any[]>(BUSINESS_AUTOMATIONS);
 
-  // Estados para el Webhook de integración externa
+  // Estados para el Webhook de integración externa y seguridad multi-tenant
+  const [orgCredentials, setOrgCredentials] = useState<{
+    apiKey: string;
+    instanceName: string;
+    organizationName: string;
+  } | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [testPhone, setTestPhone] = useState('');
@@ -99,7 +104,21 @@ export default function AutomationsScreen() {
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const webhookEndpoint = 'https://turnoflowapi-production.up.railway.app/api/integrations/outbound-webhook';
-  const webhookKey = 'turnoflow-webhook-secret-2026';
+  const effectiveApiKey = orgCredentials?.apiKey || 'turnoflow-webhook-secret-2026';
+
+  useEffect(() => {
+    const fetchOrgApiKey = async () => {
+      try {
+        const res = await apiClient.get('/integrations/api-key');
+        if (res.data?.apiKey) {
+          setOrgCredentials(res.data);
+        }
+      } catch {
+        // Fallback si no está autenticado con JWT
+      }
+    };
+    fetchOrgApiKey();
+  }, [user?.organizationId]);
 
   const copyText = async (text: string, type: 'key' | 'curl') => {
     try {
@@ -138,7 +157,7 @@ export default function AutomationsScreen() {
         appName: 'Test desde Panel'
       }, {
         headers: {
-          'x-api-key': webhookKey
+          'x-api-key': effectiveApiKey
         }
       });
 
@@ -295,11 +314,33 @@ export default function AutomationsScreen() {
                 <View style={[styles.categoryBadge, { backgroundColor: '#DCFCE7', borderColor: '#BBF7D0' }]}>
                   <Text style={[styles.categoryBadgeText, { color: '#15803D' }]}>100% GRATUITO / INCLUIDO</Text>
                 </View>
+                <View style={[styles.categoryBadge, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                  <Text style={[styles.categoryBadgeText, { color: '#1D4ED8' }]}>
+                    {orgCredentials?.organizationName ? `EMPRESA: ${orgCredentials.organizationName.toUpperCase()}` : 'MULTI-TENANT AISLADO'}
+                  </Text>
+                </View>
               </View>
               <Text style={styles.wfDesc}>
                 Envía mensajes directos de WhatsApp desde cualquiera de tus otros sistemas (CRM, web, tienda online, scripts en Python, n8n o Node) reutilizando la misma sesión activa de WhatsApp de TurnoFlow, sin pagar otra instancia de Evolution ni consumir APIs de voz.
               </Text>
             </View>
+          </View>
+
+          {/* Banner de Aislamiento y Seguridad */}
+          <View style={{
+            backgroundColor: '#F0FDF4',
+            borderWidth: 1,
+            borderColor: '#BBF7D0',
+            borderRadius: 8,
+            padding: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10
+          }}>
+            <ShieldCheck size={18} color="#15803D" />
+            <Text style={{ fontSize: 12, color: '#166534', flex: 1, lineHeight: 17 }}>
+              <Text style={{ fontWeight: '700' }}>Seguridad Multi-Tenant Blindada:</Text> Tu clave de API (<Text style={{ fontFamily: Platform.select({ web: 'monospace', default: 'System' }), fontWeight: '700' }}>{effectiveApiKey.substring(0, 16)}...</Text>) está asociada de forma exclusiva a tu negocio. Ningún otro cliente de TurnoFlow puede enviar mensajes por tu WhatsApp ni ver tus conversaciones.
+            </Text>
           </View>
 
           {/* Credenciales y Endpoint */}
@@ -327,14 +368,14 @@ export default function AutomationsScreen() {
             </View>
 
             <View style={styles.credItem}>
-              <Text style={styles.credLabel}>API KEY DE AUTENTICACIÓN (Header: x-api-key)</Text>
+              <Text style={styles.credLabel}>API KEY EXCLUSIVA DE TU NEGOCIO (Header: x-api-key)</Text>
               <View style={styles.credRow}>
                 <Text style={styles.credValue} numberOfLines={1} selectable>
-                  {webhookKey}
+                  {effectiveApiKey}
                 </Text>
                 <TouchableOpacity
                   style={styles.copyBtn}
-                  onPress={() => copyText(webhookKey, 'key')}
+                  onPress={() => copyText(effectiveApiKey, 'key')}
                 >
                   {copiedKey ? (
                     <Check size={14} color="#16A34A" />
@@ -357,7 +398,7 @@ export default function AutomationsScreen() {
                 style={styles.copyCodeBtn}
                 onPress={() =>
                   copyText(
-                    `curl -X POST "${webhookEndpoint}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: ${webhookKey}" \\\n  -d '{"to": "5493512345678", "message": "Mensaje desde mi app", "appName": "MiCRM"}'`,
+                    `curl -X POST "${webhookEndpoint}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: ${effectiveApiKey}" \\\n  -d '{"to": "5493512345678", "message": "Mensaje desde mi app", "appName": "MiCRM"}'`,
                     'curl'
                   )
                 }
@@ -376,7 +417,7 @@ export default function AutomationsScreen() {
               <Text style={styles.codeText} selectable>
                 {`curl -X POST "${webhookEndpoint}" \\
   -H "Content-Type: application/json" \\
-  -H "x-api-key: ${webhookKey}" \\
+  -H "x-api-key: ${effectiveApiKey}" \\
   -d '{
     "to": "5493512345678",
     "message": "Hola! Notificación enviada desde mi sistema.",

@@ -2,16 +2,20 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { IntegrationsController } from './modules/integrations/integrations.controller';
 import { IntegrationsService } from './modules/integrations/integrations.service';
 import { ScalinkyService } from './modules/integrations/scalinky.service';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 
 describe('IntegrationsController — Outbound WhatsApp Webhook', () => {
   let controller: IntegrationsController;
   let service: IntegrationsService;
 
   const mockSendOutbound = jest.fn();
+  const mockValidateKey = jest.fn();
+  const mockGetCredentials = jest.fn();
 
   beforeEach(async () => {
     mockSendOutbound.mockReset();
+    mockValidateKey.mockReset();
+    mockGetCredentials.mockReset();
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [IntegrationsController],
@@ -20,6 +24,8 @@ describe('IntegrationsController — Outbound WhatsApp Webhook', () => {
           provide: IntegrationsService,
           useValue: {
             sendOutboundWebhookMessage: mockSendOutbound,
+            validateAndResolveOrgFromKey: mockValidateKey,
+            getOrgWebhookCredentials: mockGetCredentials,
             getStatus: jest.fn(),
             sendWhatsAppMessage: jest.fn()
           }
@@ -56,18 +62,20 @@ describe('IntegrationsController — Outbound WhatsApp Webhook', () => {
     ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('debe rechazar solicitudes con clave inválida corta', async () => {
+  it('debe rechazar solicitudes con clave no autorizada', async () => {
+    mockValidateKey.mockResolvedValue(null);
+
     await expect(
       controller.handleOutboundWebhook(
         {},
         { to: '+5493547464266', message: 'Hola' },
-        { 'x-api-key': 'bad' },
+        { 'x-api-key': 'clave-inventada-o-falsa' },
         {}
       )
     ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('debe procesar el envío de mensaje con API key válida por header x-api-key', async () => {
+  it('debe procesar el envío de mensaje con Master API key válida por header x-api-key', async () => {
     mockSendOutbound.mockResolvedValue({
       success: true,
       messageId: 'msg-wa-1234',
@@ -96,6 +104,53 @@ describe('IntegrationsController — Outbound WhatsApp Webhook', () => {
         appName: 'Mi CRM Externo'
       })
     );
+  });
+
+  it('debe procesar el envío con API Key exclusiva de organización (Multi-Tenant)', async () => {
+    mockValidateKey.mockResolvedValue('org-empresa-123');
+    mockSendOutbound.mockResolvedValue({
+      success: true,
+      messageId: 'msg-wa-org-123',
+      to: '+5493547464266',
+      organizationId: 'org-empresa-123',
+      loggedToChat: true
+    });
+
+    const result = await controller.handleOutboundWebhook(
+      {},
+      {
+        to: '+5493547464266',
+        message: 'Aviso exclusivo de mi empresa',
+        appName: 'Mi Negocio App'
+      },
+      { 'x-api-key': 'tf_sec_empresa123_abc123' },
+      {}
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockSendOutbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org-empresa-123',
+        text: 'Aviso exclusivo de mi empresa'
+      })
+    );
+  });
+
+  it('debe bloquear con ForbiddenException (403) si una clave intenta enviar a nombre de otra empresa', async () => {
+    mockValidateKey.mockResolvedValue('org-empresa-A');
+
+    await expect(
+      controller.handleOutboundWebhook(
+        {},
+        {
+          to: '+5493547464266',
+          message: 'Intento de vulnerar otra empresa',
+          organizationId: 'org-empresa-B-ajena'
+        },
+        { 'x-api-key': 'tf_sec_empresaA_secret' },
+        {}
+      )
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('debe soportar aliases flexibles (phone y text en vez de to y message)', async () => {
