@@ -1,7 +1,12 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import axios from 'axios';
 import * as QRCode from 'qrcode';
-import { IntegrationStatus } from '@turnoflow/shared';
+import { IntegrationStatus, MessageSender, ConversationStatus, AgentRoleType } from '@turnoflow/shared';
+import { Conversation } from '../../entities/conversation.entity';
+import { Message } from '../../entities/message.entity';
+import { Organization } from '../../entities/organization.entity';
 
 interface QRSessionState {
   organizationId: string;
@@ -18,6 +23,18 @@ export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
   private readonly qrSessions = new Map<string, QRSessionState>();
   private readonly recentBotMessages = new Map<string, number>();
+
+  constructor(
+    @Optional()
+    @InjectRepository(Conversation)
+    private readonly conversationRepo?: Repository<Conversation>,
+    @Optional()
+    @InjectRepository(Message)
+    private readonly messageRepo?: Repository<Message>,
+    @Optional()
+    @InjectRepository(Organization)
+    private readonly orgRepo?: Repository<Organization>
+  ) {}
 
   recordBotSentMessage(messageId?: string, text?: string) {
     const now = Date.now();
@@ -502,6 +519,132 @@ export class IntegrationsService {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
       return { success: false };
     }
+  }
+
+  /**
+   * Webhook para despacho de mensajes de texto hacia WhatsApp desde aplicaciones externas
+   * utilizando la instancia activa de Evolution API ya vinculada en TurnoFlow.
+   */
+  async sendOutboundWebhookMessage(params: {
+    to: string;
+    text: string;
+    organizationId?: string;
+    appName?: string;
+    logToChat?: boolean;
+    pauseAi?: boolean;
+    explicitInstanceName?: string;
+  }): Promise<{
+    success: boolean;
+    messageId?: string;
+    to: string;
+    organizationId: string;
+    loggedToChat: boolean;
+    error?: string;
+  }> {
+    const rawTo = String(params.to || '').trim();
+    const cleanPhone = rawTo.split('@')[0].split(':')[0].replace(/\D/g, '');
+
+    if (!cleanPhone || cleanPhone.length < 8 || cleanPhone.length > 15) {
+      return {
+        success: false,
+        to: rawTo,
+        organizationId: params.organizationId || 'default-org-id',
+        loggedToChat: false,
+        error: `Número de teléfono de destino inválido: "${rawTo}". Debe contener entre 8 y 15 dígitos numéricos con código de país.`
+      };
+    }
+
+    const trimmedText = String(params.text || '').trim();
+    if (!trimmedText) {
+      return {
+        success: false,
+        to: cleanPhone,
+        organizationId: params.organizationId || 'default-org-id',
+        loggedToChat: false,
+        error: 'El contenido del mensaje ("message" o "text") no puede estar vacío.'
+      };
+    }
+
+    // Resolver organización efectiva si no se pasó
+    let effectiveOrgId = params.organizationId;
+    if (!effectiveOrgId && this.orgRepo) {
+      try {
+        const firstOrg = await this.orgRepo.findOne({ where: {} });
+        effectiveOrgId = firstOrg?.id;
+      } catch {
+        // Ignorar
+      }
+    }
+    effectiveOrgId = effectiveOrgId || 'default-org-id';
+
+    // 1. Enviar mensaje de texto puro por Evolution API (WhatsApp QR sin costos extra)
+    const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
+    const sendResult = await this.sendQRWhatsAppMessage(
+      effectiveOrgId,
+      formattedPhone,
+      trimmedText,
+      params.explicitInstanceName
+    );
+
+    let loggedToChat = false;
+
+    // 2. Registrar en el chat de TurnoFlow si logToChat está activado
+    if (params.logToChat !== false && this.conversationRepo && this.messageRepo) {
+      try {
+        let conv = await this.conversationRepo.findOne({
+          where: [
+            { organizationId: effectiveOrgId, channelConversationId: formattedPhone },
+            { organizationId: effectiveOrgId, channelConversationId: cleanPhone },
+            { channelConversationId: formattedPhone },
+            { channelConversationId: cleanPhone }
+          ],
+          order: { updatedAt: 'DESC' }
+        });
+
+        if (!conv) {
+          conv = this.conversationRepo.create({
+            organizationId: effectiveOrgId,
+            channel: 'whatsapp',
+            channelConversationId: formattedPhone,
+            status: params.pauseAi ? ConversationStatus.HUMAN_TAKEOVER : ConversationStatus.AI_HANDLED,
+            assignedAgent: AgentRoleType.RECEPTIONIST,
+            messagesCount: 0,
+            metadata: {
+              contactName: params.appName ? `Contacto (${params.appName})` : undefined
+            }
+          });
+          conv = await this.conversationRepo.save(conv);
+        } else if (params.pauseAi) {
+          conv.status = ConversationStatus.HUMAN_TAKEOVER;
+        }
+
+        const msgContent = params.appName ? `📢 [${params.appName}]: ${trimmedText}` : trimmedText;
+        const msg = this.messageRepo.create({
+          conversationId: conv.id,
+          sender: MessageSender.HUMAN_AGENT,
+          content: msgContent,
+          externalMessageId: sendResult.messageId
+        });
+        await this.messageRepo.save(msg);
+
+        conv.lastMessagePreview = msgContent.substring(0, 100);
+        conv.messagesCount = (conv.messagesCount || 0) + 1;
+        conv.updatedAt = new Date();
+        await this.conversationRepo.save(conv);
+        loggedToChat = true;
+      } catch (err: any) {
+        this.logger.warn(`No se pudo registrar mensaje saliente de webhook en chat: ${err.message}`);
+      }
+    }
+
+    return {
+      success: sendResult.success,
+      messageId: sendResult.messageId,
+      to: formattedPhone,
+      organizationId: effectiveOrgId,
+      loggedToChat,
+      error: sendResult.success ? undefined : 'Error al despachar mensaje a través de Evolution API'
+    };
   }
 
   /**
