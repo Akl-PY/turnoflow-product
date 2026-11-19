@@ -523,6 +523,195 @@ export class IntegrationsService {
   }
 
   /**
+   * Detecta metadatos y MIME type adecuados para el envío de archivos adjuntos.
+   */
+  detectMediaMeta(
+    media: string,
+    fileName?: string,
+    userType?: string,
+    userMime?: string
+  ): { mediatype: 'image' | 'document' | 'video' | 'audio'; mimetype: string; fileName: string } {
+    const rawClean = (fileName || media.split('?')[0].split('#')[0] || '').toLowerCase();
+
+    if (userMime) {
+      const mime = userMime.toLowerCase();
+      if (mime.startsWith('image/')) {
+        return { mediatype: 'image', mimetype: mime, fileName: fileName || 'imagen.jpg' };
+      }
+      if (mime.startsWith('video/')) {
+        return { mediatype: 'video', mimetype: mime, fileName: fileName || 'video.mp4' };
+      }
+      if (mime.startsWith('audio/')) {
+        return { mediatype: 'audio', mimetype: mime, fileName: fileName || 'audio.mp3' };
+      }
+      return { mediatype: 'document', mimetype: mime, fileName: fileName || 'archivo.pdf' };
+    }
+
+    if (userType) {
+      const t = userType.toLowerCase();
+      if (t === 'image' || t === 'foto') {
+        return { mediatype: 'image', mimetype: 'image/jpeg', fileName: fileName || 'imagen.jpg' };
+      }
+      if (t === 'video') {
+        return { mediatype: 'video', mimetype: 'video/mp4', fileName: fileName || 'video.mp4' };
+      }
+      if (t === 'audio' || t === 'voice') {
+        return { mediatype: 'audio', mimetype: 'audio/mpeg', fileName: fileName || 'audio.mp3' };
+      }
+      if (t === 'pdf' || t === 'document' || t === 'doc') {
+        return { mediatype: 'document', mimetype: 'application/pdf', fileName: fileName || 'documento.pdf' };
+      }
+    }
+
+    // Inferencia por extensión de archivo
+    if (rawClean.endsWith('.pdf')) {
+      return { mediatype: 'document', mimetype: 'application/pdf', fileName: fileName || 'documento.pdf' };
+    }
+    if (rawClean.endsWith('.jpg') || rawClean.endsWith('.jpeg')) {
+      return { mediatype: 'image', mimetype: 'image/jpeg', fileName: fileName || 'imagen.jpg' };
+    }
+    if (rawClean.endsWith('.png')) {
+      return { mediatype: 'image', mimetype: 'image/png', fileName: fileName || 'imagen.png' };
+    }
+    if (rawClean.endsWith('.webp')) {
+      return { mediatype: 'image', mimetype: 'image/webp', fileName: fileName || 'imagen.webp' };
+    }
+    if (rawClean.endsWith('.mp4') || rawClean.endsWith('.mov')) {
+      return { mediatype: 'video', mimetype: 'video/mp4', fileName: fileName || 'video.mp4' };
+    }
+    if (
+      rawClean.endsWith('.mp3') ||
+      rawClean.endsWith('.ogg') ||
+      rawClean.endsWith('.wav') ||
+      rawClean.endsWith('.m4a')
+    ) {
+      return { mediatype: 'audio', mimetype: 'audio/mpeg', fileName: fileName || 'audio.mp3' };
+    }
+    if (rawClean.endsWith('.docx') || rawClean.endsWith('.doc')) {
+      return {
+        mediatype: 'document',
+        mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        fileName: fileName || 'documento.docx'
+      };
+    }
+    if (rawClean.endsWith('.xlsx') || rawClean.endsWith('.xls')) {
+      return {
+        mediatype: 'document',
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        fileName: fileName || 'planilla.xlsx'
+      };
+    }
+    if (rawClean.endsWith('.zip')) {
+      return { mediatype: 'document', mimetype: 'application/zip', fileName: fileName || 'archivo.zip' };
+    }
+
+    // Si viene como Data URI base64
+    if (media.startsWith('data:')) {
+      const mimeMatch = media.match(/^data:([^;]+);base64,/);
+      if (mimeMatch && mimeMatch[1]) {
+        const mime = mimeMatch[1].toLowerCase();
+        if (mime.startsWith('image/')) {
+          return { mediatype: 'image', mimetype: mime, fileName: fileName || 'imagen.jpg' };
+        }
+        if (mime.startsWith('video/')) {
+          return { mediatype: 'video', mimetype: mime, fileName: fileName || 'video.mp4' };
+        }
+        if (mime.startsWith('audio/')) {
+          return { mediatype: 'audio', mimetype: mime, fileName: fileName || 'audio.mp3' };
+        }
+        return { mediatype: 'document', mimetype: mime, fileName: fileName || 'archivo.bin' };
+      }
+    }
+
+    // Default genérico: documento PDF
+    return { mediatype: 'document', mimetype: 'application/pdf', fileName: fileName || 'documento.pdf' };
+  }
+
+  /**
+   * Envía un archivo adjunto (PDF, imagen, video, audio o documento) vía Evolution API.
+   */
+  async sendQRWhatsAppMedia(
+    organizationId: string,
+    to: string,
+    media: string,
+    options?: {
+      caption?: string;
+      fileName?: string;
+      mediaType?: string;
+      mimetype?: string;
+      explicitInstanceName?: string;
+    }
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const rawUrl = process.env.EVOLUTION_API_URL || '';
+    const rawKey = process.env.EVOLUTION_API_KEY || '';
+    const evolutionUrl = rawUrl.trim().replace(/\/$/, '');
+    const evolutionKey = rawKey.trim().replace(/^['"]|['"]$/g, '');
+
+    const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
+    if (
+      to.includes('@g.us') ||
+      to.includes('@broadcast') ||
+      to.includes('@newsletter') ||
+      cleanPhone.startsWith('120363') ||
+      cleanPhone.length > 15
+    ) {
+      this.logger.warn(`Intento de envío de archivo QR a grupo bloqueado por blindaje: ${to}`);
+      return { success: false, error: 'No se permite el envío de archivos a grupos o canales de difusión.' };
+    }
+
+    if (!evolutionUrl || !evolutionKey) {
+      const mockId = `mock-wa-media-${Date.now()}`;
+      this.recordBotSentMessage(mockId, options?.caption || '[Archivo adjunto]');
+      this.logger.log(`[QR MOCK MEDIA] WhatsApp QR archivo a ${to}: "${options?.fileName || 'archivo'}"`);
+      return { success: true, messageId: mockId };
+    }
+
+    try {
+      const preferred = `tf_${organizationId.replace(/-/g, '').substring(0, 12)}`;
+      const instanceName =
+        options?.explicitInstanceName || (await this.resolveActiveEvolutionInstance(organizationId)) || preferred;
+
+      const meta = this.detectMediaMeta(media, options?.fileName, options?.mediaType, options?.mimetype);
+      const cleanMedia = media.startsWith('data:')
+        ? media.replace(/^data:[^;]+;base64,/, '').trim()
+        : media.trim();
+
+      const response = await axios.post(
+        `${evolutionUrl}/message/sendMedia/${instanceName}`,
+        {
+          number: cleanPhone,
+          mediatype: meta.mediatype,
+          mimetype: meta.mimetype,
+          caption: options?.caption || undefined,
+          media: cleanMedia,
+          fileName: meta.fileName
+        },
+        {
+          headers: {
+            apikey: evolutionKey,
+            Authorization: `Bearer ${evolutionKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 25000
+        }
+      );
+
+      const msgId = response.data?.key?.id;
+      if (msgId) {
+        this.recordBotSentMessage(msgId, options?.caption || meta.fileName);
+      }
+
+      this.logger.log(
+        `Archivo QR (${meta.mediatype} - ${meta.fileName}) enviado a ${cleanPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`
+      );
+      return { success: true, messageId: msgId };
+    } catch (err: any) {
+      this.logger.error(`Error enviando archivo vía Evolution API: ${err.response?.data?.message || err.message}`);
+      return { success: false, error: err.response?.data?.message || err.message };
+    }
+  }
+
+  /**
    * Genera una API Key única, determinística e inviolable para una organización.
    * Formato: tf_sec_<orgPrefix>_<signature>
    */
@@ -611,12 +800,16 @@ export class IntegrationsService {
   }
 
   /**
-   * Webhook para despacho de mensajes de texto hacia WhatsApp desde aplicaciones externas
-   * utilizando la instancia activa de Evolution API ya vinculada en TurnoFlow.
+   * Webhook para despacho de mensajes de texto y archivos adjuntos (PDFs, imágenes, videos, audios)
+   * hacia WhatsApp desde aplicaciones externas utilizando la instancia activa de Evolution API.
    */
   async sendOutboundWebhookMessage(params: {
     to: string;
-    text: string;
+    text?: string;
+    media?: string;
+    fileName?: string;
+    mediaType?: string;
+    mimetype?: string;
     organizationId?: string;
     appName?: string;
     logToChat?: boolean;
@@ -628,6 +821,8 @@ export class IntegrationsService {
     to: string;
     organizationId: string;
     loggedToChat: boolean;
+    hasMedia?: boolean;
+    fileName?: string;
     error?: string;
   }> {
     const rawTo = String(params.to || '').trim();
@@ -644,13 +839,16 @@ export class IntegrationsService {
     }
 
     const trimmedText = String(params.text || '').trim();
-    if (!trimmedText) {
+    const rawMedia = String(params.media || '').trim();
+    const hasMedia = Boolean(rawMedia);
+
+    if (!trimmedText && !hasMedia) {
       return {
         success: false,
         to: cleanPhone,
         organizationId: params.organizationId || 'default-org-id',
         loggedToChat: false,
-        error: 'El contenido del mensaje ("message" o "text") no puede estar vacío.'
+        error: 'Debes enviar al menos un contenido: texto ("message" o "text") o archivo adjunto ("media", "file" o "mediaUrl").'
       };
     }
 
@@ -666,14 +864,30 @@ export class IntegrationsService {
     }
     effectiveOrgId = effectiveOrgId || 'default-org-id';
 
-    // 1. Enviar mensaje de texto puro por Evolution API (WhatsApp QR sin costos extra)
     const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
-    const sendResult = await this.sendQRWhatsAppMessage(
-      effectiveOrgId,
-      formattedPhone,
-      trimmedText,
-      params.explicitInstanceName
-    );
+    let sendResult: { success: boolean; messageId?: string; error?: string };
+
+    if (hasMedia) {
+      sendResult = await this.sendQRWhatsAppMedia(
+        effectiveOrgId,
+        formattedPhone,
+        rawMedia,
+        {
+          caption: trimmedText || undefined,
+          fileName: params.fileName,
+          mediaType: params.mediaType,
+          mimetype: params.mimetype,
+          explicitInstanceName: params.explicitInstanceName
+        }
+      );
+    } else {
+      sendResult = await this.sendQRWhatsAppMessage(
+        effectiveOrgId,
+        formattedPhone,
+        trimmedText,
+        params.explicitInstanceName
+      );
+    }
 
     let loggedToChat = false;
 
@@ -707,7 +921,10 @@ export class IntegrationsService {
           conv.status = ConversationStatus.HUMAN_TAKEOVER;
         }
 
-        const msgContent = params.appName ? `📢 [${params.appName}]: ${trimmedText}` : trimmedText;
+        const mediaTag = hasMedia ? `📎 [Archivo: ${params.fileName || 'Adjunto'}]` : '';
+        const bodyContent = [mediaTag, trimmedText].filter(Boolean).join(' ');
+        const msgContent = params.appName ? `📢 [${params.appName}]: ${bodyContent}` : bodyContent;
+
         const msg = this.messageRepo.create({
           conversationId: conv.id,
           sender: MessageSender.HUMAN_AGENT,
@@ -732,7 +949,9 @@ export class IntegrationsService {
       to: formattedPhone,
       organizationId: effectiveOrgId,
       loggedToChat,
-      error: sendResult.success ? undefined : 'Error al despachar mensaje a través de Evolution API'
+      hasMedia,
+      fileName: params.fileName,
+      error: sendResult.success ? undefined : sendResult.error || 'Error al despachar mensaje a través de Evolution API'
     };
   }
 

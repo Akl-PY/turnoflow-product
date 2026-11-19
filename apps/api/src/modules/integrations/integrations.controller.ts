@@ -125,17 +125,27 @@ export class IntegrationsController {
       },
       payloadFields: {
         to: 'Obligatorio. Número de WhatsApp con código de país (ej: "+5493547464266" o "5493547464266"). Aliases aceptados: "phone", "number", "recipient".',
-        message: 'Obligatorio. Texto del mensaje a enviar. Aliases aceptados: "text", "content", "body".',
+        message: 'Opcional si envías archivo. Texto del mensaje o epígrafe/caption. Aliases aceptados: "text", "content", "body", "caption".',
+        media: 'Opcional. URL pública del archivo (PDF, JPG, PNG, MP4, MP3, etc.) o base64 (data:application/pdf;base64,...). Aliases: "file", "mediaUrl", "attachment", "document".',
+        fileName: 'Opcional. Nombre del archivo (ej: "comprobante.pdf", "catalogo.pdf"). Si no se envía se infiere de la URL o tipo de archivo.',
+        mediaType: 'Opcional. Tipo de archivo: "document", "image", "video", "audio".',
         appName: 'Opcional. Nombre de tu otra aplicación (ej: "Mi E-commerce", "Sistema Facturación") para identificar el origen en los chats de TurnoFlow.',
         logToChat: 'Opcional booleano (default true). Si es true, el mensaje queda registrado en el historial de chats de TurnoFlow.',
         pauseAi: 'Opcional booleano (default false). Si es true, pausa la IA para ese cliente durante 24hs para atención humana.',
         organizationId: 'Opcional. ID de la organización en TurnoFlow (se valida contra la API Key de tu empresa).'
       },
-      examplePayload: {
+      examplePayloadText: {
         to: '+5493547464266',
         message: '¡Hola! Te avisamos que tu pedido #4589 ya fue despachado. 📦🚀',
         appName: 'Mi Tienda Online',
         logToChat: true
+      },
+      examplePayloadAttachment: {
+        to: '+5493547464266',
+        message: 'Adjuntamos el comprobante oficial de tu reserva.',
+        media: 'https://ejemplo.com/comprobante-1024.pdf',
+        fileName: 'comprobante-1024.pdf',
+        appName: 'Mi Sistema'
       },
       exampleCurl: `curl -X POST https://turnoflowapi-production.up.railway.app/api/integrations/outbound-webhook \\
   -H "Content-Type: application/json" \\
@@ -147,7 +157,7 @@ export class IntegrationsController {
   @Post('outbound-webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Webhook para que aplicaciones externas envíen mensajes de WhatsApp texto vía Evolution API'
+    summary: 'Webhook para que aplicaciones externas envíen mensajes de WhatsApp y archivos adjuntos vía Evolution API'
   })
   async handleOutboundWebhook(
     @Request() req: any,
@@ -171,11 +181,39 @@ export class IntegrationsController {
       body.text ||
       body.content ||
       body.body ||
-      body.msg;
+      body.caption ||
+      body.msg ||
+      '';
 
-    if (!to || !message) {
+    const media =
+      body.media ||
+      body.file ||
+      body.mediaUrl ||
+      body.fileUrl ||
+      body.attachment ||
+      body.attachmentUrl ||
+      body.document ||
+      body.mediaBase64 ||
+      body.pdf;
+
+    const fileName =
+      body.fileName ||
+      body.filename ||
+      body.name ||
+      body.documentName;
+
+    const mediaType =
+      body.mediaType ||
+      body.mediatype ||
+      body.type;
+
+    const mimetype =
+      body.mimetype ||
+      body.mimeType;
+
+    if (!to || (!message && !media)) {
       throw new BadRequestException(
-        'Faltan campos obligatorios. Debes enviar el destinatario ("to" o "phone") y el mensaje de texto ("message" o "text").'
+        'Faltan campos obligatorios. Debes enviar el destinatario ("to" o "phone") y al menos un contenido: texto ("message") o archivo ("media", "file", "mediaUrl").'
       );
     }
 
@@ -188,6 +226,10 @@ export class IntegrationsController {
     const result = await this.integrationsService.sendOutboundWebhookMessage({
       to,
       text: message,
+      media,
+      fileName,
+      mediaType,
+      mimetype,
       organizationId,
       appName,
       logToChat,
@@ -196,7 +238,7 @@ export class IntegrationsController {
     });
 
     if (!result.success) {
-      throw new BadRequestException(result.error || 'No se pudo enviar el mensaje por Evolution API');
+      throw new BadRequestException(result.error || 'No se pudo enviar el mensaje o archivo por Evolution API');
     }
 
     return result;

@@ -182,11 +182,84 @@ describe('IntegrationsController — Outbound WhatsApp Webhook', () => {
     );
   });
 
-  it('debe lanzar BadRequestException si falta el destinatario o el mensaje', async () => {
+  it('debe soportar envío de archivos adjuntos (PDFs, imágenes, etc.) vía media y fileName', async () => {
+    mockSendOutbound.mockResolvedValue({
+      success: true,
+      messageId: 'msg-wa-media-999',
+      to: '+5493547464266',
+      organizationId: 'org-test',
+      loggedToChat: true,
+      hasMedia: true,
+      fileName: 'comprobante-1042.pdf'
+    });
+
+    const result = await controller.handleOutboundWebhook(
+      {},
+      {
+        to: '+5493547464266',
+        media: 'https://ejemplo.com/comprobante.pdf',
+        fileName: 'comprobante-1042.pdf',
+        message: 'Aquí tienes tu comprobante',
+        appName: 'Mi Sistema de Facturación'
+      },
+      { 'x-api-key': 'turnoflow-webhook-secret-2026' },
+      {}
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockSendOutbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: '+5493547464266',
+        media: 'https://ejemplo.com/comprobante.pdf',
+        fileName: 'comprobante-1042.pdf',
+        text: 'Aquí tienes tu comprobante'
+      })
+    );
+  });
+
+  it('debe permitir enviar solo un archivo adjunto sin texto explicito', async () => {
+    mockSendOutbound.mockResolvedValue({
+      success: true,
+      messageId: 'msg-wa-media-solo',
+      to: '+5493547464266',
+      organizationId: 'org-test',
+      loggedToChat: true,
+      hasMedia: true
+    });
+
+    const result = await controller.handleOutboundWebhook(
+      {},
+      {
+        to: '+5493547464266',
+        file: 'https://ejemplo.com/foto.jpg'
+      },
+      { 'x-api-key': 'turnoflow-webhook-secret-2026' },
+      {}
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockSendOutbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: '+5493547464266',
+        media: 'https://ejemplo.com/foto.jpg'
+      })
+    );
+  });
+
+  it('debe lanzar BadRequestException si falta el destinatario o ambos (texto y archivo)', async () => {
     await expect(
       controller.handleOutboundWebhook(
         {},
         { message: 'Sin número' },
+        { 'x-api-key': 'turnoflow-webhook-secret-2026' },
+        {}
+      )
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      controller.handleOutboundWebhook(
+        {},
+        { to: '+5493547464266' },
         { 'x-api-key': 'turnoflow-webhook-secret-2026' },
         {}
       )

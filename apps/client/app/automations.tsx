@@ -100,6 +100,7 @@ export default function AutomationsScreen() {
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [testPhone, setTestPhone] = useState('');
   const [testMessage, setTestMessage] = useState('Hola! Mensaje de prueba enviado desde mi otra aplicación.');
+  const [testMedia, setTestMedia] = useState('');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -142,8 +143,8 @@ export default function AutomationsScreen() {
       setTestResult({ ok: false, msg: 'Ingresa un número de WhatsApp de destino (con código de país, ej: 5493512345678)' });
       return;
     }
-    if (!testMessage.trim()) {
-      setTestResult({ ok: false, msg: 'Ingresa el texto del mensaje a enviar' });
+    if (!testMessage.trim() && !testMedia.trim()) {
+      setTestResult({ ok: false, msg: 'Ingresa el texto del mensaje o una URL de archivo adjunto' });
       return;
     }
 
@@ -153,7 +154,8 @@ export default function AutomationsScreen() {
     try {
       const res = await apiClient.post('/integrations/outbound-webhook', {
         to: testPhone.trim(),
-        message: testMessage.trim(),
+        message: testMessage.trim() || undefined,
+        media: testMedia.trim() || undefined,
         appName: 'Test desde Panel'
       }, {
         headers: {
@@ -435,7 +437,7 @@ export default function AutomationsScreen() {
             </Text>
 
             <View style={styles.testerInputsRow}>
-              <View style={{ flex: 1, minWidth: 200 }}>
+              <View style={{ flex: 1, minWidth: 180 }}>
                 <Text style={styles.inputLabel}>Número Destino (ej: 5493512345678)</Text>
                 <TextInput
                   style={styles.textInput}
@@ -447,14 +449,25 @@ export default function AutomationsScreen() {
                 />
               </View>
 
-              <View style={{ flex: 2, minWidth: 260 }}>
-                <Text style={styles.inputLabel}>Mensaje de Texto</Text>
+              <View style={{ flex: 2, minWidth: 220 }}>
+                <Text style={styles.inputLabel}>Mensaje / Texto</Text>
                 <TextInput
                   style={styles.textInput}
                   placeholder="Escribe el mensaje..."
                   placeholderTextColor="#94A3B8"
                   value={testMessage}
                   onChangeText={setTestMessage}
+                />
+              </View>
+
+              <View style={{ flex: 2, minWidth: 220 }}>
+                <Text style={styles.inputLabel}>URL de Archivo Adjunto (Opcional: PDF, Foto)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="https://ejemplo.com/archivo.pdf"
+                  placeholderTextColor="#94A3B8"
+                  value={testMedia}
+                  onChangeText={setTestMedia}
                 />
               </View>
 
