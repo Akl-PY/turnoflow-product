@@ -156,7 +156,8 @@ export default function AutomationsScreen() {
         to: testPhone.trim(),
         message: testMessage.trim() || undefined,
         media: testMedia.trim() || undefined,
-        appName: 'Test desde Panel'
+        appName: 'Test desde Panel',
+        apiKey: effectiveApiKey
       }, {
         headers: {
           'x-api-key': effectiveApiKey

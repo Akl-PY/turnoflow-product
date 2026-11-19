@@ -47,7 +47,13 @@ async function bootstrap() {
       'X-Requested-With',
       'Origin',
       'Access-Control-Request-Method',
-      'Access-Control-Request-Headers'
+      'Access-Control-Request-Headers',
+      'x-api-key',
+      'x-webhook-secret',
+      'x-organization-id',
+      'x-app-name',
+      'apikey',
+      'ApiKey'
     ],
     credentials: true,
     preflightContinue: false,
