@@ -509,7 +509,11 @@ export class IntegrationsService {
     organizationId: string,
     to: string,
     text: string,
-    explicitInstanceName?: string
+    explicitInstanceName?: string,
+    options?: {
+      linkPreview?: boolean;
+      delay?: number;
+    }
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const rawUrl = process.env.EVOLUTION_API_URL || '';
     const rawKey = process.env.EVOLUTION_API_KEY || '';
@@ -548,19 +552,33 @@ export class IntegrationsService {
         cleanPhone
       );
 
+      // Si el texto contiene enlaces y se solicita SEO / linkPreview o delay
+      const hasUrl = /https?:\/\/[^\s]+/i.test(text);
+      const linkPreview = options?.linkPreview !== undefined ? Boolean(options.linkPreview) : hasUrl;
+      const delay = options?.delay !== undefined ? Number(options.delay) : (linkPreview ? 1000 : 0);
+
+      const payload: Record<string, any> = {
+        number: targetPhone,
+        text: text
+      };
+
+      if (linkPreview) {
+        payload.linkPreview = true;
+      }
+      if (delay > 0) {
+        payload.delay = delay;
+      }
+
       const response = await axios.post(
         `${evolutionUrl}/message/sendText/${instanceName}`,
-        {
-          number: targetPhone,
-          text: text
-        },
+        payload,
         {
           headers: {
             apikey: evolutionKey,
             Authorization: `Bearer ${evolutionKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 15000
         }
       );
 
@@ -569,7 +587,7 @@ export class IntegrationsService {
         this.recordBotSentMessage(msgId, text);
       }
 
-      this.logger.log(`Mensaje QR enviado a ${targetPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`);
+      this.logger.log(`Mensaje QR enviado a ${targetPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}${linkPreview ? ' [OG LinkPreview On]' : ''}`);
       return { success: true, messageId: msgId };
     } catch (err: any) {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
@@ -877,6 +895,8 @@ export class IntegrationsService {
     logToChat?: boolean;
     pauseAi?: boolean;
     explicitInstanceName?: string;
+    linkPreview?: boolean;
+    delay?: number;
   }): Promise<{
     success: boolean;
     messageId?: string;
@@ -947,7 +967,11 @@ export class IntegrationsService {
         effectiveOrgId,
         formattedPhone,
         trimmedText,
-        params.explicitInstanceName
+        params.explicitInstanceName,
+        {
+          linkPreview: params.linkPreview,
+          delay: params.delay
+        }
       );
     }
 

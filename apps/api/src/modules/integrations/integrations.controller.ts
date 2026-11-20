@@ -132,6 +132,8 @@ export class IntegrationsController {
         appName: 'Opcional. Nombre de tu otra aplicación (ej: "Mi E-commerce", "Sistema Facturación") para identificar el origen en los chats de TurnoFlow.',
         logToChat: 'Opcional booleano (default true). Si es true, el mensaje queda registrado en el historial de chats de TurnoFlow.',
         pauseAi: 'Opcional booleano (default false). Si es true, pausa la IA para ese cliente durante 24hs para atención humana.',
+        linkPreview: 'Opcional booleano (default true si el mensaje contiene URLs). Permite generar la tarjeta de vista previa Open Graph (SEO / WhatsApp OG).',
+        delay: 'Opcional numérico en milisegundos (default 1000 si hay linkPreview o URLs, 0 si no). Simula escritura o espera previa al envío para que WhatsApp scrapeé el enlace.',
         organizationId: 'Opcional. ID de la organización en TurnoFlow (se valida contra la API Key de tu empresa).'
       },
       examplePayloadText: {
@@ -222,6 +224,18 @@ export class IntegrationsController {
       body.appName || body.source || body.origin || headers['x-app-name'] || 'App Externa';
     const logToChat = body.logToChat !== false;
     const pauseAi = Boolean(body.pauseAi);
+    const linkPreview =
+      body.linkPreview !== undefined
+        ? Boolean(body.linkPreview)
+        : body.seo !== undefined
+          ? Boolean(body.seo)
+          : undefined;
+    const delay =
+      body.delay !== undefined
+        ? Number(body.delay)
+        : body.waitMs !== undefined
+          ? Number(body.waitMs)
+          : undefined;
 
     const result = await this.integrationsService.sendOutboundWebhookMessage({
       to,
@@ -234,7 +248,9 @@ export class IntegrationsController {
       appName,
       logToChat,
       pauseAi,
-      explicitInstanceName: body.instanceName
+      explicitInstanceName: body.instanceName,
+      linkPreview,
+      delay
     });
 
     if (!result.success) {
