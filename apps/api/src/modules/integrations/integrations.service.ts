@@ -458,6 +458,53 @@ export class IntegrationsService {
     }
   }
 
+  /**
+   * Resuelve el formato exacto del número en WhatsApp (JID) vía Evolution API.
+   * Crucial para Argentina (54 vs 549), eliminando discordancias de prefijos.
+   */
+  async resolveWhatsAppRecipient(
+    evolutionUrl: string,
+    evolutionKey: string,
+    instanceName: string,
+    phone: string
+  ): Promise<string> {
+    const clean = phone.replace(/\D/g, '');
+    if (!evolutionUrl || !evolutionKey || !clean) return clean;
+
+    const candidates = [clean];
+    if (clean.startsWith('549') && clean.length >= 12) {
+      candidates.push(`54${clean.substring(3)}`);
+    } else if (clean.startsWith('54') && !clean.startsWith('549') && clean.length >= 11) {
+      candidates.push(`549${clean.substring(2)}`);
+    }
+
+    try {
+      const res = await axios.post(
+        `${evolutionUrl}/chat/whatsappNumbers/${instanceName}`,
+        { numbers: candidates },
+        {
+          headers: { apikey: evolutionKey, Authorization: `Bearer ${evolutionKey}` },
+          timeout: 4000
+        }
+      );
+
+      const list = Array.isArray(res.data) ? res.data : [res.data];
+      const valid = list.find((item: any) => item?.exists === true);
+      if (valid) {
+        const resolved = valid.jid ? valid.jid.split('@')[0] : valid.number;
+        if (resolved) {
+          const cleanResolved = resolved.replace(/\D/g, '');
+          this.logger.log(`[JID RESOLVER] ${clean} resuelto en WhatsApp como: ${cleanResolved}`);
+          return cleanResolved;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`No se pudo verificar JID previo en WhatsApp para ${clean}: ${err.message}`);
+    }
+
+    return clean;
+  }
+
   async sendQRWhatsAppMessage(
     organizationId: string,
     to: string,
@@ -491,12 +538,20 @@ export class IntegrationsService {
       this.recordBotSentMessage(undefined, text);
       const instanceName =
         explicitInstanceName || (await this.resolveActiveEvolutionInstance(organizationId));
-      const cleanPhone = to.split('@')[0].split(':')[0].replace(/\D/g, '');
+      let targetPhone = cleanPhone;
+
+      // Resolver formato exacto del número de WhatsApp (54 vs 549)
+      targetPhone = await this.resolveWhatsAppRecipient(
+        evolutionUrl,
+        evolutionKey,
+        instanceName,
+        cleanPhone
+      );
 
       const response = await axios.post(
         `${evolutionUrl}/message/sendText/${instanceName}`,
         {
-          number: cleanPhone,
+          number: targetPhone,
           text: text
         },
         {
@@ -514,7 +569,7 @@ export class IntegrationsService {
         this.recordBotSentMessage(msgId, text);
       }
 
-      this.logger.log(`Mensaje QR enviado a ${cleanPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`);
+      this.logger.log(`Mensaje QR enviado a ${targetPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`);
       return { success: true, messageId: msgId };
     } catch (err: any) {
       this.logger.error(`Error enviando mensaje vía Evolution API: ${err.response?.data?.message || err.message}`);
@@ -676,10 +731,17 @@ export class IntegrationsService {
         ? media.replace(/^data:[^;]+;base64,/, '').trim()
         : media.trim();
 
+      const targetPhone = await this.resolveWhatsAppRecipient(
+        evolutionUrl,
+        evolutionKey,
+        instanceName,
+        cleanPhone
+      );
+
       const response = await axios.post(
         `${evolutionUrl}/message/sendMedia/${instanceName}`,
         {
-          number: cleanPhone,
+          number: targetPhone,
           mediatype: meta.mediatype,
           mimetype: meta.mimetype,
           caption: options?.caption || undefined,
@@ -702,7 +764,7 @@ export class IntegrationsService {
       }
 
       this.logger.log(
-        `Archivo QR (${meta.mediatype} - ${meta.fileName}) enviado a ${cleanPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`
+        `Archivo QR (${meta.mediatype} - ${meta.fileName}) enviado a ${targetPhone} vía Evolution (${instanceName}): ${msgId || 'ok'}`
       );
       return { success: true, messageId: msgId };
     } catch (err: any) {
