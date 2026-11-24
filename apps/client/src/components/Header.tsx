@@ -13,7 +13,7 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
 
   return (
     <View style={styles.container}>
-      <View>
+      <View style={{ flexShrink: 1, minWidth: 180 }}>
         <Text style={styles.title}>{title}</Text>
         {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
@@ -41,14 +41,17 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
 
 const styles = StyleSheet.create({
   container: {
-    height: 64,
+    minHeight: 64,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
     backgroundColor: '#ffffff',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 28
+    flexWrap: 'wrap',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 8
   },
   title: {
     color: '#0f172a',
@@ -63,7 +66,8 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    flexWrap: 'wrap',
+    gap: 8
   },
   statusPill: {
     flexDirection: 'row',

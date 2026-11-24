@@ -1196,7 +1196,7 @@ export default function ChatsScreen() {
               </View>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 1, maxWidth: '100%' }}>
               <TouchableOpacity
                 style={[
                   styles.refreshButton,

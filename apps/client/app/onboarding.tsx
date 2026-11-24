@@ -600,7 +600,7 @@ export default function OnboardingScreen() {
                 <View style={styles.connectedBadge}>
                   <CheckCircle size={24} color="#16A34A" />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 200 }}>
                   <Text style={styles.connectedTitle}>WhatsApp Conectado con Éxito</Text>
                   <Text style={styles.connectedText}>
                     Línea vinculada:{' '}
@@ -1560,20 +1560,21 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
-    paddingHorizontal: 24,
-    gap: 12
+    paddingHorizontal: 12,
+    gap: 6
   },
   tabButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
-    gap: 8
+    gap: 6
   },
   tabButtonActive: {
     borderBottomColor: '#1A73E8'
@@ -1636,12 +1637,13 @@ const styles = StyleSheet.create({
   connectedBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#BBF7D0',
     borderRadius: 12,
-    padding: 20,
-    gap: 16
+    padding: 16,
+    gap: 12
   },
   connectedBadge: {
     width: 44,

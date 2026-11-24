@@ -522,6 +522,7 @@ const styles = StyleSheet.create({
   hubActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10
   },
   btnGuide: {
@@ -595,6 +596,9 @@ const styles = StyleSheet.create({
   statusChip: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    flexShrink: 1,
+    maxWidth: '100%',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 20,
