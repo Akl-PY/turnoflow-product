@@ -523,6 +523,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
+    flexShrink: 1,
+    maxWidth: '100%',
     gap: 10
   },
   btnGuide: {
