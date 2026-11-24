@@ -43,17 +43,11 @@ const queryClient = new QueryClient({
 });
 
 const ALL_NAV_ITEMS = [
-  { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
-  { path: '/chats', label: 'Chats & Control IA', icon: MessageSquare },
-  { path: '/guide', label: 'Cómo Funciona', icon: HelpCircle },
-  { path: '/leads', label: 'Clientes & Leads', icon: Users },
-  { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
-  { path: '/prospecting', label: 'Embudos & Prospección', icon: Workflow },
-  { path: '/knowledge-base', label: 'Servicios & Tarifas', icon: BookOpen },
-  { path: '/agents', label: 'Agentes de IA', icon: Bot },
-  { path: '/automations', label: 'Automatizaciones', icon: Workflow },
-  { path: '/playground', label: 'Simulador en Vivo', icon: Sparkles },
-  { path: '/onboarding', label: 'WhatsApp & Scalinky', icon: Smartphone }
+  { path: '/', label: 'Inicio', icon: LayoutDashboard },
+  { path: '/chats', label: 'Chats & Control', icon: MessageSquare },
+  { path: '/appointments', label: 'Agenda & Clientes', icon: Calendar },
+  { path: '/knowledge-base', label: 'Negocio & IA', icon: BookOpen },
+  { path: '/onboarding', label: 'Configuración', icon: Smartphone }
 ];
 
 function AuthenticatedShell() {

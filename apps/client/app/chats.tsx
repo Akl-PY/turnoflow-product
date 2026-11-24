@@ -78,6 +78,51 @@ export default function ChatsScreen() {
   const [broadcastSegment, setBroadcastSegment] = useState<'EXISTING_CUSTOMER' | 'RETURNING_CONTACT' | 'NEW_CONTACT' | 'ALL'>('EXISTING_CUSTOMER');
   const [broadcastText, setBroadcastText] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [autoReply247, setAutoReply247] = useState(true);
+  const [externalWebhookEnabled, setExternalWebhookEnabled] = useState(true);
+  const [togglingControl, setTogglingControl] = useState(false);
+
+  useEffect(() => {
+    apiClient
+      .get('/conversations/control-flags')
+      .then((res) => {
+        if (res.data) {
+          setAutoReply247(res.data.autoReply247 !== false);
+          setExternalWebhookEnabled(res.data.externalWebhookEnabled !== false);
+        }
+      })
+      .catch(() => null);
+  }, []);
+
+  const handleToggleControlFlag = async (key: 'autoReply247' | 'externalWebhookEnabled') => {
+    if (togglingControl) return;
+    setTogglingControl(true);
+    const nextVal = key === 'autoReply247' ? !autoReply247 : !externalWebhookEnabled;
+    if (key === 'autoReply247') setAutoReply247(nextVal);
+    else setExternalWebhookEnabled(nextVal);
+    try {
+      const res = await apiClient.patch('/conversations/control-flags', { [key]: nextVal });
+      if (res.data) {
+        setAutoReply247(res.data.autoReply247 !== false);
+        setExternalWebhookEnabled(res.data.externalWebhookEnabled !== false);
+      }
+      setActionNotice(
+        key === 'autoReply247'
+          ? nextVal
+            ? '🤖 IA Activa: el bot vuelve a responder mensajes de WhatsApp.'
+            : '⏸️ IA Pausada: el bot dejó de responder en WhatsApp (el Webhook de terceros sigue funcionando).'
+          : nextVal
+          ? '🔌 Webhook Externo Activo: apps de terceros pueden enviar mensajes.'
+          : '🔌 Webhook Externo Pausado: solo se frenó el envío de apps de terceros (la IA sigue normal).'
+      );
+      setTimeout(() => setActionNotice(null), 5000);
+    } catch {
+      if (key === 'autoReply247') setAutoReply247(!nextVal);
+      else setExternalWebhookEnabled(!nextVal);
+    } finally {
+      setTogglingControl(false);
+    }
+  };
 
   // Consulta de conversaciones
   const {
@@ -1152,6 +1197,52 @@ export default function ChatsScreen() {
             </View>
 
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                style={[
+                  styles.refreshButton,
+                  {
+                    backgroundColor: autoReply247 ? '#DCFCE7' : '#FEF2F2',
+                    borderColor: autoReply247 ? '#86EFAC' : '#FECACA'
+                  }
+                ]}
+                onPress={() => handleToggleControlFlag('autoReply247')}
+                disabled={togglingControl}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '700',
+                    color: autoReply247 ? '#15803D' : '#DC2626'
+                  }}
+                >
+                  {autoReply247 ? '🤖 IA: Activa (Pausar)' : '⏸️ IA: Pausada (Reactivar)'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.refreshButton,
+                  {
+                    backgroundColor: externalWebhookEnabled ? '#F0FDF4' : '#FEF3C7',
+                    borderColor: externalWebhookEnabled ? '#BBF7D0' : '#FDE68A'
+                  }
+                ]}
+                onPress={() => handleToggleControlFlag('externalWebhookEnabled')}
+                disabled={togglingControl}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '700',
+                    color: externalWebhookEnabled ? '#166534' : '#B45309'
+                  }}
+                >
+                  {externalWebhookEnabled ? '🔌 Webhook Terceros: ON' : '🔌 Webhook Terceros: OFF'}
+                </Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[
                   styles.refreshButton,

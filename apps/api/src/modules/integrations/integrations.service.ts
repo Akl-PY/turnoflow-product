@@ -56,6 +56,26 @@ export class IntegrationsService {
     }
   }
 
+  async isExternalWebhookEnabled(organizationId: string): Promise<boolean> {
+    try {
+      const repo = this.conversationRepo?.manager?.getRepository('BusinessProfile');
+      if (!repo) return true;
+      const profile: any =
+        (organizationId && organizationId !== 'default-org-id'
+          ? await repo.findOne({ where: { organizationId } })
+          : null) || (await repo.findOne({ where: {} }));
+      if (profile?.specialInstructions) {
+        const parsed = JSON.parse(profile.specialInstructions);
+        if (parsed?.automations?.externalWebhookEnabled === false) {
+          return false;
+        }
+      }
+    } catch {
+      // Fallback seguro si no hay BD o en tests unitarios
+    }
+    return true;
+  }
+
   isBotSentMessage(messageId?: string, text?: string): boolean {
     const now = Date.now();
     if (messageId && this.recentBotMessages.has(`id:${messageId}`)) {

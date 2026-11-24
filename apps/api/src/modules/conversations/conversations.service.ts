@@ -488,6 +488,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
 
   async getAutomationFlags(organizationId: string): Promise<{
     autoReply247: boolean;
+    externalWebhookEnabled: boolean;
     visionReceipts: boolean;
     autoLeadCapture: boolean;
     adminAlerts: boolean;
@@ -495,6 +496,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
   }> {
     const defaults = {
       autoReply247: true,
+      externalWebhookEnabled: true,
       visionReceipts: true,
       autoLeadCapture: true,
       adminAlerts: true,
@@ -502,7 +504,11 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     };
     if (!this.profileRepo) return defaults;
     try {
-      let profile = await this.profileRepo.findOne({ where: { organizationId } });
+      const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
+      let profile =
+        effectiveOrgId && effectiveOrgId !== 'default-org-id'
+          ? await this.profileRepo.findOne({ where: { organizationId: effectiveOrgId } })
+          : null;
       if (!profile) {
         profile = await this.profileRepo.findOne({ where: {} });
       }
@@ -511,6 +517,7 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
         if (parsed?.automations) {
           return {
             autoReply247: parsed.automations.autoReply247 !== false,
+            externalWebhookEnabled: parsed.automations.externalWebhookEnabled !== false,
             visionReceipts: parsed.automations.visionReceipts !== false,
             autoLeadCapture: parsed.automations.autoLeadCapture !== false,
             adminAlerts: parsed.automations.adminAlerts !== false,
@@ -522,6 +529,52 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
       // Ignorar
     }
     return defaults;
+  }
+
+  async updateControlFlags(
+    organizationId: string,
+    flags: { autoReply247?: boolean; externalWebhookEnabled?: boolean }
+  ) {
+    if (!this.profileRepo) {
+      return {
+        autoReply247: flags.autoReply247 ?? true,
+        externalWebhookEnabled: flags.externalWebhookEnabled ?? true
+      };
+    }
+    const effectiveOrgId = await this.resolveEffectiveOrgId(organizationId);
+    let profile =
+      effectiveOrgId && effectiveOrgId !== 'default-org-id'
+        ? await this.profileRepo.findOne({ where: { organizationId: effectiveOrgId } })
+        : null;
+    if (!profile) {
+      profile = await this.profileRepo.findOne({ where: {} });
+    }
+    if (!profile) {
+      return {
+        autoReply247: flags.autoReply247 ?? true,
+        externalWebhookEnabled: flags.externalWebhookEnabled ?? true
+      };
+    }
+
+    let parsed: Record<string, any> = {};
+    if (profile.specialInstructions) {
+      try {
+        parsed = JSON.parse(profile.specialInstructions);
+      } catch {
+        parsed = { customContext: profile.specialInstructions };
+      }
+    }
+    const prevAuto = parsed.automations || {};
+    parsed.automations = {
+      ...prevAuto,
+      ...(typeof flags.autoReply247 === 'boolean' ? { autoReply247: flags.autoReply247 } : {}),
+      ...(typeof flags.externalWebhookEnabled === 'boolean'
+        ? { externalWebhookEnabled: flags.externalWebhookEnabled }
+        : {})
+    };
+    profile.specialInstructions = JSON.stringify(parsed);
+    await this.profileRepo.save(profile);
+    return this.getAutomationFlags(effectiveOrgId);
   }
 
   private async autoCaptureLeadFromMessage(
@@ -1030,7 +1083,22 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     }
     conv.status = ConversationStatus.HUMAN_TAKEOVER;
     conv.updatedAt = new Date();
-    return this.conversationRepo.save(conv);
+    const saved = await this.conversationRepo.save(conv);
+
+    // Pausar también cualquier otra fila duplicada del mismo teléfono
+    const cleanDigits = (conv.channelConversationId || '').replace(/\D/g, '');
+    if (cleanDigits.length >= 8) {
+      const tail = cleanDigits.slice(-8);
+      const allConvs = await this.conversationRepo.find();
+      for (const other of allConvs) {
+        if (other.id !== conv.id && (other.channelConversationId || '').replace(/\D/g, '').endsWith(tail)) {
+          other.status = ConversationStatus.HUMAN_TAKEOVER;
+          other.updatedAt = new Date();
+          await this.conversationRepo.save(other);
+        }
+      }
+    }
+    return saved;
   }
 
   async resumeAi(conversationId: string): Promise<Conversation> {
@@ -1045,6 +1113,23 @@ El cliente *${params.senderName || 'Desconocido'}* (${params.senderPhone}) neces
     }
     conv.updatedAt = new Date();
     const saved = await this.conversationRepo.save(conv);
+
+    const cleanDigits = (conv.channelConversationId || '').replace(/\D/g, '');
+    if (cleanDigits.length >= 8) {
+      const tail = cleanDigits.slice(-8);
+      const allConvs = await this.conversationRepo.find();
+      for (const other of allConvs) {
+        if (other.id !== conv.id && (other.channelConversationId || '').replace(/\D/g, '').endsWith(tail)) {
+          other.status = ConversationStatus.AI_HANDLED;
+          if ((other.assignedAgent as any) === 'EXCLUDED_PERMANENT') {
+            other.assignedAgent = AgentRoleType.RECEPTIONIST;
+          }
+          other.updatedAt = new Date();
+          await this.conversationRepo.save(other);
+        }
+      }
+    }
+
     this.logger.log(
       `[IA REACTIVADA] Operador reactivó la atención automática para ${conv.channelConversationId}`
     );

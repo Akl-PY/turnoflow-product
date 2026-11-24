@@ -25,6 +25,7 @@ import {
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 import { downloadCsv } from '../src/lib/csv';
+import LeadsScreen from './leads';
 
 function formatAppointmentItem(raw: any) {
   if (raw.date && raw.time) return raw;
@@ -66,6 +67,7 @@ export default function AppointmentsScreen() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [servicesCatalog, setServicesCatalog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeSection, setActiveSection] = useState<'agenda' | 'leads'>('agenda');
   const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Formulario de Nuevo Turno
@@ -196,10 +198,53 @@ export default function AppointmentsScreen() {
   return (
     <View style={styles.container}>
       <Header
-        title="Agenda & Citas del Negocio"
-        subtitle="Visualiza los turnos confirmados por el asistente de WhatsApp, envía recordatorios y agenda visitas"
+        title="Agenda & Clientes"
+        subtitle="Turnos confirmados, cupos del día y directorio completo de clientes/alumnos"
       />
 
+      {/* Tabs unificadas Agenda | Clientes & Leads */}
+      <View
+        style={{
+          flexDirection: 'row',
+          backgroundColor: '#FFFFFF',
+          borderBottomWidth: 1,
+          borderBottomColor: '#E2E8F0',
+          paddingHorizontal: 16,
+          gap: 10
+        }}
+      >
+        {[
+          { id: 'agenda' as const, label: '📅 Agenda & Cupos' },
+          { id: 'leads' as const, label: '👥 Clientes & Leads' }
+        ].map((tab) => (
+          <TouchableOpacity
+            key={tab.id}
+            onPress={() => setActiveSection(tab.id)}
+            style={{
+              paddingVertical: 12,
+              paddingHorizontal: 10,
+              borderBottomWidth: 2,
+              borderBottomColor: activeSection === tab.id ? '#1A73E8' : 'transparent'
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: '700',
+                color: activeSection === tab.id ? '#1A73E8' : '#64748B'
+              }}
+            >
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {activeSection === 'leads' ? (
+        <View style={{ flex: 1 }}>
+          <LeadsScreen />
+        </View>
+      ) : (
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Aviso de Recordatorios Automáticos */}
         <View
@@ -687,6 +732,7 @@ export default function AppointmentsScreen() {
           )}
         </View>
       </ScrollView>
+      )}
     </View>
   );
 }

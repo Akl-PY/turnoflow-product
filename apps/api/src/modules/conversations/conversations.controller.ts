@@ -853,6 +853,27 @@ export class ConversationsController {
     return result;
   }
 
+  @Get('control-flags')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Obtener switches de control: IA Global y Webhook Externo de Terceros' })
+  async getControlFlags(@Request() req: any) {
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
+    return this.conversationsService.getAutomationFlags(orgId);
+  }
+
+  @Patch('control-flags')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Pausar/Activar IA Global (sin frenar webhook externo) o Pausar/Activar solo Webhook de Terceros' })
+  async updateControlFlags(
+    @Request() req: any,
+    @Body() body: { autoReply247?: boolean; externalWebhookEnabled?: boolean }
+  ) {
+    const orgId = req?.user?.organizationId || (await this.resolveOrganizationFromInstance('default-org-id'));
+    return this.conversationsService.updateControlFlags(orgId, body);
+  }
+
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()

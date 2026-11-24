@@ -169,6 +169,20 @@ export class IntegrationsController {
   ) {
     const auth = await this.resolveAuthorizedOrganization(req, body, headers, query);
 
+    if (
+      typeof this.integrationsService.isExternalWebhookEnabled === 'function' &&
+      !(await this.integrationsService.isExternalWebhookEnabled(auth.organizationId))
+    ) {
+      return {
+        success: false,
+        messageId: undefined,
+        to: String(body.phone || body.to || ''),
+        organizationId: auth.organizationId,
+        loggedToChat: false,
+        error: 'El webhook externo para terceros está pausado desde el panel de TurnoFlow.'
+      };
+    }
+
     const to =
       body.phone ||
       body.to ||

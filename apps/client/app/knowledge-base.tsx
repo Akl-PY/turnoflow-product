@@ -24,13 +24,14 @@ import {
 import { apiClient } from '../src/lib/api';
 import { useAuth } from '../src/lib/auth';
 import { downloadCsv } from '../src/lib/csv';
+import PlaygroundScreen from './playground';
 
 export default function KnowledgeBaseScreen() {
   const { user } = useAuth();
   const [services, setServices] = useState<any[]>([]);
   const [faqs, setFaqs] = useState<any[]>([]);
   const [salesOrders, setSalesOrders] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'services' | 'orders' | 'context' | 'faqs'>('services');
+  const [activeTab, setActiveTab] = useState<'services' | 'orders' | 'context' | 'faqs' | 'playground'>('services');
   const [loading, setLoading] = useState(true);
 
   // Form para pedido manual
@@ -551,8 +552,23 @@ export default function KnowledgeBaseScreen() {
             Preguntas Frecuentes ({faqs.length})
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'playground' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('playground')}
+        >
+          <Sparkles size={16} color={activeTab === 'playground' ? '#1A73E8' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'playground' && styles.tabTextActive]}>
+            ✨ Simulador IA
+          </Text>
+        </TouchableOpacity>
       </View>
 
+      {activeTab === 'playground' ? (
+        <View style={{ flex: 1 }}>
+          <PlaygroundScreen />
+        </View>
+      ) : (
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* ======================================================== */}
         {/* PESTAÑA: PRODUCTOS & SERVICIOS */}
@@ -1934,6 +1950,7 @@ export default function KnowledgeBaseScreen() {
           </View>
         )}
       </ScrollView>
+      )}
     </View>
   );
 }

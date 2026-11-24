@@ -20,14 +20,11 @@ import { useAuth } from '../lib/auth';
 import { apiClient } from '../lib/api';
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Panel Ejecutivo', icon: LayoutDashboard },
-  { path: '/chats', label: 'Chats & Control IA', icon: MessageSquare },
-  { path: '/leads', label: 'Clientes & Leads', icon: Users },
-  { path: '/appointments', label: 'Agenda & Citas', icon: Calendar },
-  { path: '/prospecting', label: 'Embudos & Prospección', icon: Workflow },
-  { path: '/knowledge-base', label: 'Catálogo & Contexto IA', icon: BookOpen },
-  { path: '/playground', label: 'Simulador en Vivo', icon: Sparkles },
-  { path: '/onboarding', label: 'Configuración & Canales', icon: Smartphone }
+  { path: '/', label: 'Inicio', icon: LayoutDashboard },
+  { path: '/chats', label: 'Chats & Control', icon: MessageSquare },
+  { path: '/appointments', label: 'Agenda & Clientes', icon: Calendar },
+  { path: '/knowledge-base', label: 'Negocio & IA', icon: BookOpen },
+  { path: '/onboarding', label: 'Configuración', icon: Smartphone }
 ];
 
 export const Sidebar: React.FC = () => {
